@@ -9,6 +9,12 @@ class Order extends Model
 {
     use HasFactory;
 
+    public const FULFILLMENT_RESERVED = 'reserved';
+    public const FULFILLMENT_PREPARING = 'preparing';
+    public const FULFILLMENT_READY = 'ready';
+    public const FULFILLMENT_DELIVERED = 'delivered';
+    public const FULFILLMENT_CANCELED = 'canceled';
+
     public const DELIVERY_TRACKING_FLOW = [
         'pending',
         'confirmed',
@@ -45,6 +51,12 @@ class Order extends Model
         'notes',
         'delivery_type',
         'tracking_status',
+        'fulfillment_status',
+        'preparing_at',
+        'ready_at',
+        'prepared_by',
+        'ready_by',
+        'delivered_by',
         'tracking_notes',
         'estimated_delivery_date',
         'delivered_at',
@@ -58,6 +70,8 @@ class Order extends Model
         'delivered_at' => 'datetime',
         'reserved_until' => 'datetime',
         'paid_at' => 'datetime',
+        'preparing_at' => 'datetime',
+        'ready_at' => 'datetime',
     ];
 
     public function user()
@@ -73,6 +87,19 @@ class Order extends Model
     public function reservations()
     {
         return $this->hasMany(InventoryReservation::class);
+    }
+
+    public function fulfillmentHistory() { return $this->hasMany(OrderFulfillmentHistory::class)->orderBy('created_at'); }
+    public function preparedBy() { return $this->belongsTo(User::class, 'prepared_by'); }
+    public function readyBy() { return $this->belongsTo(User::class, 'ready_by'); }
+    public function deliveredBy() { return $this->belongsTo(User::class, 'delivered_by'); }
+
+    public function effectiveFulfillmentStatus(): string
+    {
+        if ($this->fulfillment_status) return $this->fulfillment_status;
+        if (in_array($this->status, ['canceled','rejected'], true)) return self::FULFILLMENT_CANCELED;
+        if ($this->status === 'delivered') return self::FULFILLMENT_DELIVERED;
+        return self::FULFILLMENT_RESERVED;
     }
 
     /**

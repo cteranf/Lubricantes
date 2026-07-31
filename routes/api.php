@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryContr
 use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
+use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
@@ -72,6 +73,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/inventory-movements', [AdminInventoryMovementController::class, 'index'])->name('inventory-movements.index');
             Route::apiResource('orders', AdminOrderController::class)->only(['index', 'update']);
             Route::put('/orders/{id}/tracking', [AdminOrderController::class, 'updateTracking'])->name('orders.tracking.update');
+            Route::get('/orders/{order}/fulfillment', [AdminOrderFulfillmentController::class, 'show'])->name('orders.fulfillment.show');
+            Route::post('/orders/{order}/fulfillment/approve-transfer', [AdminOrderFulfillmentController::class, 'approveTransfer'])->name('orders.fulfillment.approve-transfer');
+            Route::post('/orders/{order}/fulfillment/start-preparation', [AdminOrderFulfillmentController::class, 'startPreparation'])->name('orders.fulfillment.start');
+            Route::post('/orders/{order}/fulfillment/ready', [AdminOrderFulfillmentController::class, 'ready'])->name('orders.fulfillment.ready');
+            Route::post('/orders/{order}/fulfillment/delivered', [AdminOrderFulfillmentController::class, 'delivered'])->name('orders.fulfillment.delivered');
+            Route::post('/orders/{order}/fulfillment/cancel', [AdminOrderFulfillmentController::class, 'cancel'])->name('orders.fulfillment.cancel');
             Route::apiResource('sliders', App\Http\Controllers\Api\V1\Admin\SliderController::class)->only(['index', 'store', 'update', 'destroy']);
             Route::get('/categories/options', [AdminCategoryController::class, 'options'])->name('categories.options');
             Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');

@@ -19,7 +19,7 @@
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 class="text-3xl font-bold">Seguimiento de Pedido</h1>
-                        <p class="text-gray-500">Pedido {{ order.order_number }} • Realizado el {{ order.created_at }}</p>
+                        <p class="text-gray-500">Pedido {{ order.order_number }} • Realizado el {{ formatDateTime(order.created_at) }}</p>
                     </div>
                     <div class="bg-blue-100 text-blue-800 px-4 py-2 rounded-full font-bold">
                         {{ order.tracking_status_label }}
@@ -31,29 +31,30 @@
                     <h3 class="text-xl font-bold mb-8 border-b pb-4">Timeline del Pedido</h3>
                     
                     <div class="relative">
-                        <!-- Horizontal bar (desktop) / Vertical bar (mobile) -->
-                        <div class="hidden md:block absolute top-5 left-8 right-8 h-1 bg-gray-200"></div>
-                        
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center relative z-10 gap-8 md:gap-0">
                             <div 
                                 v-for="(step, index) in timeline" 
                                 :key="index"
-                                class="flex md:flex-col items-center gap-4 md:gap-2 flex-1 text-center"
+                                class="relative flex md:flex-col items-center gap-4 md:gap-2 flex-1 text-center"
                             >
+                                <div
+                                    v-if="index < timeline.length - 1"
+                                    :class="connectorClass(index)"
+                                    class="absolute left-5 top-10 h-8 w-0.5 md:left-1/2 md:top-5 md:h-1 md:w-full"
+                                ></div>
                                 <div 
                                     :class="[
-                                        'w-10 h-10 rounded-full flex items-center justify-center transition-colors duration-500',
-                                        step.completed ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-500',
-                                        step.active ? 'ring-4 ring-blue-200 bg-blue-600 text-white' : ''
+                                        'relative z-10 w-10 h-10 rounded-full flex shrink-0 items-center justify-center transition-colors duration-500',
+                                        stepCircleClass(step)
                                     ]"
                                 >
                                     <i :class="step.icon"></i>
                                 </div>
                                 <div class="text-left md:text-center">
-                                    <p :class="['font-bold text-sm', step.completed || step.active ? 'text-gray-900' : 'text-gray-400']">
+                                    <p :class="['font-bold text-sm', step.status === 'canceled' ? 'text-red-700' : (step.completed || step.active ? 'text-gray-900' : 'text-gray-400')]">
                                         {{ step.label }}
                                     </p>
-                                    <p v-if="step.date" class="text-xs text-gray-500">{{ step.date }}</p>
+                                    <p v-if="step.date" class="text-xs text-gray-500">{{ formatDateTime(step.date) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -64,7 +65,7 @@
                         <i class="pi pi-calendar text-2xl text-blue-600"></i>
                         <div>
                             <p class="text-sm text-blue-800 font-medium">Fecha estimada de {{ order.delivery_type === 'delivery' ? 'entrega' : 'recojo' }}</p>
-                            <p class="text-lg font-bold text-blue-900">{{ formatDate(order.estimated_delivery_date) }}</p>
+                            <p class="text-lg font-bold text-blue-900">{{ formatCalendarDate(order.estimated_delivery_date) }}</p>
                         </div>
                     </div>
                 </div>
@@ -96,7 +97,10 @@
                         </h3>
                         <div class="space-y-4">
                             <div v-for="(item, index) in order.items" :key="index" class="flex gap-4 items-center">
-                                <img :src="item.image" class="w-12 h-12 rounded object-cover border" alt="">
+                                <img v-if="item.image_url && !brokenImages[index]" :src="item.image_url" @error="brokenImages[index] = true" class="w-12 h-12 rounded object-cover border" :alt="item.name">
+                                <div v-else class="w-12 h-12 rounded border bg-gray-100 text-gray-400 flex shrink-0 items-center justify-center" aria-label="Producto sin imagen">
+                                    <i class="pi pi-image"></i>
+                                </div>
                                 <div class="flex-1">
                                     <p class="font-medium text-sm">{{ item.name }}</p>
                                     <p class="text-xs text-gray-500">{{ item.quantity }} unidades x S/ {{ item.price }}</p>
@@ -120,12 +124,31 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '@/api';
+import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
 
 const route = useRoute();
 const order = ref(null);
 const timeline = ref([]);
 const loading = ref(true);
 const error = ref(null);
+const brokenImages = ref({});
+
+const stepCircleClass = (step) => {
+    if (step.status === 'canceled') return 'bg-red-600 text-white ring-4 ring-red-100';
+    if (step.completed || step.active) return step.active
+        ? 'bg-green-600 text-white ring-4 ring-green-200'
+        : 'bg-green-600 text-white';
+    return 'bg-gray-200 text-gray-500';
+};
+
+const connectorClass = (index) => {
+    const current = timeline.value[index];
+    const next = timeline.value[index + 1];
+    if (next?.status === 'canceled') return 'bg-red-500';
+    return (current?.completed || current?.active) && (next?.completed || next?.active)
+        ? 'bg-green-600'
+        : 'bg-gray-200';
+};
 
 const fetchTracking = async () => {
     try {
@@ -147,27 +170,5 @@ const fetchTracking = async () => {
     }
 };
 
-const formatDate = (dateString) => {
-    if (!dateString) return '';
-    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    return new Date(dateString).toLocaleDateString('es-ES', options);
-};
-
 onMounted(fetchTracking);
 </script>
-
-<style scoped>
-/* Mobile adjustments for timeline vertical line */
-@media (max-width: 767px) {
-    .flex-col::before {
-        content: '';
-        position: absolute;
-        left: 20px;
-        top: 20px;
-        bottom: 20px;
-        width: 2px;
-        background-color: #e5e7eb;
-        z-index: -1;
-    }
-}
-</style>

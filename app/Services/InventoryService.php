@@ -116,6 +116,7 @@ class InventoryService
             $order = Order::whereKey($reservation->order_id)->lockForUpdate()->firstOrFail();
             $locked = InventoryReservation::whereKey($reservation->id)->lockForUpdate()->firstOrFail();
             if ($locked->status !== InventoryReservation::ACTIVE || $locked->expires_at->isFuture()) return false;
+            if ($order->effectiveFulfillmentStatus() !== Order::FULFILLMENT_RESERVED) return false;
             $this->releaseOrderReservation($order, InventoryReservation::EXPIRED);
             if ($order->status === 'pending' && $order->payment_status === 'pending') $order->update(['status'=>'canceled','tracking_status'=>'canceled']);
             return true;

@@ -6,12 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\InventoryService;
 use App\Services\OrderStateService;
+use App\Services\OrderFulfillmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
-    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService) {}
+    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService, private OrderFulfillmentService $fulfillment) {}
 
     public function index()
     {
@@ -23,6 +24,12 @@ class OrderController extends Controller
         $validated = $request->validate([
             'status' => 'required|in:pending,confirmed,shipped,delivered,canceled,rejected',
         ]);
+        $target=$validated['status'];
+        if ($target==='rejected' && $order->payment_status==='approved') throw \Illuminate\Validation\ValidationException::withMessages(['status'=>['Un pago aprobado no puede marcarse como rechazado. Use la cancelacion operativa.']]);
+        if (in_array($target,['canceled','rejected'],true)) return response()->json($this->fulfillment->cancelFulfillment($order,$request->user(),$target==='rejected'?'Pedido rechazado por administracion':'Pedido cancelado por administracion')['order']);
+        if ($target==='shipped') return response()->json($this->fulfillment->markAsReady($order,$request->user(),'Compatibilidad con estado enviado')['order']);
+        if ($target==='delivered') return response()->json($this->fulfillment->markAsDelivered($order,$request->user(),'Compatibilidad con estado entregado')['order']);
+        if ($target==='confirmed' && $order->payment_method==='contra_entrega') throw \Illuminate\Validation\ValidationException::withMessages(['status'=>['Contraentrega se confirma al entregar; use Iniciar preparacion.']]);
 
         $updatedOrder = DB::transaction(function () use ($order, $validated, $request) {
             $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
@@ -59,6 +66,13 @@ class OrderController extends Controller
             'estimated_delivery_date' => 'nullable|date',
         ]);
 
+        $order=Order::findOrFail($id); $target=$validated['tracking_status']; $note=$validated['tracking_notes']??null;
+        if ($target==='canceled') { $result=$this->fulfillment->cancelFulfillment($order,$request->user(),$note ?: 'Pedido cancelado desde tracking'); return response()->json(['message'=>'Seguimiento actualizado correctamente.','order'=>$result['order']]); }
+        if ($target==='processing') { $result=$this->fulfillment->startPreparation($order,$request->user(),$note); return response()->json(['message'=>'Seguimiento actualizado correctamente.','order'=>$result['order']]); }
+        if (in_array($target,['shipped','ready_for_pickup'],true)) { $result=$this->fulfillment->markAsReady($order,$request->user(),$note); return response()->json(['message'=>'Seguimiento actualizado correctamente.','order'=>$result['order']]); }
+        if (in_array($target,['delivered','picked_up'],true)) { $result=$this->fulfillment->markAsDelivered($order,$request->user(),$note); return response()->json(['message'=>'Seguimiento actualizado correctamente.','order'=>$result['order']]); }
+        if ($target==='confirmed' && $order->payment_method==='contra_entrega') throw \Illuminate\Validation\ValidationException::withMessages(['tracking_status'=>['Contraentrega se confirma al entregar; use Iniciar preparacion.']]);
+
         $order = DB::transaction(function () use ($id, $validated, $request) {
             $lockedOrder = Order::whereKey($id)->lockForUpdate()->firstOrFail();
             $oldStatus = $lockedOrder->status;
@@ -89,18 +103,4 @@ class OrderController extends Controller
         ]);
     }
 
-    private function restoreOrderStock(Order $order, $user = null): void
-    {
-        $order->items()->with(['product', 'warehouse'])->get()
-            ->each(fn ($item) => $this->inventoryService->returnCancellation($item, $user));
-    }
-
-    private function cancelOrderInventory(Order $order, $user = null): void
-    {
-        if (!$this->inventoryService->orderUsesReservationFlow($order) || $order->payment_status === 'approved' || $order->paid_at || $this->inventoryService->orderHasConsumedReservation($order)) {
-            $this->restoreOrderStock($order, $user);
-            return;
-        }
-        $this->inventoryService->releaseOrderReservation($order);
-    }
 }

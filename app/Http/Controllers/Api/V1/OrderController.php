@@ -52,7 +52,7 @@ class OrderController extends Controller
                     $total += $subtotal;
                     $itemsToCreate[] = ['product'=>$product,'quantity'=>$item['quantity'],'price'=>$price,'subtotal'=>$subtotal];
                 }
-                $order = Order::create(['user_id'=>$request->user()->id,'status'=>'pending','total'=>$total,'shipping_info'=>$request->shipping_info,'payment_method'=>$request->payment_method,'delivery_type'=>$request->delivery_type,'tracking_status'=>'pending','reserved_until'=>$reservedUntil]);
+                $order = Order::create(['user_id'=>$request->user()->id,'status'=>'pending','total'=>$total,'shipping_info'=>$request->shipping_info,'payment_method'=>$request->payment_method,'delivery_type'=>$request->delivery_type,'tracking_status'=>'pending','fulfillment_status'=>Order::FULFILLMENT_RESERVED,'reserved_until'=>$reservedUntil]);
                 foreach ($itemsToCreate as $data) {
                     $item = $order->items()->create(['product_id'=>$data['product']->id,'warehouse_id'=>$warehouse->id,'quantity'=>$data['quantity'],'price'=>$data['price'],'subtotal'=>$data['subtotal']]);
                     $item->setRelation('product', $data['product']);
