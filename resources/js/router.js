@@ -9,6 +9,7 @@ import Register from '@/views/Register.vue';
 import Profile from '@/views/Profile.vue';
 const Orders = () => import('./views/Orders.vue');
 const OrderSuccess = () => import('./views/OrderSuccess.vue');
+const PaymentReturn = () => import('./views/PaymentReturn.vue');
 const OrderTracking = () => import('./views/OrderTracking.vue');
 import About from '@/views/About.vue';
 import Contact from '@/views/Contact.vue';
@@ -25,34 +26,25 @@ const routes = [
     { path: '/checkout', component: Checkout },
     { path: '/login', component: Login },
     { path: '/register', component: Register },
-    { path: '/profile', component: Profile },
-    { path: '/orders', name: 'Orders', component: Orders },
-    { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess },
-    { path: '/orders/:id/tracking', name: 'OrderTracking', component: OrderTracking },
+    { path: '/profile', component: Profile, meta: { requiresAuth: true } },
+    { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true } },
+    { path: '/orders/payment-return', name: 'PaymentReturn', component: PaymentReturn, meta: { requiresAuth: true } },
+    { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess, meta: { requiresAuth: true } },
+    { path: '/orders/:id/tracking', name: 'OrderTracking', component: OrderTracking, meta: { requiresAuth: true } },
     { path: '/about', name: 'About', component: About },
     { path: '/contact', component: Contact },
 
     // Admin Routes
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
     { path: '/admin/products', component: AdminProducts, meta: { requiresAdmin: true } },
+    { path: '/admin/branches', component: () => import('@/views/admin/Branches.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/warehouses', component: () => import('@/views/admin/Warehouses.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/inventory', component: () => import('@/views/admin/Inventory.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/categories', component: () => import('@/views/admin/Categories.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/brands', component: () => import('@/views/admin/Brands.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/news', component: () => import('@/views/admin/News.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/sliders', component: AdminSliders, meta: { requiresAdmin: true } },
     { path: '/admin/orders', component: () => import('@/views/admin/Orders.vue'), meta: { requiresAdmin: true } },
-    {
-        path: '/orders/success/:id',
-        name: 'OrderSuccess',
-        component: {
-            template: `
-                <div class="container mx-auto py-20 text-center">
-                    <h1 class="text-4xl font-bold text-green-600 mb-4">¡Pedido Confirmado!</h1>
-                    <p class="mb-6 text-xl">Gracias por tu compra. Te hemos enviado un correo con los detalles.</p>
-                    <router-link to="/" class="text-blue-600 underline">Volver al inicio</router-link>
-                </div>
-            `
-        }
-    },
-    // Admin routes can be added here
 ];
 
 const router = createRouter({
@@ -70,9 +62,11 @@ router.beforeEach(async (to, from, next) => {
         await authStore.fetchUser();
     }
 
-    if (to.meta.requiresAdmin) {
+    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+        next({ path: '/login', query: { redirect: to.fullPath } });
+    } else if (to.meta.requiresAdmin) {
         if (!authStore.isAuthenticated) {
-            next('/login');
+            next({ path: '/login', query: { redirect: to.fullPath } });
         } else if (!authStore.isAdmin) {
             next('/');
         } else {

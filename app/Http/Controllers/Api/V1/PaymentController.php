@@ -4,12 +4,18 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\InventoryService;
+use App\Services\OrderStateService;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class PaymentController extends Controller
 {
+    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService) {}
+
     /**
      * Create payment preference/checkout
      */
@@ -61,7 +67,8 @@ class PaymentController extends Controller
                     : $paymentData['init_point'],
             ]);
         } catch (\Exception $e) {
-            Log::error('Payment creation failed: ' . $e->getMessage());
+            Log::error('Payment creation failed: '.$e->getMessage());
+
             return response()->json(['message' => 'Error creating payment'], 500);
         }
     }
@@ -75,18 +82,104 @@ class PaymentController extends Controller
             $gateway = PaymentGatewayFactory::create();
             $paymentData = $gateway->verifyPayment($paymentId);
 
-            // Find order by payment_id
-            $order = Order::where('payment_id', $paymentId)->first();
+            $order = $this->findOrderForPayment($paymentId, $paymentData);
 
-            if ($order) {
-                $this->updateOrderStatus($order, $paymentData);
+            if (! $order) {
+                abort(404);
             }
 
-            return response()->json($paymentData);
+            if (! $request->user()->isAdmin() && $order->user_id !== $request->user()->id) {
+                abort(404);
+            }
+
+            $this->assertPaymentMatchesOrder($order, $paymentData);
+            $order = $this->updateOrderStatus($order, $paymentData);
+
+            return response()->json([
+                'payment' => $paymentData,
+                'order_id' => $order->id,
+                'order_status' => $order->status,
+                'payment_status' => $order->payment_status,
+            ]);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            throw $e;
         } catch (\Exception $e) {
-            Log::error('Payment verification failed: ' . $e->getMessage());
+            Log::error('Payment verification failed: '.$e->getMessage());
+
             return response()->json(['message' => 'Error verifying payment'], 500);
         }
+    }
+
+    /**
+     * Resolve Mercado Pago's browser return without trusting its status query string.
+     */
+    public function handleReturn(Request $request)
+    {
+        $validated = $request->validate([
+            'payment_id' => 'nullable|string|max:255',
+            'collection_id' => 'nullable|string|max:255',
+            'preference_id' => 'nullable|string|max:255',
+            'external_reference' => 'nullable|integer|min:1',
+            'result' => 'nullable|in:approved,pending,rejected,canceled',
+        ]);
+
+        $transactionId = $validated['payment_id'] ?? $validated['collection_id'] ?? null;
+        $paymentData = null;
+
+        if ($transactionId) {
+            try {
+                $paymentData = PaymentGatewayFactory::create()->verifyPayment($transactionId);
+            } catch (\Exception $e) {
+                Log::warning('Could not verify payment return', [
+                    'payment_id' => $transactionId,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $verifiedOrderId = $paymentData['external_reference'] ?? null;
+        $requestedOrderId = $validated['external_reference'] ?? null;
+        $orderId = $verifiedOrderId ?: $requestedOrderId;
+
+        $query = Order::where('user_id', $request->user()->id);
+
+        if ($orderId) {
+            $query->whereKey($orderId);
+        } elseif (! empty($validated['preference_id'])) {
+            $query->where('payment_id', $validated['preference_id']);
+        } else {
+            return response()->json([
+                'message' => 'No se pudo identificar el pedido devuelto por la pasarela.',
+            ], 422);
+        }
+
+        $order = $query->firstOrFail();
+
+        if (! empty($validated['preference_id'])
+            && $order->payment_id
+            && ! hash_equals((string) $order->payment_id, (string) $validated['preference_id'])) {
+            abort(404);
+        }
+
+        if ($paymentData) {
+            $this->assertPaymentMatchesOrder($order, $paymentData);
+            $order = $this->updateOrderStatus($order, $paymentData);
+        }
+
+        $displayStatus = $order->payment_status;
+        if ($displayStatus === 'pending'
+            && in_array($validated['result'] ?? null, ['pending', 'rejected', 'canceled'], true)) {
+            $displayStatus = $validated['result'];
+        }
+
+        return response()->json([
+            'order_id' => $order->id,
+            'order_status' => $order->status,
+            'payment_status' => $order->payment_status,
+            'display_status' => $displayStatus,
+        ]);
     }
 
     /**
@@ -104,12 +197,20 @@ class PaymentController extends Controller
                 ->first();
 
             if ($order) {
+                $this->assertPaymentMatchesOrder($order, $paymentData);
                 $this->updateOrderStatus($order, $paymentData);
             }
 
             return response()->json(['status' => 'ok'], 200);
+        } catch (ValidationException $e) {
+            Log::warning('Webhook payment data did not match the order', [
+                'errors' => $e->errors(),
+            ]);
+
+            return response()->json(['status' => 'invalid'], 422);
         } catch (\Exception $e) {
-            Log::error('Webhook processing failed: ' . $e->getMessage());
+            Log::error('Webhook processing failed: '.$e->getMessage());
+
             return response()->json(['status' => 'error'], 500);
         }
     }
@@ -117,24 +218,51 @@ class PaymentController extends Controller
     /**
      * Update order status based on payment status
      */
-    private function updateOrderStatus(Order $order, array $paymentData)
+    private function updateOrderStatus(Order $order, array $paymentData): Order
     {
-        $paymentStatus = $paymentData['status'];
+        $order = DB::transaction(function () use ($order, $paymentData) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $wasCanceled = in_array($locked->status, ['canceled', 'rejected'], true);
+            $updated = $this->orderStateService->applyPaymentStatus($locked, $paymentData);
+            if (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
+                $updated->items()->with(['product', 'warehouse'])->get()
+                    ->each(fn ($item) => $this->inventoryService->returnCancellation($item));
+            }
+            return $updated;
+        });
 
-        // Map payment status to order status
-        $statusMap = [
-            'approved' => 'confirmed',
-            'rejected' => 'canceled',
-            'pending' => 'pending',
-            'in_process' => 'pending',
-        ];
+        Log::info("Order #{$order->id} updated to payment_status: {$order->payment_status}");
 
-        $order->update([
-            'payment_status' => $paymentStatus,
-            'status' => $statusMap[$paymentStatus] ?? 'pending',
-            'payment_data' => array_merge($order->payment_data ?? [], $paymentData),
-        ]);
+        return $order;
+    }
 
-        Log::info("Order #{$order->id} updated to payment_status: {$paymentStatus}");
+    private function findOrderForPayment(string $paymentId, array $paymentData): ?Order
+    {
+        $externalReference = $paymentData['external_reference'] ?? null;
+
+        return Order::when($externalReference, fn ($query) => $query->whereKey($externalReference))
+            ->when(! $externalReference, fn ($query) => $query->where('payment_id', $paymentId))
+            ->first();
+    }
+
+    private function assertPaymentMatchesOrder(Order $order, array $paymentData): void
+    {
+        if (config('payment.default_gateway') === 'mock') {
+            return;
+        }
+
+        if (array_key_exists('transaction_amount', $paymentData)
+            && abs((float) $paymentData['transaction_amount'] - (float) $order->total) > 0.01) {
+            throw ValidationException::withMessages([
+                'payment' => ['El monto confirmado no coincide con el total del pedido.'],
+            ]);
+        }
+
+        if (! empty($paymentData['currency_id'])
+            && $paymentData['currency_id'] !== config('payment.currency')) {
+            throw ValidationException::withMessages([
+                'payment' => ['La moneda confirmada no coincide con la moneda del pedido.'],
+            ]);
+        }
     }
 }

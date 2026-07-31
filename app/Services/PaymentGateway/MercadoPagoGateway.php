@@ -2,9 +2,9 @@
 
 namespace App\Services\PaymentGateway;
 
-use MercadoPago\MercadoPagoConfig;
-use MercadoPago\Client\Preference\PreferenceClient;
 use MercadoPago\Client\Payment\PaymentClient;
+use MercadoPago\Client\Preference\PreferenceClient;
+use MercadoPago\MercadoPagoConfig;
 
 class MercadoPagoGateway implements PaymentGatewayInterface
 {
@@ -15,7 +15,7 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 
     public function createPayment(array $orderData): array
     {
-        $client = new PreferenceClient();
+        $client = new PreferenceClient;
 
         // Prepare items
         $items = [];
@@ -55,7 +55,7 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 
     public function verifyPayment(string $paymentId): array
     {
-        $client = new PaymentClient();
+        $client = new PaymentClient;
         $payment = $client->get($paymentId);
 
         return [
@@ -64,6 +64,7 @@ class MercadoPagoGateway implements PaymentGatewayInterface
             'status_detail' => $payment->status_detail,
             'external_reference' => $payment->external_reference ?? null,
             'transaction_amount' => $payment->transaction_amount,
+            'currency_id' => $payment->currency_id ?? null,
             'payment_method_id' => $payment->payment_method_id,
         ];
     }
@@ -84,6 +85,7 @@ class MercadoPagoGateway implements PaymentGatewayInterface
         // MercadoPago sends payment ID in the notification
         if (isset($payload['data']['id'])) {
             $paymentId = $payload['data']['id'];
+
             return $this->verifyPayment($paymentId);
         }
 

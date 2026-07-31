@@ -83,11 +83,18 @@ const product = ref(null);
 const qty = ref(1);
 
 onMounted(async () => {
+    const slug = Array.isArray(route.params.slug) ? route.params.slug[0] : route.params.slug;
+    if (typeof slug !== 'string' || !slug.trim() || slug === 'undefined') {
+        toast.add({ severity: 'error', summary: 'Producto no disponible', detail: 'El enlace del producto no es valido.', life: 3000 });
+        if (import.meta.env.DEV) console.warn('ProductDetail se abrio sin un slug valido.', route.params);
+        return;
+    }
     try {
-        const response = await api.get(`/products/${route.params.slug}`);
+        const response = await api.get(`/products/${encodeURIComponent(slug)}`);
         product.value = response.data;
     } catch (e) {
-        console.error(e);
+        toast.add({ severity: 'error', summary: 'Producto no disponible', detail: e.response?.status === 404 ? 'El producto solicitado no existe.' : 'No se pudo cargar el producto.', life: 3500 });
+        if (import.meta.env.DEV) console.error('Error al cargar el detalle del producto.', e);
     }
 });
 

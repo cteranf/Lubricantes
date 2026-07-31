@@ -3,15 +3,20 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Exceptions\InventoryException;
 use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Product;
+use App\Services\InventoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
+    public function __construct(private InventoryService $inventory) {}
+
     public function index(Request $request)
     {
         return $request->user()->orders()->with('items.product')->latest()->get();
@@ -35,59 +40,47 @@ class OrderController extends Controller
         }
 
         try {
-            DB::beginTransaction();
-
-            $total = 0;
-            $itemsToCreate = [];
-
-            foreach ($request->items as $item) {
-                $product = Product::lockForUpdate()->find($item['product_id']);
-
-                if ($product->stock < $item['quantity']) {
-                    throw new \Exception("Insufficient stock for product: {$product->name}");
+            $order = DB::transaction(function () use ($request) {
+                $total = 0;
+                $itemsToCreate = [];
+                foreach ($request->items as $item) {
+                    $product = Product::findOrFail($item['product_id']);
+                    $price = $product->sale_price ?? $product->price;
+                    $subtotal = $price * $item['quantity'];
+                    $total += $subtotal;
+                    $itemsToCreate[] = ['product'=>$product,'quantity'=>$item['quantity'],'price'=>$price,'subtotal'=>$subtotal];
                 }
-
-                $price = $product->sale_price ?? $product->price;
-                $subtotal = $price * $item['quantity'];
-                $total += $subtotal;
-
-                $itemsToCreate[] = [
-                    'product_id' => $product->id,
-                    'quantity' => $item['quantity'],
-                    'price' => $price,
-                    'subtotal' => $subtotal,
-                ];
-
-                $product->decrement('stock', $item['quantity']);
-            }
-
-            $order = Order::create([
-                'user_id' => $request->user()->id,
-                'status' => 'pending',
-                'total' => $total,
-                'shipping_info' => $request->shipping_info,
-                'payment_method' => $request->payment_method,
-                'delivery_type' => $request->delivery_type,
-                'tracking_status' => 'pending', // Initial tracking status
-            ]);
-
-            foreach ($itemsToCreate as $itemData) {
-                $order->items()->create($itemData);
-            }
-
-            DB::commit();
+                $order = Order::create(['user_id'=>$request->user()->id,'status'=>'pending','total'=>$total,'shipping_info'=>$request->shipping_info,'payment_method'=>$request->payment_method,'delivery_type'=>$request->delivery_type,'tracking_status'=>'pending']);
+                foreach ($itemsToCreate as $data) {
+                    $item = $order->items()->create(['product_id'=>$data['product']->id,'quantity'=>$data['quantity'],'price'=>$data['price'],'subtotal'=>$data['subtotal']]);
+                    $item->setRelation('product', $data['product']);
+                    $this->inventory->sell($item, $request->user());
+                }
+                return $order;
+            });
 
             return response()->json($order->load('items'), 201);
 
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 400);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (InventoryException $e) {
+            throw ValidationException::withMessages(['items' => [$e->getMessage()]]);
+        } catch (\Throwable $e) {
+            Log::error('Order creation failed', [
+                'user_id' => $request->user()->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'No se pudo crear el pedido. Inténtalo nuevamente.',
+            ], 500);
         }
     }
 
     public function show(Request $request, $id)
     {
         $order = $request->user()->orders()->with('items.product')->findOrFail($id);
+
         return response()->json($order);
     }
 }

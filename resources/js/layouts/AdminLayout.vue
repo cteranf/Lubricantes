@@ -12,8 +12,20 @@
                 <router-link to="/admin/products" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
                     <i class="pi pi-box mr-3"></i> Productos
                 </router-link>
+                <router-link to="/admin/branches" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
+                    <i class="pi pi-map-marker mr-3"></i> Sedes
+                </router-link>
+                <router-link to="/admin/warehouses" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
+                    <i class="pi pi-building mr-3"></i> Almacenes
+                </router-link>
+                <router-link to="/admin/inventory" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
+                    <i class="pi pi-warehouse mr-3"></i> Inventario
+                </router-link>
                 <router-link to="/admin/categories" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
                     <i class="pi pi-tags mr-3"></i> Categorías
+                </router-link>
+                <router-link to="/admin/brands" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
+                    <i class="pi pi-bookmark mr-3"></i> Marcas
                 </router-link>
                 <router-link to="/admin/news" active-class="bg-gray-800 text-blue-400" class="block py-3 px-6 hover:bg-gray-800">
                     <i class="pi pi-megaphone mr-3"></i> Noticias

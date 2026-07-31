@@ -47,7 +47,13 @@ const cartStore = useCartStore();
 const toast = useToast();
 
 const goToDetail = () => {
-    router.push(`/product/${props.product.slug}`);
+    const slug = props.product?.slug;
+    if (typeof slug !== 'string' || !slug.trim() || slug === 'undefined') {
+        toast.add({ severity: 'error', summary: 'Producto no disponible', detail: 'No se pudo abrir el detalle del producto.', life: 3000 });
+        if (import.meta.env.DEV) console.warn('ProductCard recibio un producto sin slug valido.', props.product);
+        return;
+    }
+    router.push({ path: `/product/${encodeURIComponent(slug)}` });
 };
 
 const addToCart = () => {

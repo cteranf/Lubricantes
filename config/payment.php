@@ -19,6 +19,10 @@ return [
     */
     'currency' => 'PEN',
 
+    'mock' => [
+        'enabled' => env('PAYMENT_MOCK_ENABLED', env('APP_ENV', 'production') !== 'production'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | MercadoPago Configuration
@@ -28,10 +32,10 @@ return [
         'public_key' => env('MERCADOPAGO_PUBLIC_KEY'),
         'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
         'sandbox' => env('MERCADOPAGO_SANDBOX', true),
-        'success_url' => env('APP_URL') . '/orders/success',
-        'failure_url' => env('APP_URL') . '/orders/failure',
-        'pending_url' => env('APP_URL') . '/orders/pending',
-        'webhook_url' => env('APP_URL') . '/api/v1/payment/webhook',
+        'success_url' => env('APP_URL').'/orders/payment-return?result=approved',
+        'failure_url' => env('APP_URL').'/orders/payment-return?result=rejected',
+        'pending_url' => env('APP_URL').'/orders/payment-return?result=pending',
+        'webhook_url' => env('APP_URL').'/api/v1/payment/webhook',
     ],
 
     /*

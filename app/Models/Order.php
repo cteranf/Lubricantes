@@ -9,6 +9,27 @@ class Order extends Model
 {
     use HasFactory;
 
+    public const DELIVERY_TRACKING_FLOW = [
+        'pending',
+        'confirmed',
+        'processing',
+        'shipped',
+        'delivered',
+    ];
+
+    public const PICKUP_TRACKING_FLOW = [
+        'pending',
+        'confirmed',
+        'ready_for_pickup',
+        'picked_up',
+    ];
+
+    public const TERMINAL_TRACKING_STATUSES = [
+        'delivered',
+        'picked_up',
+        'canceled',
+    ];
+
     protected $fillable = [
         'user_id',
         'status',
@@ -50,9 +71,7 @@ class Order extends Model
      */
     public function getTrackingTimeline()
     {
-        $statuses = $this->delivery_type === 'delivery'
-            ? ['pending', 'confirmed', 'processing', 'shipped', 'delivered']
-            : ['pending', 'confirmed', 'ready_for_pickup', 'picked_up'];
+        $statuses = $this->trackingFlow();
 
         $timeline = [];
         $currentIndex = array_search($this->tracking_status, $statuses);
@@ -70,6 +89,18 @@ class Order extends Model
         return $timeline;
     }
 
+    public function trackingFlow(): array
+    {
+        return $this->delivery_type === 'delivery'
+            ? self::DELIVERY_TRACKING_FLOW
+            : self::PICKUP_TRACKING_FLOW;
+    }
+
+    public function isTrackingTerminal(): bool
+    {
+        return in_array($this->tracking_status, self::TERMINAL_TRACKING_STATUSES, true);
+    }
+
     private function getStatusLabel($status)
     {
         $labels = [
@@ -82,6 +113,7 @@ class Order extends Model
             'picked_up' => 'Recogido',
             'canceled' => 'Cancelado',
         ];
+
         return $labels[$status] ?? $status;
     }
 
@@ -97,6 +129,7 @@ class Order extends Model
             'picked_up' => 'pi pi-check',
             'canceled' => 'pi pi-times-circle',
         ];
+
         return $icons[$status] ?? 'pi pi-circle';
     }
 }

@@ -1,190 +1,50 @@
 <template>
-    <AdminLayout>
-        <div class="container mx-auto px-6 py-8">
-            <div class="flex justify-between items-center mb-6">
-                 <h3 class="text-gray-700 text-3xl font-medium">Gestión de Productos</h3>
-                 <button @click="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-                     <i class="pi pi-plus mr-2"></i> Nuevo Producto
-                 </button>
-            </div>
-
-            <!-- List -->
-            <div class="bg-white shadow-md rounded-lg overflow-hidden">
-                <table class="min-w-full leading-normal">
-                    <thead>
-                        <tr>
-                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Producto</th>
-                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Precio</th>
-                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Stock</th>
-                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="product in products" :key="product.id">
-                            <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                                <div class="flex items-center">
-                                    <div class="flex-shrink-0 w-10 h-10">
-                                        <img class="w-full h-full rounded-full object-cover" :src="product.image_path || 'https://via.placeholder.com/150'" alt="" />
-                                    </div>
-                                    <div class="ml-3">
-                                        <p class="text-gray-900 whitespace-no-wrap font-bold">{{ product.name }}</p>
-                                        <p class="text-gray-600 whitespace-no-wrap text-xs">{{ product.category?.name }}</p>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                                <p class="text-gray-900 whitespace-no-wrap">S/ {{ product.price }}</p>
-                            </td>
-                            <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">
-                                <span :class="product.stock < 5 ? 'bg-red-200 text-red-900' : 'bg-green-200 text-green-900'" class="px-2 py-1 leading-tight rounded-full text-xs font-semibold">
-                                    {{ product.stock }}
-                                </span>
-                            </td>
-                            <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm text-center">
-                                <button @click="openModal(product)" class="text-blue-600 hover:text-blue-900 mr-4"><i class="pi pi-pencil"></i></button>
-                                <button @click="deleteProduct(product.id)" class="text-red-600 hover:text-red-900"><i class="pi pi-trash"></i></button>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-                 <!-- Pagination could be added here -->
-            </div>
-
-            <!-- Modal -->
-             <div v-if="showModal" class="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center bg-black bg-opacity-50">
-                <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6">
-                    <h3 class="text-xl font-bold mb-4">{{ isEditing ? 'Editar Producto' : 'Nuevo Producto' }}</h3>
-                    <form @submit.prevent="submitForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="md:col-span-2">
-                             <label class="block text-gray-700 text-sm font-bold mb-2">Nombre</label>
-                             <input v-model="form.name" type="text" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-gray-700 text-sm font-bold mb-2">Precio</label>
-                            <input v-model="form.price" type="number" step="0.01" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-gray-700 text-sm font-bold mb-2">Stock</label>
-                            <input v-model="form.stock" type="number" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" required>
-                        </div>
-                        
-                        <!-- Simplified Category/Brand selection (assuming IDs known orfetched separately, skipping for brevity but placeholder logic included) -->
-                        <div>
-                             <label class="block text-gray-700 text-sm font-bold mb-2">Categoría ID</label>
-                             <input v-model="form.category_id" type="number" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
-                         <div>
-                             <label class="block text-gray-700 text-sm font-bold mb-2">Marca ID</label>
-                             <input v-model="form.brand_id" type="number" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
-
-                        <div class="md:col-span-2">
-                            <label class="block text-gray-700 text-sm font-bold mb-2">Imagen</label>
-                            <input type="file" @change="handleFileUpload" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                             <p v-if="isEditing && !form.image" class="text-xs text-gray-500 mt-1">Deja vacío para mantener la actual.</p>
-                        </div>
-
-                        <div class="md:col-span-2">
-                             <label class="block text-gray-700 text-sm font-bold mb-2">Descripción</label>
-                             <textarea v-model="form.description" class="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                        </div>
-
-                         <div class="md:col-span-2 flex justify-end space-x-3 mt-4">
-                            <button type="button" @click="showModal = false" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">Cancelar</button>
-                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700" :disabled="processing">
-                                {{ processing ? 'Guardando...' : 'Guardar' }}
-                            </button>
-                        </div>
-                    </form>
-                </div>
-             </div>
-        </div>
-    </AdminLayout>
+<AdminLayout><div class="container mx-auto px-6 py-8">
+  <div class="flex flex-wrap justify-between gap-4 items-center mb-6"><h1 class="text-gray-700 text-3xl font-medium">Gestion de Productos</h1><button @click="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg"><i class="pi pi-plus mr-2"></i>Nuevo Producto</button></div>
+  <div class="bg-white rounded-lg shadow p-4 mb-4 flex gap-3"><input v-model="search" @keyup.enter="fetchProducts(1)" placeholder="Buscar por nombre o SKU" class="flex-1 border rounded px-3 py-2"><button @click="fetchProducts(1)" class="px-4 py-2 bg-gray-800 text-white rounded">Buscar</button></div>
+  <div class="bg-white shadow rounded-lg overflow-x-auto">
+    <div v-if="loading" class="p-8 text-center text-gray-500">Cargando productos...</div>
+    <div v-else-if="loadError" class="p-8 text-center"><p class="text-red-600 mb-2">{{loadError}}</p><button @click="fetchProducts(page)" class="text-blue-600">Reintentar</button></div>
+    <table v-else class="min-w-full"><thead><tr class="bg-gray-100 text-xs uppercase text-gray-600"><th class="p-4 text-left">Producto</th><th class="p-4 text-left">Categoria / Marca</th><th class="p-4 text-left">SKU</th><th class="p-4">Precio</th><th class="p-4">Stock</th><th class="p-4">Estado</th><th class="p-4">Acciones</th></tr></thead><tbody>
+      <tr v-for="product in products" :key="product.id" class="border-t"><td class="p-4"><div class="flex items-center gap-3"><img class="w-10 h-10 rounded object-cover" :src="product.image_path || 'https://via.placeholder.com/150'"><strong>{{product.name}}</strong></div></td><td class="p-4 text-sm"><div>{{product.category?.name || 'Sin categoria'}}</div><div class="text-gray-500">{{product.brand?.name || 'Sin marca'}}</div></td><td class="p-4 font-mono text-sm">{{product.sku}}</td><td class="p-4 text-center">S/ {{product.price}}</td><td class="p-4 text-center">{{product.stock}}<small class="block text-gray-500">total almacenes</small></td><td class="p-4 text-center"><span :class="product.is_active?'bg-green-100 text-green-800':'bg-gray-200 text-gray-700'" class="px-2 py-1 rounded-full text-xs">{{product.is_active?'Activo':'Inactivo'}}</span></td><td class="p-4 text-center"><button @click="openModal(product)" class="text-blue-600 mr-4" title="Editar"><i class="pi pi-pencil"></i></button><button @click="confirmStatus(product)" :class="product.is_active?'text-red-600':'text-green-600'" title="Cambiar estado"><i :class="product.is_active?'pi pi-ban':'pi pi-check-circle'"></i></button></td></tr>
+      <tr v-if="!products.length"><td colspan="7" class="p-8 text-center text-gray-500">No hay productos.</td></tr>
+    </tbody></table>
+  </div>
+  <div v-if="lastPage>1" class="flex justify-center gap-3 mt-4"><button :disabled="page===1" @click="fetchProducts(page-1)" class="border rounded px-3 py-1 disabled:opacity-40">Anterior</button><span>Pagina {{page}} de {{lastPage}}</span><button :disabled="page===lastPage" @click="fetchProducts(page+1)" class="border rounded px-3 py-1 disabled:opacity-40">Siguiente</button></div>
+  <div v-if="showModal" class="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center bg-black bg-opacity-50"><div class="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6"><h2 class="text-xl font-bold mb-4">{{isEditing?'Editar Producto':'Nuevo Producto'}}</h2>
+    <form @submit.prevent="submitForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Field label="Nombre" :error="fieldError('name')" class="md:col-span-2"><input v-model="form.name" class="input" required></Field>
+      <Field label="SKU interno" :error="fieldError('sku')"><input v-model="form.sku" class="input uppercase" placeholder="Se genera automaticamente"></Field>
+      <Field label="Precio" :error="fieldError('price')"><input v-model="form.price" type="number" min="0" step="0.01" class="input" required></Field>
+      <Field v-if="!isEditing" label="Cantidad inicial" :error="fieldError('cantidad_inicial')"><input v-model.number="form.cantidad_inicial" type="number" min="0" class="input" required></Field>
+      <Field v-if="!isEditing" label="Almacen inicial" :error="fieldError('warehouse_id')"><select v-model="form.warehouse_id" :required="form.cantidad_inicial>0" class="input"><option value="">Seleccione un almacen</option><option v-for="w in warehouses" :key="w.id" :value="w.id">{{w.name}} — {{w.branch?.name}}</option></select><small class="text-gray-500">Los cambios posteriores se realizan desde Inventario.</small></Field>
+      <Field label="Categoria" :error="fieldError('category_id')"><select v-model="form.category_id" class="input" :disabled="optionsLoading"><option value="">Sin categoria</option><option v-for="c in categoryOptions" :key="c.id" :value="c.id">{{c.name}}</option></select><router-link to="/admin/categories" class="text-xs text-blue-600">Administrar categorias</router-link></Field>
+      <Field label="Marca" :error="fieldError('brand_id')"><select v-model="form.brand_id" class="input" :disabled="optionsLoading"><option value="">Sin marca</option><option v-for="b in brandOptions" :key="b.id" :value="b.id">{{b.name}}</option></select><router-link to="/admin/brands" class="text-xs text-blue-600">Administrar marcas</router-link></Field>
+      <div v-if="optionsError" class="md:col-span-2 text-red-600 text-sm">{{optionsError}} <button type="button" @click="loadOptions(true)" class="underline">Reintentar</button></div><div v-else-if="!optionsLoading&&!categoryOptions.length&&!brandOptions.length" class="md:col-span-2 text-amber-700 text-sm">No existen categorias ni marcas activas.</div>
+      <Field label="Imagen" :error="fieldError('image')" class="md:col-span-2"><input type="file" accept="image/*" @change="form.image=$event.target.files[0]" class="w-full text-sm"><small v-if="isEditing" class="text-gray-500">Deje vacio para mantener la actual.</small></Field>
+      <Field label="Descripcion" :error="fieldError('description')" class="md:col-span-2"><textarea v-model="form.description" class="input"></textarea></Field>
+      <div class="md:col-span-2 flex justify-end gap-3"><button type="button" @click="showModal=false" class="px-4 py-2 bg-gray-200 rounded">Cancelar</button><button :disabled="processing||optionsLoading" class="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50">{{processing?'Guardando...':'Guardar'}}</button></div>
+    </form>
+  </div></div>
+</div></AdminLayout>
 </template>
-
 <script setup>
-import AdminLayout from '@/layouts/AdminLayout.vue';
-import { ref, onMounted } from 'vue';
-import api from '@/api';
-import { useToast } from 'primevue/usetoast';
-import { useConfirm } from 'primevue/useconfirm';
-
-const toast = useToast();
-const confirm = useConfirm();
-
-const products = ref([]);
-const showModal = ref(false);
-const isEditing = ref(false);
-const processing = ref(false);
-const form = ref({});
-
-const fetchProducts = async () => {
-    try {
-        const response = await api.get('/admin/products');
-        // Handle pagination response vs array response
-        products.value = response.data.data ? response.data.data : response.data;
-    } catch(e) {
-        console.error(e);
-    }
-};
-
-const openModal = (product = null) => {
-    isEditing.value = !!product;
-    if (product) {
-        form.value = { ...product, image: null };
-    } else {
-        form.value = { name: '', price: 0, stock: 0, category_id: 1, brand_id: 1, image: null }; // Default IDs for demo
-    }
-    showModal.value = true;
-};
-
-const handleFileUpload = (event) => {
-    form.value.image = event.target.files[0];
-};
-
-const submitForm = async () => {
-    processing.value = true;
-    try {
-        const formData = new FormData();
-        formData.append('name', form.value.name);
-        formData.append('price', form.value.price);
-        formData.append('stock', form.value.stock);
-        if(form.value.category_id) formData.append('category_id', form.value.category_id);
-        if(form.value.brand_id) formData.append('brand_id', form.value.brand_id);
-        if(form.value.description) formData.append('description', form.value.description);
-        
-        if (form.value.image) {
-            formData.append('image', form.value.image);
-        }
-
-        if (isEditing.value) {
-            formData.append('_method', 'PUT');
-            await api.post(`/admin/products/${form.value.id}`, formData, {
-                 headers: { 'Content-Type': 'multipart/form-data' }
-            });
-        } else {
-            await api.post('/admin/products', formData, {
-                 headers: { 'Content-Type': 'multipart/form-data' }
-            });
-        }
-        showModal.value = false;
-        fetchProducts();
-    } catch (e) {
-        alert("Error al guardar: " + (e.response?.data?.message || e.message));
-    } finally {
-        processing.value = false;
-    }
-};
-
-const deleteProduct = async (id) => {
-    if(!confirm('¿Eliminar producto?')) return;
-    await api.delete(`/admin/products/${id}`);
-    fetchProducts();
-};
-
-onMounted(() => {
-    fetchProducts();
-});
+import { defineComponent, h, onMounted, ref } from 'vue';
+import { useConfirm } from 'primevue/useconfirm'; import { useToast } from 'primevue/usetoast';
+import AdminLayout from '@/layouts/AdminLayout.vue'; import api from '@/api';
+const Field=defineComponent({props:{label:String,error:String},setup(p,{slots,attrs}){return()=>h('div',attrs,[h('label',{class:'block text-sm font-bold mb-2'},p.label),slots.default?.(),p.error?h('p',{class:'text-red-600 text-xs mt-1'},p.error):null])}});
+const toast=useToast(), confirm=useConfirm();
+const products=ref([]), warehouses=ref([]), categoryOptions=ref([]), brandOptions=ref([]), search=ref(''), page=ref(1), lastPage=ref(1), loading=ref(false), loadError=ref(''), showModal=ref(false), isEditing=ref(false), processing=ref(false), optionsLoading=ref(false), optionsError=ref(''), optionsLoaded=ref(false), errors=ref({}), form=ref({});
+const validId=id=>Number.isInteger(Number(id))&&Number(id)>0;
+const fieldError=name=>errors.value[name]?.[0]||'';
+async function fetchProducts(target=1){loading.value=true;loadError.value='';try{const {data}=await api.get('/admin/products',{params:{page:target,search:search.value||undefined}});products.value=data.data;page.value=data.current_page;lastPage.value=data.last_page;}catch(e){loadError.value=e.response?.data?.message||'No se pudo cargar productos.';}finally{loading.value=false;}}
+async function loadOptions(force=false){if(optionsLoaded.value&&!force)return;optionsLoading.value=true;optionsError.value='';try{const [w,c,b]=await Promise.all([api.get('/admin/warehouses/options'),api.get('/admin/categories/options'),api.get('/admin/brands/options')]);warehouses.value=w.data;categoryOptions.value=c.data;brandOptions.value=b.data;optionsLoaded.value=true;}catch(e){optionsError.value=e.response?.data?.message||'No se pudieron cargar las opciones.';}finally{optionsLoading.value=false;}}
+const preferredWarehouse=()=>warehouses.value.find(w=>w.code==='ALM-PRINCIPAL')?.id||warehouses.value.find(w=>w.is_default)?.id||warehouses.value[0]?.id||'';
+function preserveAssignedOption(list,relation,id){if(id&&!list.some(x=>Number(x.id)===Number(id))&&relation?.name)list.push({id,name:`${relation.name} (inactiva)`});}
+async function openModal(product=null){if(product&&!validId(product.id)){toast.add({severity:'error',summary:'Producto invalido',detail:'No se puede abrir la edicion.',life:3000});if(import.meta.env.DEV)console.warn('Producto sin id valido',product);return;}await loadOptions();errors.value={};isEditing.value=!!product;if(product){preserveAssignedOption(categoryOptions.value,product.category,product.category_id);preserveAssignedOption(brandOptions.value,product.brand,product.brand_id);form.value={id:product.id,name:product.name,sku:product.sku||'',price:product.price,category_id:product.category_id||'',brand_id:product.brand_id||'',description:product.description||'',image:null};}else form.value={name:'',sku:'',price:0,cantidad_inicial:0,warehouse_id:preferredWarehouse(),category_id:'',brand_id:'',description:'',image:null};showModal.value=true;}
+async function submitForm(){if(isEditing.value&&!validId(form.value.id)){toast.add({severity:'error',summary:'Producto invalido',detail:'No se envio ninguna solicitud.',life:3000});return;}processing.value=true;errors.value={};try{const data=new FormData();['name','sku','price','category_id','brand_id','description'].forEach(k=>{if(form.value[k]!==''&&form.value[k]!=null)data.append(k,form.value[k]);});if(!isEditing.value){data.append('cantidad_inicial',form.value.cantidad_inicial);if(form.value.warehouse_id)data.append('warehouse_id',form.value.warehouse_id);}if(form.value.image)data.append('image',form.value.image);if(isEditing.value){data.append('_method','PUT');await api.post(`/admin/products/${form.value.id}`,data);}else await api.post('/admin/products',data);showModal.value=false;toast.add({severity:'success',summary:'Guardado',detail:'Producto guardado correctamente.',life:2500});await fetchProducts(page.value);}catch(e){errors.value=e.response?.status===422?e.response.data.errors:{};toast.add({severity:'error',summary:'No se pudo guardar',detail:e.response?.data?.message||e.message,life:4000});}finally{processing.value=false;}}
+function confirmStatus(product){if(!validId(product?.id)){toast.add({severity:'error',summary:'Producto invalido',detail:'No se envio ninguna solicitud.',life:3000});return;}confirm.require({message:`¿Desea ${product.is_active?'desactivar':'activar'} ${product.name}?`,header:'Confirmacion',icon:'pi pi-exclamation-triangle',accept:()=>changeStatus(product)});}
+async function changeStatus(product){try{await api.patch(`/admin/products/${product.id}/status`,{is_active:!product.is_active});toast.add({severity:'success',summary:'Estado actualizado',detail:'El estado del producto fue actualizado.',life:2500});await fetchProducts(page.value);}catch(e){toast.add({severity:'error',summary:'Error',detail:e.response?.data?.message||e.message,life:3500});}}
+onMounted(()=>fetchProducts());
 </script>
+<style scoped>.input{width:100%;border:1px solid #d1d5db;border-radius:.25rem;padding:.5rem .75rem;outline:none}.input:focus{box-shadow:0 0 0 2px #3b82f6}</style>

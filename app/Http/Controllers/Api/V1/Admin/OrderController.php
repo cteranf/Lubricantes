@@ -4,10 +4,15 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Services\InventoryService;
+use App\Services\OrderStateService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
+    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService) {}
+
     public function index()
     {
         return Order::with(['user', 'items.product'])->latest()->paginate(20);
@@ -16,34 +21,25 @@ class OrderController extends Controller
     public function update(Request $request, Order $order)
     {
         $validated = $request->validate([
-            'status' => 'required|in:pending,confirmed,shipped,delivered,canceled,rejected'
+            'status' => 'required|in:pending,confirmed,shipped,delivered,canceled,rejected',
         ]);
 
-        $oldStatus = $order->status;
-        $newStatus = $validated['status'];
+        $updatedOrder = DB::transaction(function () use ($order, $validated, $request) {
+            $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $oldStatus = $lockedOrder->status;
+            $newStatus = $validated['status'];
 
-        // Logic for Stock Restoration
-        // If moving TO canceled/rejected FROM a status that held stock (pending, confirmed)
-        if (in_array($newStatus, ['canceled', 'rejected']) && !in_array($oldStatus, ['canceled', 'rejected'])) {
-            // Restore stock
-            foreach ($order->items as $item) {
-                $item->product->increment('stock', $item->quantity);
+            $updatedOrder = $this->orderStateService->transitionCommercial($lockedOrder, $newStatus);
+
+            if (in_array($newStatus, ['canceled', 'rejected'], true)
+                && ! in_array($oldStatus, ['canceled', 'rejected'], true)) {
+                $this->restoreOrderStock($updatedOrder, $request->user());
             }
-        }
 
-        // Logic for Stock Deduction (Re-deduct if moving FROM canceled/rejected TO active)
-        // Only if we allow reviving canceled orders
-        if (!in_array($newStatus, ['canceled', 'rejected']) && in_array($oldStatus, ['canceled', 'rejected'])) {
-            foreach ($order->items as $item) {
-                if ($item->product->stock < $item->quantity) {
-                    return response()->json(['message' => "No hay suficiente stock para reactivar el pedido para el producto: {$item->product->name}"], 400);
-                }
-                $item->product->decrement('stock', $item->quantity);
-            }
-        }
+            return $updatedOrder;
+        });
 
-        $order->update(['status' => $newStatus]);
-        return response()->json($order);
+        return response()->json($updatedOrder->load(['user', 'items.product']));
     }
 
     /**
@@ -51,40 +47,39 @@ class OrderController extends Controller
      */
     public function updateTracking(Request $request, $id)
     {
-        $order = Order::findOrFail($id);
-
         $validated = $request->validate([
             'tracking_status' => 'required|string',
             'tracking_notes' => 'nullable|string',
             'estimated_delivery_date' => 'nullable|date',
         ]);
 
-        // Validate status transitions
-        $validTransitions = $this->getValidTransitions($order->delivery_type);
-        if (!in_array($validated['tracking_status'], $validTransitions)) {
-            return response()->json([
-                'message' => 'Invalid tracking status for this delivery type'
-            ], 422);
-        }
+        $order = DB::transaction(function () use ($id, $validated, $request) {
+            $lockedOrder = Order::whereKey($id)->lockForUpdate()->firstOrFail();
+            $oldStatus = $lockedOrder->status;
 
-        // Update tracking fields
-        $order->update($validated);
+            $updatedOrder = $this->orderStateService->transitionTracking(
+                $lockedOrder,
+                $validated['tracking_status'],
+                $validated
+            );
 
-        // Auto-update delivered_at when status changes to delivered/picked_up
-        if (in_array($validated['tracking_status'], ['delivered', 'picked_up']) && !$order->delivered_at) {
-            $order->update(['delivered_at' => now()]);
-        }
+            if ($validated['tracking_status'] === 'canceled'
+                && ! in_array($oldStatus, ['canceled', 'rejected'], true)) {
+                $this->restoreOrderStock($updatedOrder, $request->user());
+            }
+
+            return $updatedOrder;
+        });
 
         return response()->json([
-            'message' => 'Tracking updated successfully',
-            'order' => $order
+            'message' => 'Seguimiento actualizado correctamente.',
+            'order' => $order->load(['user', 'items.product']),
         ]);
     }
 
-    private function getValidTransitions($deliveryType)
+    private function restoreOrderStock(Order $order, $user = null): void
     {
-        return $deliveryType === 'delivery'
-            ? ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'canceled']
-            : ['pending', 'confirmed', 'ready_for_pickup', 'picked_up', 'canceled'];
+        $order->items()->with(['product', 'warehouse'])->get()
+            ->each(fn ($item) => $this->inventoryService->returnCancellation($item, $user));
     }
 }

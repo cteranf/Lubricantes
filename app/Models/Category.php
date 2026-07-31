@@ -9,7 +9,9 @@ class Category extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'slug', 'image', 'parent_id'];
+    protected $fillable = ['name', 'slug', 'image', 'parent_id', 'is_active'];
+
+    protected $casts = ['is_active' => 'boolean'];
 
     public function products()
     {

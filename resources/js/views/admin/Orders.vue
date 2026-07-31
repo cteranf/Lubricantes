@@ -3,7 +3,17 @@
         <div class="container mx-auto px-6 py-8">
             <h3 class="text-gray-700 text-3xl font-medium mb-6">Gestión de Pedidos</h3>
 
-            <div class="bg-white shadow-md rounded-lg overflow-hidden">
+            <div v-if="loading" class="bg-white shadow-md rounded-lg p-8 text-center text-gray-500">
+                <i class="pi pi-spin pi-spinner text-3xl text-blue-600"></i>
+                <p class="mt-3">Cargando pedidos...</p>
+            </div>
+
+            <div v-else-if="loadError" class="bg-white shadow-md rounded-lg p-8 text-center border border-red-100">
+                <p class="text-red-600">{{ loadError }}</p>
+                <button @click="fetchOrders" class="mt-3 text-blue-600 font-bold hover:underline">Reintentar</button>
+            </div>
+
+            <div v-else class="bg-white shadow-md rounded-lg overflow-hidden">
                 <table class="min-w-full leading-normal">
                     <thead>
                         <tr>
@@ -38,12 +48,7 @@
                                     <i class="pi pi-eye"></i>
                                 </button>
                                 <select @change="updateStatus(order, $event.target.value)" :value="order.status" class="border rounded text-xs p-1 ml-2">
-                                    <option value="pending">Pendiente</option>
-                                    <option value="confirmed">Confirmado</option>
-                                    <option value="shipped">Enviado</option>
-                                    <option value="delivered">Entregado</option>
-                                    <option value="canceled">Cancelado</option>
-                                    <option value="rejected">Rechazado</option>
+                                    <option v-for="option in commercialStatusOptions(order)" :key="option.value" :value="option.value">{{ option.label }}</option>
                                 </select>
                             </td>
                         </tr>
@@ -76,13 +81,8 @@
                             <p class="font-bold text-xl mt-2">Total: S/ {{ selectedOrder.total }}</p>
                              <div class="mt-4">
                                 <label class="block text-sm font-bold text-gray-700">Cambiar Estado:</label>
-                                <select v-model="selectedOrder.status" @change="updateStatus(selectedOrder, selectedOrder.status)" class="w-full border rounded p-2 mt-1">
-                                    <option value="pending">Pendiente</option>
-                                    <option value="confirmed">Confirmado</option>
-                                    <option value="shipped">Enviado</option>
-                                    <option value="delivered">Entregado</option>
-                                    <option value="canceled">Cancelado</option>
-                                    <option value="rejected">Rechazado</option>
+                                <select :value="selectedOrder.status" @change="updateStatus(selectedOrder, $event.target.value)" class="w-full border rounded p-2 mt-1">
+                                    <option v-for="option in commercialStatusOptions(selectedOrder)" :key="option.value" :value="option.value">{{ option.label }}</option>
                                 </select>
                                 <p class="text-xs text-gray-500 mt-1">
                                     * Cancelar/Rechazar restaurará el stock automáticamente.
@@ -99,20 +99,7 @@
                                     <div>
                                         <label class="block text-sm font-bold text-gray-700">Estado de Tracking:</label>
                                         <select v-model="trackingForm.tracking_status" class="w-full border rounded p-2 mt-1">
-                                            <template v-if="selectedOrder.delivery_type === 'delivery'">
-                                                <option value="pending">Pedido Recibido</option>
-                                                <option value="confirmed">Pago Confirmado</option>
-                                                <option value="processing">Preparando Pedido</option>
-                                                <option value="shipped">En Camino</option>
-                                                <option value="delivered">Entregado</option>
-                                            </template>
-                                            <template v-else>
-                                                <option value="pending">Pedido Recibido</option>
-                                                <option value="confirmed">Pago Confirmado</option>
-                                                <option value="ready_for_pickup">Listo para Recoger</option>
-                                                <option value="picked_up">Recogido</option>
-                                            </template>
-                                            <option value="canceled">Cancelado</option>
+                                            <option v-for="option in trackingOptions(selectedOrder)" :key="option.value" :value="option.value">{{ option.label }}</option>
                                         </select>
                                     </div>
 
@@ -180,6 +167,8 @@ const confirm = useConfirm();
 const orders = ref([]);
 const selectedOrder = ref(null);
 const updatingTracking = ref(false);
+const loading = ref(true);
+const loadError = ref(null);
 
 const trackingForm = ref({
     tracking_status: '',
@@ -187,12 +176,83 @@ const trackingForm = ref({
     estimated_delivery_date: ''
 });
 
+const trackingLabels = {
+    pending: 'Pedido Recibido',
+    confirmed: 'Pago Confirmado',
+    processing: 'Preparando Pedido',
+    shipped: 'En Camino',
+    delivered: 'Entregado',
+    ready_for_pickup: 'Listo para Recoger',
+    picked_up: 'Recogido',
+    canceled: 'Cancelado'
+};
+
+const commercialLabels = {
+    pending: 'Pendiente',
+    confirmed: 'Confirmado',
+    shipped: 'Enviado',
+    delivered: 'Entregado',
+    canceled: 'Cancelado',
+    rejected: 'Rechazado'
+};
+
+const trackingFlow = (order) => order.delivery_type === 'delivery'
+    ? ['pending', 'confirmed', 'processing', 'shipped', 'delivered']
+    : ['pending', 'confirmed', 'ready_for_pickup', 'picked_up'];
+
+const trackingOptions = (order) => {
+    const terminal = ['delivered', 'picked_up', 'canceled'].includes(order.tracking_status);
+    const values = [order.tracking_status];
+
+    if (!terminal) {
+        const flow = trackingFlow(order);
+        const currentIndex = flow.indexOf(order.tracking_status);
+        const nextStatus = flow[currentIndex + 1];
+        const paymentAllowsConfirmation = nextStatus !== 'confirmed'
+            || order.payment_method !== 'card'
+            || order.payment_status === 'approved';
+
+        if (nextStatus && paymentAllowsConfirmation) values.push(nextStatus);
+        values.push('canceled');
+    }
+
+    return [...new Set(values)].map(value => ({ value, label: trackingLabels[value] || value }));
+};
+
+const commercialStatusOptions = (order) => {
+    const terminal = ['delivered', 'canceled', 'rejected'].includes(order.status);
+    const values = [order.status];
+
+    if (!terminal) {
+        const nextByTracking = {
+            pending: 'confirmed',
+            processing: 'shipped',
+            shipped: 'delivered',
+            ready_for_pickup: 'delivered'
+        };
+        const nextStatus = nextByTracking[order.tracking_status];
+        const paymentAllowsConfirmation = nextStatus !== 'confirmed'
+            || order.payment_method !== 'card'
+            || order.payment_status === 'approved';
+
+        if (nextStatus && paymentAllowsConfirmation) values.push(nextStatus);
+        values.push('canceled');
+        if (order.payment_status !== 'approved') values.push('rejected');
+    }
+
+    return [...new Set(values)].map(value => ({ value, label: commercialLabels[value] || value }));
+};
+
 const fetchOrders = async () => {
+    loading.value = true;
+    loadError.value = null;
     try {
         const response = await api.get('/admin/orders');
         orders.value = response.data.data;
     } catch(e) {
-        console.error(e);
+        loadError.value = 'No se pudo cargar la lista de pedidos.';
+    } finally {
+        loading.value = false;
     }
 };
 
@@ -238,7 +298,7 @@ const updateStatus = async (order, newStatus) => {
                 if(index !== -1) orders.value[index] = response.data;
                 
                 if(selectedOrder.value && selectedOrder.value.id === order.id) {
-                    selectedOrder.value.status = newStatus;
+                    selectedOrder.value = response.data;
                 }
                 toast.add({ severity: 'success', summary: 'Éxito', detail: 'Estado actualizado correctamente.', life: 3000 });
             } catch (e) {
@@ -258,18 +318,15 @@ const saveTracking = async () => {
     updatingTracking.value = true;
     try {
         const response = await api.put(`/admin/orders/${selectedOrder.value.id}/tracking`, trackingForm.value);
+        const updatedOrder = response.data.order;
         
         // Update local state
         const index = orders.value.findIndex(o => o.id === selectedOrder.value.id);
         if(index !== -1) {
-            orders.value[index].tracking_status = trackingForm.value.tracking_status;
-            orders.value[index].tracking_notes = trackingForm.value.tracking_notes;
-            orders.value[index].estimated_delivery_date = trackingForm.value.estimated_delivery_date;
+            orders.value[index] = updatedOrder;
         }
-        
-        selectedOrder.value.tracking_status = trackingForm.value.tracking_status;
-        selectedOrder.value.tracking_notes = trackingForm.value.tracking_notes;
-        selectedOrder.value.estimated_delivery_date = trackingForm.value.estimated_delivery_date;
+
+        selectedOrder.value = updatedOrder;
 
         toast.add({ severity: 'success', summary: 'Éxito', detail: 'Seguimiento actualizado.', life: 3000 });
     } catch (e) {

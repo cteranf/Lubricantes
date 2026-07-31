@@ -52,9 +52,8 @@
                 </div>
             </div>
 
-            <form action="{{ route('mock.payment.approve', $paymentId) }}" method="POST">
+            <form action="{{ $approveUrl }}" method="POST">
                 @csrf
-                <input type="hidden" name="order_id" value="{{ $orderId }}">
 
                 <button type="submit"
                     class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center">

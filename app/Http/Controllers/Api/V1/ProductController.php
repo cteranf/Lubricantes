@@ -4,10 +4,15 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\WarehouseInventory;
+use App\Services\InventoryService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 class ProductController extends Controller
 {
+    public function __construct(private InventoryService $inventory) {}
+
     public function index(Request $request)
     {
         $query = Product::query()->with(['category', 'brand', 'images'])->where('is_active', true);
@@ -26,8 +31,8 @@ class ProductController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where('name', 'like', '%' . $request->search . '%')
-                ->orWhere('sku', 'like', '%' . $request->search . '%');
+            $query->where(fn ($search) => $search->where('name', 'like', '%' . $request->search . '%')
+                ->orWhere('sku', 'like', '%' . $request->search . '%'));
         }
 
         if ($request->has('viscosity')) {
@@ -57,7 +62,15 @@ class ProductController extends Controller
             $query->orderBy('is_featured', 'desc')->orderBy('created_at', 'desc');
         }
 
-        return $query->paginate(12);
+        $products = $query->paginate(12);
+        if (Schema::hasTable('warehouse_inventories')) {
+            $warehouseId = $this->inventory->defaultWarehouse()->id;
+            $sellable = WarehouseInventory::where('warehouse_id', $warehouseId)
+                ->whereIn('product_id', $products->getCollection()->pluck('id'))
+                ->pluck('quantity', 'product_id');
+            $products->getCollection()->each(fn ($product) => $product->setAttribute('stock', (int) ($sellable[$product->id] ?? 0)));
+        }
+        return $products;
     }
 
     public function show($slug)
@@ -67,6 +80,9 @@ class ProductController extends Controller
             ->where('is_active', true)
             ->firstOrFail();
 
+        if (Schema::hasTable('warehouse_inventories')) {
+            $product->setAttribute('stock', $this->inventory->sellableStock($product));
+        }
         return response()->json($product);
     }
 }

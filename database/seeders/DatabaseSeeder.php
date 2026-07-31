@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\InventoryService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -59,7 +60,8 @@ class DatabaseSeeder extends Seeder
             $type = $types[array_rand($types)];
             $visc = $viscosities[array_rand($viscosities)];
 
-            Product::create([
+            $stock = rand(5, 50);
+            $product = Product::create([
                 'category_id' => $cat->id,
                 'brand_id' => $brand->id,
                 'name' => "Aceite {$brand->name} {$type} {$visc}",
@@ -68,7 +70,6 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Aceite de alta calidad diseñado para proteger su motor en condiciones extremas.',
                 'specifications' => "Viscosidad: {$visc}\nTipo: {$type}\nAPI SN/CF",
                 'price' => rand(80, 250) + (rand(0, 99) / 100),
-                'stock' => rand(5, 50),
                 'viscosity' => $visc,
                 'type' => $type,
                 'presentation' => '1 Galón',
@@ -76,6 +77,8 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
                 'is_featured' => rand(0, 1) == 1,
             ]);
+            $inventory = app(InventoryService::class);
+            $inventory->initializeProduct($product, $stock, $inventory->defaultWarehouse());
         }
     }
 }

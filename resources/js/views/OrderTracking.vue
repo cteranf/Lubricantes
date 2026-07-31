@@ -138,7 +138,9 @@ const fetchTracking = async () => {
         order.value.tracking_status_label = activeStep ? activeStep.label : 'Pendiente';
         
     } catch (e) {
-        error.value = "No se pudo cargar la información de seguimiento.";
+        error.value = e.response?.status === 404
+            ? 'El pedido no existe o no pertenece a tu cuenta.'
+            : 'No se pudo cargar la información de seguimiento.';
         console.error(e);
     } finally {
         loading.value = false;

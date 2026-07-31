@@ -3,13 +3,18 @@
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Api\V1\Admin\BranchController as AdminBranchController;
+use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
+use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
+use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
+use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -42,22 +47,39 @@ Route::prefix('v1')->group(function () {
 
         // Cart & Checkout
         Route::post('/cart', [CartController::class, 'store']); // Sync cart
-        Route::apiResource('orders', OrderController::class);
+        Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
         Route::get('/orders/{id}/tracking', [App\Http\Controllers\Api\V1\OrderTrackingController::class, 'show']);
 
         // Payment
         Route::post('/payment/create', [App\Http\Controllers\Api\V1\PaymentController::class, 'createPayment']);
         Route::get('/payment/verify/{paymentId}', [App\Http\Controllers\Api\V1\PaymentController::class, 'verifyPayment']);
+        Route::get('/payment/return', [App\Http\Controllers\Api\V1\PaymentController::class, 'handleReturn']);
 
         // Admin Routes
-        Route::middleware('is_admin')->prefix('admin')->group(function () {
-            Route::get('/dashboard', [DashboardController::class, 'index']);
-            Route::apiResource('products', AdminProductController::class);
-            Route::apiResource('orders', AdminOrderController::class);
-            Route::put('/orders/{id}/tracking', [AdminOrderController::class, 'updateTracking']);
-            Route::apiResource('sliders', App\Http\Controllers\Api\V1\Admin\SliderController::class);
-            Route::apiResource('categories', App\Http\Controllers\Api\V1\Admin\CategoryController::class);
-            Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class);
+        Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+            Route::patch('/products/{product}/status', [AdminProductController::class, 'status'])->name('products.status');
+            Route::apiResource('products', AdminProductController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::apiResource('branches', AdminBranchController::class)->only(['index', 'store', 'update']);
+            Route::patch('/branches/{branch}/status', [AdminBranchController::class, 'status'])->name('branches.status');
+            Route::get('/warehouses/options', [AdminWarehouseController::class, 'options'])->name('warehouses.options');
+            Route::apiResource('warehouses', AdminWarehouseController::class)->only(['index', 'store', 'update']);
+            Route::patch('/warehouses/{warehouse}/status', [AdminWarehouseController::class, 'status'])->name('warehouses.status');
+            Route::get('/inventories', [AdminInventoryController::class, 'index'])->name('inventories.index');
+            Route::get('/inventories/{product}', [AdminInventoryController::class, 'show'])->name('inventories.show');
+            Route::post('/inventories/adjustments', [AdminInventoryController::class, 'adjustment'])->name('inventories.adjustments');
+            Route::post('/inventories/transfers', [AdminInventoryController::class, 'transfer'])->name('inventories.transfers');
+            Route::get('/inventory-movements', [AdminInventoryMovementController::class, 'index'])->name('inventory-movements.index');
+            Route::apiResource('orders', AdminOrderController::class)->only(['index', 'update']);
+            Route::put('/orders/{id}/tracking', [AdminOrderController::class, 'updateTracking'])->name('orders.tracking.update');
+            Route::apiResource('sliders', App\Http\Controllers\Api\V1\Admin\SliderController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::get('/categories/options', [AdminCategoryController::class, 'options'])->name('categories.options');
+            Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');
+            Route::apiResource('categories', AdminCategoryController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');
+            Route::patch('/brands/{brand}/status', [AdminBrandController::class, 'status'])->name('brands.status');
+            Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class)->only(['index', 'store', 'update', 'destroy']);
         });
     });
 });

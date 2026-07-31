@@ -2,6 +2,8 @@
 
 namespace App\Services\PaymentGateway;
 
+use Illuminate\Support\Facades\URL;
+
 /**
  * Mock Payment Gateway for testing without real credentials
  * Simulates MercadoPago behavior for development/testing
@@ -11,10 +13,13 @@ class MockPaymentGateway implements PaymentGatewayInterface
     public function createPayment(array $orderData): array
     {
         // Simulate creating a payment preference
-        $mockId = 'MOCK-' . uniqid();
+        $mockId = 'MOCK-'.uniqid();
 
         // Generate mock checkout URL using url() helper (includes current host and port)
-        $checkoutUrl = url('/mock-payment/' . $mockId . '?order_id=' . $orderData['order_id']);
+        $checkoutUrl = URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), [
+            'paymentId' => $mockId,
+            'order_id' => $orderData['order_id'],
+        ]);
 
         return [
             'id' => $mockId,
@@ -39,7 +44,7 @@ class MockPaymentGateway implements PaymentGatewayInterface
     public function refundPayment(string $paymentId, float $amount): array
     {
         return [
-            'id' => 'REFUND-' . uniqid(),
+            'id' => 'REFUND-'.uniqid(),
             'status' => 'approved',
             'amount' => $amount,
         ];

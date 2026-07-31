@@ -16,6 +16,11 @@
                 <!-- Orders List -->
                 <div class="col-span-1 md:col-span-2 space-y-6">
                     <div v-if="loading" class="text-center py-10">Cargando pedidos...</div>
+                    <div v-else-if="error" class="bg-white rounded-lg shadow p-8 text-center border border-red-100">
+                        <i class="pi pi-exclamation-triangle text-4xl text-red-500 mb-4"></i>
+                        <p class="text-gray-700">{{ error }}</p>
+                        <button @click="fetchOrders" class="mt-4 text-blue-600 font-bold hover:underline">Reintentar</button>
+                    </div>
                     <div v-else-if="orders.length === 0" class="bg-white rounded-lg shadow p-8 text-center">
                         <i class="pi pi-inbox text-4xl text-gray-300 mb-4"></i>
                         <p class="text-gray-500">Aún no has realizado ningún pedido.</p>
@@ -72,13 +77,16 @@ const authStore = useAuthStore();
 const router = useRouter();
 const orders = ref([]);
 const loading = ref(true);
+const error = ref(null);
 
 const fetchOrders = async () => {
+    loading.value = true;
+    error.value = null;
     try {
         const response = await api.get('/orders');
         orders.value = response.data;
     } catch (e) {
-        console.error(e);
+        error.value = 'No se pudieron cargar tus pedidos. Inténtalo nuevamente.';
     } finally {
         loading.value = false;
     }
