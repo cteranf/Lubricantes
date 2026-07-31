@@ -39,6 +39,8 @@ class Order extends Model
         'payment_id',
         'payment_status',
         'payment_data',
+        'reserved_until',
+        'paid_at',
         'shipping_method',
         'notes',
         'delivery_type',
@@ -54,6 +56,8 @@ class Order extends Model
         'total' => 'decimal:2',
         'estimated_delivery_date' => 'date',
         'delivered_at' => 'datetime',
+        'reserved_until' => 'datetime',
+        'paid_at' => 'datetime',
     ];
 
     public function user()
@@ -64,6 +68,11 @@ class Order extends Model
     public function items()
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function reservations()
+    {
+        return $this->hasMany(InventoryReservation::class);
     }
 
     /**

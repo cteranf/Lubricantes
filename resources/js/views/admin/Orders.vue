@@ -137,7 +137,9 @@
                         </thead>
                         <tbody>
                             <tr v-for="item in selectedOrder.items" :key="item.id">
-                                <td class="py-2">{{ item.product?.name || 'Producto Eliminado' }}</td>
+                                <td class="py-2">{{ item.product?.name || 'Producto Eliminado' }}
+                                    <div class="text-xs text-gray-500">{{ item.warehouse?.name || 'Sin almacén' }} · Reserva: {{ item.reservation?.status || 'sin reserva' }} · Cantidad: {{ item.reservation?.quantity || 0 }} · Vence: {{ item.reservation?.expires_at ? formatDate(item.reservation.expires_at) : '—' }}</div>
+                                </td>
                                 <td class="py-2">{{ item.quantity }}</td>
                                 <td class="py-2">S/ {{ item.price }}</td>
                                 <td class="py-2 font-bold">S/ {{ item.subtotal }}</td>

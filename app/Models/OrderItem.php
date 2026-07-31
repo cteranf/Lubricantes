@@ -32,4 +32,9 @@ class OrderItem extends Model
     {
         return $this->belongsTo(Warehouse::class);
     }
+
+    public function reservation()
+    {
+        return $this->hasOne(InventoryReservation::class);
+    }
 }

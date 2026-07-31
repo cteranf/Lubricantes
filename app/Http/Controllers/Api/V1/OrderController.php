@@ -19,7 +19,7 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        return $request->user()->orders()->with('items.product')->latest()->get();
+        return $request->user()->orders()->with(['items.product','items.warehouse','items.reservation'])->latest()->get();
     }
 
     public function store(Request $request)
@@ -43,6 +43,8 @@ class OrderController extends Controller
             $order = DB::transaction(function () use ($request) {
                 $total = 0;
                 $itemsToCreate = [];
+                $warehouse = $this->inventory->defaultWarehouse();
+                $reservedUntil = now()->addMinutes(max(1, (int) config('inventory.reservation_minutes', 30)));
                 foreach ($request->items as $item) {
                     $product = Product::findOrFail($item['product_id']);
                     $price = $product->sale_price ?? $product->price;
@@ -50,16 +52,17 @@ class OrderController extends Controller
                     $total += $subtotal;
                     $itemsToCreate[] = ['product'=>$product,'quantity'=>$item['quantity'],'price'=>$price,'subtotal'=>$subtotal];
                 }
-                $order = Order::create(['user_id'=>$request->user()->id,'status'=>'pending','total'=>$total,'shipping_info'=>$request->shipping_info,'payment_method'=>$request->payment_method,'delivery_type'=>$request->delivery_type,'tracking_status'=>'pending']);
+                $order = Order::create(['user_id'=>$request->user()->id,'status'=>'pending','total'=>$total,'shipping_info'=>$request->shipping_info,'payment_method'=>$request->payment_method,'delivery_type'=>$request->delivery_type,'tracking_status'=>'pending','reserved_until'=>$reservedUntil]);
                 foreach ($itemsToCreate as $data) {
-                    $item = $order->items()->create(['product_id'=>$data['product']->id,'quantity'=>$data['quantity'],'price'=>$data['price'],'subtotal'=>$data['subtotal']]);
+                    $item = $order->items()->create(['product_id'=>$data['product']->id,'warehouse_id'=>$warehouse->id,'quantity'=>$data['quantity'],'price'=>$data['price'],'subtotal'=>$data['subtotal']]);
                     $item->setRelation('product', $data['product']);
-                    $this->inventory->sell($item, $request->user());
+                    $item->setRelation('warehouse', $warehouse);
+                    $this->inventory->reserveForOrder($item, $reservedUntil);
                 }
                 return $order;
             });
 
-            return response()->json($order->load('items'), 201);
+            return response()->json($order->load(['items.warehouse', 'items.reservation']), 201);
 
         } catch (ValidationException $e) {
             throw $e;
@@ -79,7 +82,7 @@ class OrderController extends Controller
 
     public function show(Request $request, $id)
     {
-        $order = $request->user()->orders()->with('items.product')->findOrFail($id);
+        $order = $request->user()->orders()->with(['items.product','items.warehouse','items.reservation'])->findOrFail($id);
 
         return response()->json($order);
     }

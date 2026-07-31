@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Exceptions\InventoryException;
 use App\Models\Order;
 use App\Services\InventoryService;
 use App\Services\OrderStateService;
@@ -103,6 +104,8 @@ class PaymentController extends Controller
             ]);
         } catch (ValidationException $e) {
             throw $e;
+        } catch (InventoryException $e) {
+            throw ValidationException::withMessages(['inventory'=>[$e->getMessage()]]);
         } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
             throw $e;
         } catch (\Exception $e) {
@@ -220,16 +223,29 @@ class PaymentController extends Controller
      */
     private function updateOrderStatus(Order $order, array $paymentData): Order
     {
-        $order = DB::transaction(function () use ($order, $paymentData) {
+        try {
+            $order = DB::transaction(function () use ($order, $paymentData) {
             $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
             $wasCanceled = in_array($locked->status, ['canceled', 'rejected'], true);
+            $wasPaid = $locked->payment_status === 'approved' || $locked->paid_at || $this->inventoryService->orderHasConsumedReservation($locked);
+            $usesReservations = $this->inventoryService->orderUsesReservationFlow($locked);
             $updated = $this->orderStateService->applyPaymentStatus($locked, $paymentData);
-            if (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
-                $updated->items()->with(['product', 'warehouse'])->get()
-                    ->each(fn ($item) => $this->inventoryService->returnCancellation($item));
+            if ($updated->payment_status === 'approved') {
+                if ($usesReservations) $this->inventoryService->consumeOrderReservation($updated);
+                if (!$updated->paid_at) $updated->update(['paid_at'=>now()]);
+            } elseif (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
+                if ($wasPaid || !$usesReservations) {
+                    $updated->items()->with(['product', 'warehouse'])->get()
+                        ->each(fn ($item) => $this->inventoryService->returnCancellation($item));
+                } else {
+                    $this->inventoryService->releaseOrderReservation($updated);
+                }
             }
-            return $updated;
-        });
+            return $updated->refresh();
+            });
+        } catch (InventoryException $e) {
+            throw ValidationException::withMessages(['inventory'=>[$e->getMessage()]]);
+        }
 
         Log::info("Order #{$order->id} updated to payment_status: {$order->payment_status}");
 

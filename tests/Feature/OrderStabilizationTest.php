@@ -270,7 +270,8 @@ class OrderStabilizationTest extends TestCase
         $this->postJson('/api/v1/orders', $this->orderPayload($product, 1))->assertCreated();
         $this->postJson('/api/v1/orders', $this->orderPayload($product, 1))->assertUnprocessable();
 
-        $this->assertSame(0, $product->refresh()->stock);
+        $this->assertSame(1, $product->refresh()->stock);
+        $this->assertSame(1, (int) \App\Models\WarehouseInventory::where('product_id',$product->id)->value('reserved_quantity'));
     }
 
     public function test_mock_payment_routes_are_unavailable_when_disabled(): void
@@ -386,16 +387,21 @@ class OrderStabilizationTest extends TestCase
             'payment_status' => 'pending',
             'delivery_type' => 'delivery',
             'tracking_status' => 'pending',
+            'reserved_until' => now()->addMinutes(30),
         ], $attributes));
 
         $product = $this->product();
-        OrderItem::create([
+        $item = OrderItem::create([
             'order_id' => $order->id,
             'product_id' => $product->id,
+            'warehouse_id' => app(InventoryService::class)->defaultWarehouse()->id,
             'quantity' => 1,
             'price' => 10,
             'subtotal' => 10,
         ]);
+
+        $item->setRelation('product',$product);
+        app(InventoryService::class)->reserveForOrder($item,$order->reserved_until);
 
         return $order;
     }

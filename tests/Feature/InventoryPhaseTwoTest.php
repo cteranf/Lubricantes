@@ -111,15 +111,17 @@ class InventoryPhaseTwoTest extends TestCase
         $this->expectException(LogicException::class);$movement->delete();
     }
 
-    public function test_order_uses_default_warehouse_and_cancellation_returns_only_once(): void
+    public function test_pending_order_uses_default_warehouse_and_cancellation_releases_reservation_once(): void
     {
         $admin=$this->admin();$customer=User::factory()->create(['role'=>'customer']);$product=$this->product(['stock'=>5]);Sanctum::actingAs($customer);
         $orderId=$this->postJson('/api/v1/orders',$this->orderPayload($product,2))->assertCreated()->json('id');
-        $this->assertDatabaseHas('inventory_movements',['type'=>'sale','reference_type'=>'order','reference_id'=>(string)$orderId]);
-        $this->assertSame(3,$product->refresh()->stock);$item=\App\Models\OrderItem::where('order_id',$orderId)->first();$this->assertSame($this->warehouse()->id,$item->warehouse_id);
+        $this->assertDatabaseMissing('inventory_movements',['type'=>'sale','reference_type'=>'order','reference_id'=>(string)$orderId]);
+        $this->assertSame(5,$product->refresh()->stock);$item=\App\Models\OrderItem::where('order_id',$orderId)->first();$this->assertSame($this->warehouse()->id,$item->warehouse_id);
+        $this->assertDatabaseHas('inventory_reservations',['order_item_id'=>$item->id,'status'=>'active','quantity'=>2]);
         Sanctum::actingAs($admin);$this->putJson("/api/v1/admin/orders/$orderId",['status'=>'canceled'])->assertOk();
         $this->putJson("/api/v1/admin/orders/$orderId",['status'=>'canceled'])->assertOk();
-        $this->assertSame(5,$product->refresh()->stock);$this->assertSame(1,InventoryMovement::where('idempotency_key','cancellation-order-item-'.$item->id)->count());
+        $this->assertSame(5,$product->refresh()->stock);$this->assertSame(0,InventoryMovement::where('idempotency_key','cancellation-order-item-'.$item->id)->count());
+        $this->assertDatabaseHas('inventory_reservations',['order_item_id'=>$item->id,'status'=>'released']);
     }
 
     public function test_inventory_filters_history_pagination_and_authorization(): void

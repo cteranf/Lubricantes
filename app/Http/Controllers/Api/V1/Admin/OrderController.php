@@ -15,7 +15,7 @@ class OrderController extends Controller
 
     public function index()
     {
-        return Order::with(['user', 'items.product'])->latest()->paginate(20);
+        return Order::with(['user', 'items.product', 'items.warehouse', 'items.reservation'])->latest()->paginate(20);
     }
 
     public function update(Request $request, Order $order)
@@ -28,18 +28,24 @@ class OrderController extends Controller
             $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
             $oldStatus = $lockedOrder->status;
             $newStatus = $validated['status'];
+            $usesReservations = $this->inventoryService->orderUsesReservationFlow($lockedOrder);
 
             $updatedOrder = $this->orderStateService->transitionCommercial($lockedOrder, $newStatus);
 
+            if ($newStatus === 'confirmed' && $oldStatus === 'pending') {
+                if ($usesReservations) $this->inventoryService->consumeOrderReservation($updatedOrder, $request->user());
+                $updatedOrder->update(['payment_status'=>'approved','paid_at'=>$updatedOrder->paid_at ?: now()]);
+            }
+
             if (in_array($newStatus, ['canceled', 'rejected'], true)
                 && ! in_array($oldStatus, ['canceled', 'rejected'], true)) {
-                $this->restoreOrderStock($updatedOrder, $request->user());
+                $this->cancelOrderInventory($updatedOrder, $request->user());
             }
 
             return $updatedOrder;
         });
 
-        return response()->json($updatedOrder->load(['user', 'items.product']));
+        return response()->json($updatedOrder->load(['user', 'items.product', 'items.warehouse', 'items.reservation']));
     }
 
     /**
@@ -56,6 +62,7 @@ class OrderController extends Controller
         $order = DB::transaction(function () use ($id, $validated, $request) {
             $lockedOrder = Order::whereKey($id)->lockForUpdate()->firstOrFail();
             $oldStatus = $lockedOrder->status;
+            $usesReservations = $this->inventoryService->orderUsesReservationFlow($lockedOrder);
 
             $updatedOrder = $this->orderStateService->transitionTracking(
                 $lockedOrder,
@@ -63,9 +70,14 @@ class OrderController extends Controller
                 $validated
             );
 
+            if ($validated['tracking_status'] === 'confirmed' && $oldStatus === 'pending') {
+                if ($usesReservations) $this->inventoryService->consumeOrderReservation($updatedOrder, $request->user());
+                $updatedOrder->update(['payment_status'=>'approved','paid_at'=>$updatedOrder->paid_at ?: now()]);
+            }
+
             if ($validated['tracking_status'] === 'canceled'
                 && ! in_array($oldStatus, ['canceled', 'rejected'], true)) {
-                $this->restoreOrderStock($updatedOrder, $request->user());
+                $this->cancelOrderInventory($updatedOrder, $request->user());
             }
 
             return $updatedOrder;
@@ -73,7 +85,7 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Seguimiento actualizado correctamente.',
-            'order' => $order->load(['user', 'items.product']),
+            'order' => $order->load(['user', 'items.product', 'items.warehouse', 'items.reservation']),
         ]);
     }
 
@@ -81,5 +93,14 @@ class OrderController extends Controller
     {
         $order->items()->with(['product', 'warehouse'])->get()
             ->each(fn ($item) => $this->inventoryService->returnCancellation($item, $user));
+    }
+
+    private function cancelOrderInventory(Order $order, $user = null): void
+    {
+        if (!$this->inventoryService->orderUsesReservationFlow($order) || $order->payment_status === 'approved' || $order->paid_at || $this->inventoryService->orderHasConsumedReservation($order)) {
+            $this->restoreOrderStock($order, $user);
+            return;
+        }
+        $this->inventoryService->releaseOrderReservation($order);
     }
 }

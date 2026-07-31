@@ -67,8 +67,11 @@ class ProductController extends Controller
             $warehouseId = $this->inventory->defaultWarehouse()->id;
             $sellable = WarehouseInventory::where('warehouse_id', $warehouseId)
                 ->whereIn('product_id', $products->getCollection()->pluck('id'))
-                ->pluck('quantity', 'product_id');
-            $products->getCollection()->each(fn ($product) => $product->setAttribute('stock', (int) ($sellable[$product->id] ?? 0)));
+                ->get(['product_id','quantity','reserved_quantity'])->keyBy('product_id');
+            $products->getCollection()->each(function ($product) use ($sellable) {
+                $inventory = $sellable->get($product->id);
+                $product->setAttribute('stock', $inventory ? max(0, $inventory->quantity - $inventory->reserved_quantity) : 0);
+            });
         }
         return $products;
     }

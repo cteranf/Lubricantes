@@ -13,7 +13,7 @@ class OrderTrackingController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $order = Order::with(['items.product', 'user'])->findOrFail($id);
+        $order = Order::with(['items.product', 'items.warehouse', 'items.reservation', 'user'])->findOrFail($id);
 
         $user = $request->user();
 
@@ -43,6 +43,14 @@ class OrderTrackingController extends Controller
                         'quantity' => $item->quantity,
                         'price' => $item->price,
                         'image' => $item->product?->image_path,
+                        'warehouse' => $item->warehouse ? ['id'=>$item->warehouse->id,'name'=>$item->warehouse->name] : null,
+                        'reservation' => $item->reservation ? [
+                            'status'=>$item->reservation->status,
+                            'quantity'=>$item->reservation->quantity,
+                            'expires_at'=>$item->reservation->expires_at?->toIso8601String(),
+                            'consumed_at'=>$item->reservation->consumed_at?->toIso8601String(),
+                            'released_at'=>$item->reservation->released_at?->toIso8601String(),
+                        ] : null,
                     ];
                 }),
             ],
