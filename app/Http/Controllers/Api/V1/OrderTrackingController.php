@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use Illuminate\Http\Request;
+use App\Services\OrderDeliveryService;
 
 class OrderTrackingController extends Controller
 {
+    public function __construct(private OrderDeliveryService $delivery) {}
     /**
      * Get tracking information for a specific order
      */
@@ -56,6 +58,7 @@ class OrderTrackingController extends Controller
                 }),
             ],
             'timeline' => $this->fulfillmentTimeline($order),
+            'delivery' => $this->delivery->getCustomerTracking($order),
         ]);
     }
 
@@ -71,9 +74,30 @@ class OrderTrackingController extends Controller
         if ($order->payment_method!=='contra_entrega') $steps[]=['status'=>'payment','label'=>'Pago confirmado','rank'=>0,'icon'=>'pi pi-credit-card','date'=>$this->iso($order->paid_at),'payment'=>true];
         $steps[]=['status'=>'preparing','label'=>'En preparación','rank'=>1,'icon'=>'pi pi-cog','date'=>$this->iso($order->preparing_at)];
         $steps[]=['status'=>'ready','label'=>'Listo para entrega','rank'=>2,'icon'=>'pi pi-box','date'=>$this->iso($order->ready_at)];
+        $delivery=$this->delivery->getCustomerTracking($order);
+        if($delivery){
+            $deliverySteps=$this->deliverySteps($delivery);
+            foreach($deliverySteps as $step)$steps[]=$step;
+        }
         $steps[]=['status'=>'delivered','label'=>'Entregado','rank'=>3,'icon'=>'pi pi-check-circle','date'=>$this->iso($order->delivered_at)];
         if ($order->payment_method==='contra_entrega' && $order->payment_status==='approved') $steps[]=['status'=>'payment','label'=>'Pago confirmado','rank'=>3,'icon'=>'pi pi-wallet','date'=>$this->iso($order->paid_at),'payment'=>true];
-        return collect($steps)->map(function($step)use($current,$state,$order){$payment=$step['payment']??false;$step['completed']=$payment?$order->payment_status==='approved':$current>$step['rank'];$step['active']=$payment?$state==='reserved'&&$order->payment_status==='approved':$step['status']===$state||($step['status']==='received'&&$state==='reserved'&&$order->payment_status!=='approved');unset($step['rank'],$step['payment']);return $step;})->all();
+        return collect($steps)->map(function($step)use($current,$state,$order,$delivery){
+            $payment=$step['payment']??false;
+            if($step['delivery_step']??false){$flow=$delivery['method']==='store_pickup'?['awaiting_pickup','delivered']:['dispatched','out_for_delivery','failed_attempt','rescheduled','delivered'];$now=array_search($delivery['status'],$flow,true);$at=array_search($step['status'],$flow,true);$step['completed']=$now!==false&&$at!==false&&$now>$at;$step['active']=$step['status']===$delivery['status'];}
+            else{$step['completed']=$payment?$order->payment_status==='approved':$current>$step['rank'];$step['active']=$payment?$state==='reserved'&&$order->payment_status==='approved':$step['status']===$state||($step['status']==='received'&&$state==='reserved'&&$order->payment_status!=='approved');}
+            unset($step['rank'],$step['payment'],$step['delivery_step']);return $step;
+        })->all();
+    }
+
+    private function deliverySteps(array $delivery): array
+    {
+        $status=$delivery['status'];$steps=[];
+        if($delivery['method']==='store_pickup'&&in_array($status,['awaiting_pickup','delivered'],true))$steps[]=['status'=>'awaiting_pickup','label'=>'Esperando recojo','rank'=>2,'delivery_step'=>true,'icon'=>'pi pi-shopping-bag','date'=>$delivery['scheduled_at']];
+        if($delivery['method']!=='store_pickup'&&in_array($status,['dispatched','out_for_delivery','failed_attempt','rescheduled','delivered'],true))$steps[]=['status'=>'dispatched','label'=>'Despachado','rank'=>2,'delivery_step'=>true,'icon'=>'pi pi-truck','date'=>null];
+        if(in_array($status,['out_for_delivery','failed_attempt','rescheduled','delivered'],true))$steps[]=['status'=>'out_for_delivery','label'=>'En camino','rank'=>2,'delivery_step'=>true,'icon'=>'pi pi-send','date'=>null];
+        if($status==='failed_attempt')$steps[]=['status'=>'failed_attempt','label'=>'Intento de entrega no completado','rank'=>2,'delivery_step'=>true,'icon'=>'pi pi-exclamation-triangle','date'=>null];
+        if($status==='rescheduled')$steps[]=['status'=>'rescheduled','label'=>'Entrega reprogramada','rank'=>2,'delivery_step'=>true,'icon'=>'pi pi-calendar','date'=>$delivery['scheduled_at']];
+        return $steps;
     }
 
     private function iso($date): ?string

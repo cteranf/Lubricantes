@@ -37,4 +37,9 @@ class OrderItem extends Model
     {
         return $this->hasOne(InventoryReservation::class);
     }
+
+    public function handlingItem()
+    {
+        return $this->hasOne(OrderHandlingItem::class);
+    }
 }

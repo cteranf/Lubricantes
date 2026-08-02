@@ -190,6 +190,7 @@ class OrderStabilizationTest extends TestCase
             $order->refresh();
             $this->assertSame($trackingStatus, $order->tracking_status);
             $this->assertSame($commercialStatus, $order->status);
+            if ($trackingStatus === 'processing') $this->completeHandling($order);
         }
 
         $this->assertNotNull($order->delivered_at);
@@ -420,5 +421,16 @@ class OrderStabilizationTest extends TestCase
                 ['product_id' => $product->id, 'quantity' => $quantity],
             ],
         ];
+    }
+
+    private function completeHandling(Order $order): void
+    {
+        $base='/api/v1/admin/orders/'.$order->id;
+        $this->postJson($base.'/picking/start')->assertOk();
+        foreach ($order->items as $item) $this->patchJson($base.'/picking/items/'.$item->id,['picked_quantity'=>$item->quantity])->assertOk();
+        $this->postJson($base.'/picking/complete')->assertOk();
+        $this->postJson($base.'/packing/start')->assertOk();
+        foreach ($order->items as $item) $this->patchJson($base.'/packing/items/'.$item->id,['packed_quantity'=>$item->quantity])->assertOk();
+        $this->postJson($base.'/packing/complete')->assertOk();
     }
 }

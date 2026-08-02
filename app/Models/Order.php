@@ -52,6 +52,7 @@ class Order extends Model
         'delivery_type',
         'tracking_status',
         'fulfillment_status',
+        'delivery_flow_version',
         'preparing_at',
         'ready_at',
         'prepared_by',
@@ -90,6 +91,11 @@ class Order extends Model
     }
 
     public function fulfillmentHistory() { return $this->hasMany(OrderFulfillmentHistory::class)->orderBy('created_at'); }
+    public function handlingProcess() { return $this->hasOne(OrderHandlingProcess::class); }
+    public function handlingIncidents() { return $this->hasMany(OrderHandlingIncident::class); }
+    public function handlingHistory() { return $this->hasMany(OrderHandlingHistory::class)->orderBy('created_at'); }
+    public function delivery() { return $this->hasOne(OrderDelivery::class); }
+    public function paymentTransactions() { return $this->hasMany(PaymentTransaction::class); }
     public function preparedBy() { return $this->belongsTo(User::class, 'prepared_by'); }
     public function readyBy() { return $this->belongsTo(User::class, 'ready_by'); }
     public function deliveredBy() { return $this->belongsTo(User::class, 'delivered_by'); }

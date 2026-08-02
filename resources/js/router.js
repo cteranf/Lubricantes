@@ -20,8 +20,8 @@ import AdminSliders from '@/views/admin/Sliders.vue';
 
 const routes = [
     { path: '/', component: Home },
-    { path: '/catalog', component: Catalog },
-    { path: '/product/:slug', component: ProductDetail },
+    { path: '/catalog', name: 'Catalog', component: Catalog },
+    { path: '/product/:slug', name: 'ProductDetail', component: ProductDetail },
     { path: '/cart', component: Cart },
     { path: '/checkout', component: Checkout },
     { path: '/login', component: Login },
@@ -36,6 +36,7 @@ const routes = [
 
     // Admin Routes
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/contact-inquiries', component: () => import('@/views/admin/ContactInquiries.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/products', component: AdminProducts, meta: { requiresAdmin: true } },
     { path: '/admin/branches', component: () => import('@/views/admin/Branches.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/warehouses', component: () => import('@/views/admin/Warehouses.vue'), meta: { requiresAdmin: true } },
@@ -50,6 +51,17 @@ const routes = [
 const router = createRouter({
     history: createWebHistory(),
     routes,
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition) return new Promise(resolve => setTimeout(() => resolve(savedPosition), 150));
+        if (to.name === 'Catalog' && from.name === 'ProductDetail') {
+            const stored = sessionStorage.getItem(`catalog:scroll:${to.fullPath}`);
+            if (stored) return new Promise(resolve => setTimeout(() => resolve({ top: Number(stored) }), 200));
+        }
+        if (to.name === 'Catalog' && from.name === 'Catalog' && to.query.page !== from.query.page) {
+            return new Promise(resolve => setTimeout(() => resolve({ el: '#catalog-results', top: 100 }), 150));
+        }
+        return { top: 0 };
+    },
 });
 
 import { useAuthStore } from './stores/auth';

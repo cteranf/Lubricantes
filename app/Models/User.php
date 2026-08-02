@@ -22,6 +22,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'can_deliver',
         'phone',
         'addresses',
     ];
@@ -44,6 +45,7 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'addresses' => 'array',
+        'can_deliver' => 'boolean',
     ];
 
     public function isAdmin()
@@ -54,5 +56,10 @@ class User extends Authenticatable
     public function orders()
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function assignedContactInquiries()
+    {
+        return $this->hasMany(ContactInquiry::class, 'assigned_to');
     }
 }

@@ -62,12 +62,14 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->postJson($this->url($order,'ready'))->assertUnprocessable();
         $this->postJson($this->url($order,'delivered'))->assertUnprocessable();
         $this->postJson($this->url($order,'start-preparation'))->assertOk(); $physical=$this->inventory($product)->quantity;
+        $this->completeHandling($order);
         $this->postJson($this->url($order,'ready'),['observation'=>'Empacado'])->assertOk()->assertJsonPath('fulfillment.status','ready');
         $this->assertSame($physical,$this->inventory($product)->quantity);
-        $this->postJson($this->url($order,'delivered'),['observation'=>'Recibido'])->assertOk()->assertJsonPath('fulfillment.status','delivered');
-        $this->postJson($this->url($order,'delivered'))->assertOk();
+        $this->postJson($this->url($order,'delivered'),['observation'=>'Recibido'])->assertUnprocessable();
+        $this->completeDelivery($order);
+        $this->postJson('/api/v1/admin/orders/'.$order->id.'/delivery/confirm',$this->deliveryPayload())->assertOk();
         $order->refresh(); $this->assertSame($physical,$this->inventory($product)->quantity); $this->assertSame('approved',$order->payment_status); $this->assertNotNull($order->paid_at);
-        $this->assertTrue($order->paid_at->equalTo($order->delivered_at));
+        $this->assertTrue($order->paid_at->lessThanOrEqualTo($order->delivered_at));
         $this->assertNotNull($order->ready_at); $this->assertNotNull($order->delivered_at); $this->assertSame($admin->id,$order->ready_by); $this->assertSame($admin->id,$order->delivered_by);
         $this->assertSame(3,OrderFulfillmentHistory::where('order_id',$order->id)->count());
     }
@@ -77,8 +79,9 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $admin=$this->admin(); $product=$this->product(4); $product->update(['image_path'=>'/storage/products/aceite.jpg']);
         $order=$this->createOrder($product,1,'contra_entrega'); Sanctum::actingAs($admin);
         $this->postJson($this->url($order,'start-preparation'))->assertOk();
+        $this->completeHandling($order);
         $this->postJson($this->url($order,'ready'))->assertOk();
-        $this->postJson($this->url($order,'delivered'))->assertOk();
+        $this->completeDelivery($order);
 
         $order->refresh(); Sanctum::actingAs($order->user);
         $response=$this->getJson('/api/v1/orders/'.$order->id.'/tracking')->assertOk();
@@ -91,8 +94,7 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->assertSame('payment',$payment['status']);
         $this->assertSame('Pago confirmado',$payment['label']);
         $this->assertTrue($payment['completed']);
-        $this->assertSame($delivered['date'],$payment['date']);
-        $this->assertSame($order->delivered_at->copy()->utc()->toIso8601String(),$payment['date']);
+        $this->assertSame($order->paid_at->copy()->utc()->toIso8601String(),$payment['date']);
     }
 
     public function test_product_image_url_does_not_expose_local_paths_and_tracking_allows_no_image(): void
@@ -152,6 +154,9 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
     private function product(int $stock): Product { $p=Product::create(['name'=>'Producto '.Str::random(6),'slug'=>'producto-'.Str::uuid(),'sku'=>'FUL-'.Str::random(8),'price'=>10,'is_active'=>true]);app(InventoryService::class)->initializeProduct($p,$stock,app(InventoryService::class)->defaultWarehouse());return $p->refresh(); }
     private function inventory(Product $product): WarehouseInventory { return WarehouseInventory::where('product_id',$product->id)->where('warehouse_id',app(InventoryService::class)->defaultWarehouse()->id)->firstOrFail()->refresh(); }
     private function url(Order $order,string $action): string { return '/api/v1/admin/orders/'.$order->id.'/fulfillment/'.$action; }
+    private function completeHandling(Order $order): void { $base='/api/v1/admin/orders/'.$order->id;$this->postJson($base.'/picking/start')->assertOk();foreach($order->items as $item)$this->patchJson($base.'/picking/items/'.$item->id,['picked_quantity'=>$item->quantity])->assertOk();$this->postJson($base.'/picking/complete')->assertOk();$this->postJson($base.'/packing/start')->assertOk();foreach($order->items as $item)$this->patchJson($base.'/packing/items/'.$item->id,['packed_quantity'=>$item->quantity])->assertOk();$this->postJson($base.'/packing/complete')->assertOk(); }
+    private function completeDelivery(Order $order): void { $base='/api/v1/admin/orders/'.$order->id.'/delivery';$driver=User::factory()->create(['role'=>'admin','can_deliver'=>true]);$this->postJson($base.'/initialize')->assertCreated();$this->postJson($base.'/assign-driver',['delivery_user_id'=>$driver->id])->assertOk();$this->postJson($base.'/dispatch')->assertOk();$this->postJson($base.'/attempts')->assertCreated();$this->postJson($base.'/out-for-delivery')->assertOk();$this->postJson($base.'/confirm',$this->deliveryPayload())->assertOk()->assertJsonPath('delivery.status','delivered'); }
+    private function deliveryPayload(): array { return ['recipient_name'=>'Cliente de prueba','recipient_document_type'=>'DNI','recipient_document_number'=>'12345678','confirmation_method'=>'manual','money_received'=>true,'collection_method'=>'cash']; }
     private function admin(): User { return User::factory()->create(['role'=>'admin']); }
     private function customer(): User { return User::factory()->create(['role'=>'customer']); }
 }

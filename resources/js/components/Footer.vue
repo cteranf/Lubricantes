@@ -1,33 +1,38 @@
 <template>
-    <footer class="bg-gray-800 text-white mt-12 py-10">
-        <div class="container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div>
-                <h3 class="text-xl font-bold mb-4">LubriStore</h3>
-                <p class="text-gray-400">
-                    Tu tienda de confianza para lubricantes y repuestos vehiculares.
-                    Calidad y garantía asegurada.
-                </p>
+    <footer class="bg-slate-950 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-12 text-white">
+        <div class="site-container grid grid-cols-1 gap-10 md:grid-cols-2 lg:grid-cols-4">
+            <div class="md:col-span-2 lg:col-span-1">
+                <router-link to="/" class="focus-ring inline-block rounded-lg text-2xl font-black">Lubri<span class="text-blue-400">Store</span></router-link>
+                <p class="mt-4 max-w-sm leading-relaxed text-slate-400">Lubricantes y productos para el cuidado y mantenimiento de tu vehículo.</p>
             </div>
             <div>
-                <h3 class="text-lg font-bold mb-4">Enlaces Rápidos</h3>
-                <ul class="space-y-2 text-gray-400 text-sm">
-                    <li><router-link to="/" class="hover:text-white">Inicio</router-link></li>
-                    <li><router-link to="/catalog" class="hover:text-white">Catálogo</router-link></li>
-                    <li><router-link to="/about" class="hover:text-white">Quiénes Somos</router-link></li>
-                    <li><router-link to="/contact" class="hover:text-white">Contacto</router-link></li>
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-200">Enlaces rápidos</h2>
+                <ul class="mt-4 space-y-3 text-sm text-slate-400">
+                    <li><router-link to="/" class="footer-link">Inicio</router-link></li>
+                    <li><router-link to="/catalog" class="footer-link">Catálogo</router-link></li>
+                    <li><router-link :to="{ path: '/', hash: '#categories' }" class="footer-link">Categorías</router-link></li>
+                    <li><router-link to="/about" class="footer-link">Nosotros</router-link></li>
+                    <li><router-link to="/contact" class="footer-link">Contacto</router-link></li>
                 </ul>
             </div>
             <div>
-                <h3 class="text-lg font-bold mb-4">Contacto</h3>
-                <ul class="space-y-2 text-gray-400 text-sm">
-                    <li><i class="pi pi-phone mr-2"></i> +51 999 999 999</li>
-                    <li><i class="pi pi-envelope mr-2"></i> contacto@lubristore.com</li>
-                    <li><i class="pi pi-map-marker mr-2"></i> Lima, Perú</li>
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-200">Atención</h2>
+                <ul class="mt-4 space-y-3 text-sm text-slate-400">
+                    <li v-if="whatsappLink"><a :href="whatsappLink" target="_blank" rel="noopener noreferrer" class="footer-link inline-flex items-start gap-2"><i class="pi pi-whatsapp mt-0.5" aria-hidden="true"></i><span>Asesoría por WhatsApp</span></a></li>
+                    <li><router-link to="/contact" class="footer-link inline-flex items-start gap-2"><i class="pi pi-map-marker mt-0.5" aria-hidden="true"></i><span>Información de contacto y ubicación</span></router-link></li>
                 </ul>
             </div>
+            <div>
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-200">Tu compra</h2>
+                <ul class="mt-4 space-y-3 text-sm text-slate-400"><li><router-link to="/cart" class="footer-link">Carrito</router-link></li><li><router-link to="/orders" class="footer-link">Mis pedidos</router-link></li></ul>
+            </div>
         </div>
-        <div class="container mx-auto px-4 mt-8 pt-8 border-t border-gray-700 text-center text-gray-500 text-sm">
-            &copy; 2026 LubriStore. Todos los derechos reservados.
-        </div>
+        <div class="site-container mt-10 border-t border-slate-800 pt-6 text-sm leading-relaxed text-slate-500"><p>© {{ currentYear }} LubriStore. Todos los derechos reservados.</p></div>
     </footer>
 </template>
+
+<script setup>
+const currentYear = new Date().getFullYear();
+const phone = String(import.meta.env.VITE_WHATSAPP_PHONE || '').replace(/\D+/g, '');
+const whatsappLink = phone ? `https://wa.me/${phone}?text=${encodeURIComponent('Hola, necesito asesoría para elegir un producto de LubriStore.')}` : '';
+</script>

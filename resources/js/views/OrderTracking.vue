@@ -89,6 +89,18 @@
                         </div>
                     </div>
 
+                    <div v-if="delivery" class="bg-white rounded-lg shadow p-6">
+                        <h3 class="font-bold text-lg mb-4 flex items-center gap-2"><i class="pi pi-map-marker text-blue-600"></i>Despacho</h3>
+                        <div class="space-y-2 text-gray-700">
+                            <p><span class="font-medium">Modalidad:</span> {{ deliveryMethodLabel(delivery.method) }}</p>
+                            <p><span class="font-medium">Estado:</span> {{ deliveryStatusLabel(delivery.status) }}</p>
+                            <p v-if="delivery.scheduled_at"><span class="font-medium">Programado:</span> {{ formatDateTime(delivery.scheduled_at) }}</p>
+                            <template v-if="delivery.pickup"><p><span class="font-medium">Local:</span> {{ delivery.pickup.name }}</p><p><span class="font-medium">Dirección:</span> {{ delivery.pickup.address }}</p></template>
+                            <template v-if="delivery.courier"><p><span class="font-medium">Courier:</span> {{ delivery.courier.name }}</p><p><span class="font-medium">Guía:</span> {{ delivery.courier.tracking_number }}</p><a v-if="safeTrackingUrl" :href="safeTrackingUrl" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">Abrir seguimiento del courier</a></template>
+                            <p v-if="delivery.status==='failed_attempt'" class="rounded bg-amber-50 p-2 text-amber-900">El intento no pudo completarse. Nos comunicaremos para reprogramar.</p>
+                        </div>
+                    </div>
+
                     <!-- Order Summary -->
                     <div class="bg-white rounded-lg shadow p-6">
                         <h3 class="font-bold text-lg mb-4 flex items-center gap-2">
@@ -108,7 +120,7 @@
                                 <p class="font-bold">S/ {{ (item.quantity * item.price).toFixed(2) }}</p>
                             </div>
                             <div class="border-t pt-4 flex justify-between font-bold text-xl">
-                                <span>Total Pagado</span>
+                                <span>{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total del pedido' }}</span>
                                 <span class="text-blue-600">S/ {{ order.total }}</span>
                             </div>
                         </div>
@@ -121,7 +133,7 @@
 
 <script setup>
 import AppLayout from '@/layouts/AppLayout.vue';
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '@/api';
 import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
@@ -129,9 +141,13 @@ import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
 const route = useRoute();
 const order = ref(null);
 const timeline = ref([]);
+const delivery = ref(null);
 const loading = ref(true);
 const error = ref(null);
 const brokenImages = ref({});
+const safeTrackingUrl = computed(() => { try { const url = new URL(delivery.value?.courier?.tracking_url || ''); return ['http:','https:'].includes(url.protocol) ? url.href : null; } catch { return null; } });
+const deliveryMethodLabel = value => ({store_pickup:'Recojo en tienda',own_delivery:'Reparto propio',external_courier:'Courier externo'}[value] || value);
+const deliveryStatusLabel = value => ({pending:'Pendiente',scheduled:'Programado',assigned:'Asignado',dispatched:'Despachado',out_for_delivery:'En camino',awaiting_pickup:'Esperando recojo',failed_attempt:'Intento no completado',rescheduled:'Reprogramado',delivered:'Entregado',canceled:'Cancelado'}[value] || value);
 
 const stepCircleClass = (step) => {
     if (step.status === 'canceled') return 'bg-red-600 text-white ring-4 ring-red-100';
@@ -155,6 +171,7 @@ const fetchTracking = async () => {
         const response = await api.get(`/orders/${route.params.id}/tracking`);
         order.value = response.data.order;
         timeline.value = response.data.timeline;
+        delivery.value = response.data.delivery;
         
         // Add current label for badge
         const activeStep = timeline.value.find(s => s.active);

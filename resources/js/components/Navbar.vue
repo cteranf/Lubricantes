@@ -1,84 +1,86 @@
 <template>
-    <nav class="bg-white shadow-md sticky top-0 z-50">
-        <div class="container mx-auto px-4 h-16 flex items-center justify-between">
-            <!-- Logo -->
-            <router-link to="/" class="text-2xl font-bold text-blue-700 flex items-center">
-                <span>LubriStore</span>
-            </router-link>
+    <header class="sticky top-0 z-50 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <a href="#main-content" class="skip-link">Saltar al contenido</a>
+        <nav class="site-container" aria-label="Navegación principal">
+            <div class="flex min-h-16 items-center gap-2 xl:gap-6">
+                <router-link to="/" class="focus-ring shrink-0 rounded-lg text-xl font-black tracking-tight text-blue-800 sm:text-2xl" aria-label="LubriStore, inicio">Lubri<span class="text-blue-600">Store</span></router-link>
 
-            <!-- Search Bar (Desktop) -->
-            <div class="hidden md:flex flex-1 mx-8 relative">
-                <input 
-                    v-model="searchQuery" 
-                    @keyup.enter="handleSearch"
-                    type="text" 
-                    placeholder="Buscar producto..." 
-                    class="w-full border rounded-full py-2 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-100"
-                />
-                <button @click="handleSearch" class="absolute right-3 top-2 text-gray-500 hover:text-blue-600">
-                    <i class="pi pi-search"></i>
-                </button>
-            </div>
-
-            <!-- Icons -->
-            <div class="flex items-center space-x-4">
-                <router-link to="/cart" class="relative text-gray-700 hover:text-blue-600">
-                    <i class="pi pi-shopping-cart text-xl"></i>
-                    <span v-if="cartStore.count > 0" class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                        {{ cartStore.count }}
-                    </span>
-                </router-link>
-
-                <div v-if="authStore.isAuthenticated" class="relative">
-                    <button @click="toggleMenu" class="flex items-center space-x-2 text-gray-700 hover:text-blue-600">
-                        <span class="font-medium">{{ authStore.user?.name }}</span>
-                        <i class="pi pi-user"></i>
-                    </button>
-                     <!-- Dropdown -->
-                     <div v-if="menuOpen" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 border">
-                         <router-link to="/profile" class="block px-4 py-2 hover:bg-gray-100 text-sm">Mi Perfil</router-link>
-                         <router-link to="/orders" class="block px-4 py-2 hover:bg-gray-100 text-sm">Mis Pedidos</router-link>
-                         <a v-if="authStore.isAdmin" href="/admin/dashboard" class="block px-4 py-2 hover:bg-gray-100 text-sm text-blue-600 font-bold">Panel Admin</a>
-                         <button @click="logout" class="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-red-600">Cerrar Sesión</button>
-                     </div>
+                <div class="hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">
+                    <router-link v-for="item in navigation" :key="item.label" :to="item.to" class="nav-link">{{ item.label }}</router-link>
                 </div>
-                <div v-else class="space-x-2">
-                    <router-link to="/login" class="text-sm font-medium hover:text-blue-600">Ingresar</router-link>
-                    <router-link to="/register" class="bg-blue-600 text-white px-4 py-2 rounded-full text-sm hover:bg-blue-700">Registro</router-link>
+
+                <form class="relative ml-auto hidden w-full max-w-sm xl:block" role="search" @submit.prevent="handleSearch">
+                    <label class="sr-only" for="desktop-product-search">Buscar productos</label>
+                    <input id="desktop-product-search" v-model="searchQuery" type="search" placeholder="Buscar productos" class="search-input pr-12">
+                    <button type="submit" class="search-button" :disabled="!searchQuery.trim()" aria-label="Buscar productos"><i class="pi pi-search" aria-hidden="true"></i></button>
+                </form>
+
+                <div class="ml-auto flex shrink-0 items-center gap-1 sm:gap-2 xl:ml-0">
+                    <button type="button" class="icon-button xl:hidden" :aria-expanded="mobileMenuOpen" aria-controls="mobile-navigation" :aria-label="mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'" @click="mobileMenuOpen = !mobileMenuOpen"><i :class="mobileMenuOpen ? 'pi pi-times' : 'pi pi-bars'" aria-hidden="true"></i></button>
+                    <router-link to="/cart" class="icon-button relative" aria-label="Ver carrito">
+                        <i class="pi pi-shopping-cart text-lg" aria-hidden="true"></i>
+                        <span v-if="cartStore.count > 0" class="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white" aria-label="Productos en el carrito">{{ cartCountLabel }}</span>
+                    </router-link>
+
+                    <div v-if="authStore.isAuthenticated" class="relative">
+                        <button type="button" class="account-button" :aria-expanded="accountMenuOpen" aria-controls="account-menu" @click="accountMenuOpen = !accountMenuOpen"><i class="pi pi-user" aria-hidden="true"></i><span class="hidden max-w-32 truncate md:inline">{{ authStore.user?.name || 'Mi cuenta' }}</span><i class="pi pi-chevron-down hidden text-xs md:inline" aria-hidden="true"></i></button>
+                        <div v-if="accountMenuOpen" id="account-menu" class="absolute right-0 mt-2 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-2 shadow-xl">
+                            <router-link to="/profile" class="dropdown-link">Mi perfil</router-link>
+                            <router-link to="/orders" class="dropdown-link">Mis pedidos</router-link>
+                            <router-link v-if="authStore.isAdmin" to="/admin/dashboard" class="dropdown-link font-bold text-blue-700">Panel administrativo</router-link>
+                            <button type="button" class="dropdown-link w-full text-left text-red-700" @click="logout">Cerrar sesión</button>
+                        </div>
+                    </div>
+                    <router-link v-else to="/login" class="account-button" aria-label="Ingresar a mi cuenta"><i class="pi pi-user" aria-hidden="true"></i><span class="hidden sm:inline">Ingresar</span></router-link>
+                    <router-link v-if="!authStore.isAuthenticated" to="/register" class="btn-primary hidden xl:inline-flex">Registro</router-link>
                 </div>
             </div>
-        </div>
-        <!-- Mobile Search -->
-         <div class="md:hidden px-4 pb-2">
-            <input v-model="searchQuery" @keyup.enter="handleSearch" type="text" placeholder="Buscar..." class="w-full border rounded-full py-2 px-4 bg-gray-100" />
-        </div>
-    </nav>
+
+            <form class="relative pb-3 xl:hidden" role="search" @submit.prevent="handleSearch">
+                <label class="sr-only" for="mobile-product-search">Buscar productos</label>
+                <input id="mobile-product-search" v-model="searchQuery" type="search" placeholder="Buscar productos" class="search-input pr-12">
+                <button type="submit" class="search-button" :disabled="!searchQuery.trim()" aria-label="Buscar productos"><i class="pi pi-search" aria-hidden="true"></i></button>
+            </form>
+
+            <div v-if="mobileMenuOpen" id="mobile-navigation" class="border-t border-slate-200 pb-4 pt-3 xl:hidden">
+                <div class="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    <router-link v-for="item in navigation" :key="item.label" :to="item.to" class="mobile-nav-link">{{ item.label }}</router-link>
+                    <router-link v-if="!authStore.isAuthenticated" to="/register" class="mobile-nav-link font-bold text-blue-700">Crear una cuenta</router-link>
+                </div>
+            </div>
+        </nav>
+    </header>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { useCartStore } from '@/stores/cart';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
-import { useRouter } from 'vue-router';
+import { useCartStore } from '@/stores/cart';
 
 const cartStore = useCartStore();
 const authStore = useAuthStore();
 const router = useRouter();
-
+const route = useRoute();
 const searchQuery = ref('');
-const menuOpen = ref(false);
-
+const mobileMenuOpen = ref(false);
+const accountMenuOpen = ref(false);
+const cartCountLabel = computed(() => cartStore.count > 99 ? '99+' : cartStore.count);
+const navigation = [
+    { label: 'Inicio', to: '/' },
+    { label: 'Catálogo', to: '/catalog' },
+    { label: 'Categorías', to: { path: '/', hash: '#categories' } },
+    { label: 'Nosotros', to: '/about' },
+    { label: 'Contacto', to: '/contact' },
+];
+const closeMenus = () => { mobileMenuOpen.value = false; accountMenuOpen.value = false; };
 const handleSearch = () => {
-    if (searchQuery.value) {
-        router.push({ path: '/catalog', query: { search: searchQuery.value } });
-    }
+    const search = searchQuery.value.trim();
+    if (search) router.push({ path: '/catalog', query: { search } });
 };
-
-const toggleMenu = () => menuOpen.value = !menuOpen.value;
-
-const logout = async () => {
-    await authStore.logout();
-    router.push('/login');
-    menuOpen.value = false;
-};
+const logout = async () => { await authStore.logout(); closeMenus(); router.push('/login'); };
+const handleEscape = event => { if (event.key === 'Escape') closeMenus(); };
+watch(() => route.fullPath, closeMenus);
+onMounted(() => document.addEventListener('keydown', handleEscape));
+onBeforeUnmount(() => document.removeEventListener('keydown', handleEscape));
 </script>
