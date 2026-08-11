@@ -1,25 +1,25 @@
 <?php
 
-use App\Http\Controllers\Api\V1\Admin\DashboardController;
-use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
-use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\BranchController as AdminBranchController;
-use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
+use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
+use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\V1\Admin\ContactInquiryController as AdminContactInquiryController;
+use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
 use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
-use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
-use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
+use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliveryController;
 use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
-use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliveryController;
+use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\ContactInquiryController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
-use App\Http\Controllers\Api\V1\ContactInquiryController;
-use App\Http\Controllers\Api\V1\Admin\ContactInquiryController as AdminContactInquiryController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -79,8 +79,10 @@ Route::prefix('v1')->group(function () {
             Route::post('/contact-inquiries/{contactInquiry}/actions/whatsapp', [AdminContactInquiryController::class, 'whatsapp'])->name('contact-inquiries.actions.whatsapp');
             Route::patch('/products/{product}/status', [AdminProductController::class, 'status'])->name('products.status');
             Route::apiResource('products', AdminProductController::class)->only(['index', 'store', 'update', 'destroy']);
-            Route::apiResource('branches', AdminBranchController::class)->only(['index', 'store', 'update']);
+            Route::get('/branches/options', [AdminBranchController::class, 'options'])->name('branches.options');
+            Route::patch('/branches/{branch}/main', [AdminBranchController::class, 'setMain'])->name('branches.main');
             Route::patch('/branches/{branch}/status', [AdminBranchController::class, 'status'])->name('branches.status');
+            Route::apiResource('branches', AdminBranchController::class)->only(['index', 'store', 'update', 'destroy']);
             Route::get('/warehouses/options', [AdminWarehouseController::class, 'options'])->name('warehouses.options');
             Route::apiResource('warehouses', AdminWarehouseController::class)->only(['index', 'store', 'update']);
             Route::patch('/warehouses/{warehouse}/status', [AdminWarehouseController::class, 'status'])->name('warehouses.status');
