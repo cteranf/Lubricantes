@@ -11,11 +11,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\CreatesShippingCoverage;
 use Tests\TestCase;
 
 class OrderStabilizationTest extends TestCase
 {
-    use RefreshDatabase;
+    use CreatesShippingCoverage, RefreshDatabase;
 
     public function test_customer_can_view_their_own_order_tracking(): void
     {
@@ -190,7 +191,9 @@ class OrderStabilizationTest extends TestCase
             $order->refresh();
             $this->assertSame($trackingStatus, $order->tracking_status);
             $this->assertSame($commercialStatus, $order->status);
-            if ($trackingStatus === 'processing') $this->completeHandling($order);
+            if ($trackingStatus === 'processing') {
+                $this->completeHandling($order);
+            }
         }
 
         $this->assertNotNull($order->delivered_at);
@@ -272,7 +275,7 @@ class OrderStabilizationTest extends TestCase
         $this->postJson('/api/v1/orders', $this->orderPayload($product, 1))->assertUnprocessable();
 
         $this->assertSame(1, $product->refresh()->stock);
-        $this->assertSame(1, (int) \App\Models\WarehouseInventory::where('product_id',$product->id)->value('reserved_quantity'));
+        $this->assertSame(1, (int) \App\Models\WarehouseInventory::where('product_id', $product->id)->value('reserved_quantity'));
     }
 
     public function test_mock_payment_routes_are_unavailable_when_disabled(): void
@@ -370,6 +373,7 @@ class OrderStabilizationTest extends TestCase
         $product = Product::create($data);
         $inventory = app(InventoryService::class);
         $inventory->initializeProduct($product, $stock, $stock > 0 ? $inventory->defaultWarehouse() : null);
+
         return $product->refresh();
     }
 
@@ -401,15 +405,15 @@ class OrderStabilizationTest extends TestCase
             'subtotal' => 10,
         ]);
 
-        $item->setRelation('product',$product);
-        app(InventoryService::class)->reserveForOrder($item,$order->reserved_until);
+        $item->setRelation('product', $product);
+        app(InventoryService::class)->reserveForOrder($item, $order->reserved_until);
 
         return $order;
     }
 
     private function orderPayload(Product $product, int $quantity): array
     {
-        return [
+        return $this->withShippingCoverage([
             'shipping_info' => [
                 'address' => 'Av. Prueba 123',
                 'city' => 'Lima',
@@ -420,17 +424,21 @@ class OrderStabilizationTest extends TestCase
             'items' => [
                 ['product_id' => $product->id, 'quantity' => $quantity],
             ],
-        ];
+        ]);
     }
 
     private function completeHandling(Order $order): void
     {
-        $base='/api/v1/admin/orders/'.$order->id;
+        $base = '/api/v1/admin/orders/'.$order->id;
         $this->postJson($base.'/picking/start')->assertOk();
-        foreach ($order->items as $item) $this->patchJson($base.'/picking/items/'.$item->id,['picked_quantity'=>$item->quantity])->assertOk();
+        foreach ($order->items as $item) {
+            $this->patchJson($base.'/picking/items/'.$item->id, ['picked_quantity' => $item->quantity])->assertOk();
+        }
         $this->postJson($base.'/picking/complete')->assertOk();
         $this->postJson($base.'/packing/start')->assertOk();
-        foreach ($order->items as $item) $this->patchJson($base.'/packing/items/'.$item->id,['packed_quantity'=>$item->quantity])->assertOk();
+        foreach ($order->items as $item) {
+            $this->patchJson($base.'/packing/items/'.$item->id, ['packed_quantity' => $item->quantity])->assertOk();
+        }
         $this->postJson($base.'/packing/complete')->assertOk();
     }
 }

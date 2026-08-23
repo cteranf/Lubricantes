@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ContactInquiryController as AdminContactInquiryController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\DepartmentController as AdminDepartmentController;
+use App\Http\Controllers\Api\V1\Admin\DistrictController as AdminDistrictController;
 use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
 use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
 use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
@@ -12,14 +14,22 @@ use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliv
 use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Api\V1\Admin\ProvinceController as AdminProvinceController;
+use App\Http\Controllers\Api\V1\Admin\ShippingRateController as AdminShippingRateController;
+use App\Http\Controllers\Api\V1\Admin\ShippingZoneController as AdminShippingZoneController;
+use App\Http\Controllers\Api\V1\Admin\TerritoryImportController as AdminTerritoryImportController;
 use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\CheckoutPickupBranchController;
+use App\Http\Controllers\Api\V1\CheckoutShippingQuoteController;
 use App\Http\Controllers\Api\V1\ContactInquiryController;
+use App\Http\Controllers\Api\V1\LocationOptionController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\UserAddressController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -55,6 +65,12 @@ Route::prefix('v1')->group(function () {
 
         // Cart & Checkout
         Route::post('/cart', [CartController::class, 'store']); // Sync cart
+        Route::get('/checkout/pickup-branches', [CheckoutPickupBranchController::class, 'index']);
+        Route::post('/checkout/shipping-quote', CheckoutShippingQuoteController::class);
+        Route::get('/location/departments', [LocationOptionController::class, 'departments']);
+        Route::get('/location/provinces', [LocationOptionController::class, 'provinces']);
+        Route::get('/location/districts', [LocationOptionController::class, 'districts']);
+        Route::apiResource('addresses', UserAddressController::class)->only(['index', 'store', 'update']);
         Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
         Route::get('/orders/{id}/tracking', [App\Http\Controllers\Api\V1\OrderTrackingController::class, 'show']);
 
@@ -66,6 +82,18 @@ Route::prefix('v1')->group(function () {
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
             Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+            Route::get('/territories/import/template', [AdminTerritoryImportController::class, 'template'])->name('territories.import.template');
+            Route::post('/territories/import/preview', [AdminTerritoryImportController::class, 'preview'])->middleware('throttle:10,1')->name('territories.import.preview');
+            Route::post('/territories/import/confirm', [AdminTerritoryImportController::class, 'confirm'])->middleware('throttle:5,1')->name('territories.import.confirm');
+            Route::get('/territories/import/report', [AdminTerritoryImportController::class, 'report'])->name('territories.import.report');
+            Route::get('/territories/imports', [AdminTerritoryImportController::class, 'index'])->name('territories.imports.index');
+            Route::get('/territories/imports/{territoryImport}', [AdminTerritoryImportController::class, 'show'])->name('territories.imports.show');
+            Route::patch('/departments/{department}/status', [AdminDepartmentController::class, 'status'])->name('departments.status');
+            Route::apiResource('departments', AdminDepartmentController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::patch('/provinces/{province}/status', [AdminProvinceController::class, 'status'])->name('provinces.status');
+            Route::apiResource('provinces', AdminProvinceController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::patch('/districts/{district}/status', [AdminDistrictController::class, 'status'])->name('districts.status');
+            Route::apiResource('districts', AdminDistrictController::class)->only(['index', 'store', 'update', 'destroy']);
             Route::get('/contact-inquiries/pending-count', [AdminContactInquiryController::class, 'pendingCount'])->name('contact-inquiries.pending-count');
             Route::get('/contact-inquiries/assignable-admins', [AdminContactInquiryController::class, 'assignableAdmins'])->name('contact-inquiries.assignable-admins');
             Route::get('/contact-inquiries', [AdminContactInquiryController::class, 'index'])->name('contact-inquiries.index');
@@ -86,6 +114,10 @@ Route::prefix('v1')->group(function () {
             Route::get('/warehouses/options', [AdminWarehouseController::class, 'options'])->name('warehouses.options');
             Route::apiResource('warehouses', AdminWarehouseController::class)->only(['index', 'store', 'update']);
             Route::patch('/warehouses/{warehouse}/status', [AdminWarehouseController::class, 'status'])->name('warehouses.status');
+            Route::patch('/shipping-zones/{shippingZone}/status', [AdminShippingZoneController::class, 'status'])->name('shipping-zones.status');
+            Route::apiResource('shipping-zones', AdminShippingZoneController::class)->parameters(['shipping-zones' => 'shippingZone'])->only(['index', 'store', 'update', 'destroy']);
+            Route::patch('/shipping-rates/{shippingRate}/status', [AdminShippingRateController::class, 'status'])->name('shipping-rates.status');
+            Route::apiResource('shipping-rates', AdminShippingRateController::class)->parameters(['shipping-rates' => 'shippingRate'])->only(['index', 'store', 'update', 'destroy']);
             Route::get('/inventories', [AdminInventoryController::class, 'index'])->name('inventories.index');
             Route::get('/inventories/{product}', [AdminInventoryController::class, 'show'])->name('inventories.show');
             Route::post('/inventories/adjustments', [AdminInventoryController::class, 'adjustment'])->name('inventories.adjustments');
@@ -97,6 +129,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/orders/{order}/fulfillment/approve-transfer', [AdminOrderFulfillmentController::class, 'approveTransfer'])->name('orders.fulfillment.approve-transfer');
             Route::post('/orders/{order}/fulfillment/start-preparation', [AdminOrderFulfillmentController::class, 'startPreparation'])->name('orders.fulfillment.start');
             Route::post('/orders/{order}/fulfillment/ready', [AdminOrderFulfillmentController::class, 'ready'])->name('orders.fulfillment.ready');
+            Route::post('/orders/{order}/fulfillment/ready-for-pickup', [AdminOrderFulfillmentController::class, 'readyForPickup'])->name('orders.fulfillment.ready-for-pickup');
+            Route::post('/orders/{order}/fulfillment/picked-up', [AdminOrderFulfillmentController::class, 'pickedUp'])->name('orders.fulfillment.picked-up');
             Route::post('/orders/{order}/fulfillment/delivered', [AdminOrderFulfillmentController::class, 'delivered'])->name('orders.fulfillment.delivered');
             Route::post('/orders/{order}/fulfillment/cancel', [AdminOrderFulfillmentController::class, 'cancel'])->name('orders.fulfillment.cancel');
             Route::get('/orders/{order}/picking-packing', [AdminOrderPickingPackingController::class, 'show'])->name('orders.handling.show');

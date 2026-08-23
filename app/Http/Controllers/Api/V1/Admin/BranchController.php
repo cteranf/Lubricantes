@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
+use App\Services\TerritorySelectionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -149,9 +150,9 @@ class BranchController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string|max:2000',
             'address' => 'required|string|max:255',
-            'district' => 'required|string|max:100',
-            'province' => 'required|string|max:100',
-            'department' => 'required|string|max:100',
+            'department_id' => 'required|integer',
+            'province_id' => 'required|integer',
+            'district_id' => 'required|integer',
             'reference' => 'nullable|string|max:500',
             'phone' => 'nullable|string|max:30',
             'email' => 'nullable|email|max:255',
@@ -165,7 +166,12 @@ class BranchController extends Controller
             $rules['is_active'] = 'required|boolean';
         }
 
-        return $request->validate($rules);
+        $data = $request->validate($rules);
+        $territories = app(TerritorySelectionService::class);
+
+        return $data + $territories->snapshots($territories->resolve(
+            $data['department_id'], $data['province_id'], $data['district_id'],
+        ));
     }
 
     private function code(string $code): string

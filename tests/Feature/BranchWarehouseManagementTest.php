@@ -12,11 +12,13 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\CreatesShippingCoverage;
+use Tests\Concerns\CreatesTerritoryCatalog;
 use Tests\TestCase;
 
 class BranchWarehouseManagementTest extends TestCase
 {
-    use RefreshDatabase;
+    use CreatesShippingCoverage, CreatesTerritoryCatalog, RefreshDatabase;
 
     public function test_first_branch_becomes_main_and_second_branch_does_not(): void
     {
@@ -148,11 +150,11 @@ class BranchWarehouseManagementTest extends TestCase
         app(InventoryService::class)->initializeProduct($product, 3, $warehouse, $admin);
 
         Sanctum::actingAs(User::factory()->create(['role' => 'customer']));
-        $orderId = $this->postJson('/api/v1/orders', [
+        $orderId = $this->postJson('/api/v1/orders', $this->withShippingCoverage([
             'shipping_info' => ['address' => 'Av. Cliente 123', 'city' => 'Lima'],
             'payment_method' => 'transferencia', 'delivery_type' => 'delivery',
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
-        ])->assertCreated()->json('id');
+        ]))->assertCreated()->json('id');
 
         $this->assertDatabaseHas('order_items', ['order_id' => $orderId, 'warehouse_id' => $warehouseId]);
         $this->assertDatabaseHas('inventory_reservations', ['order_id' => $orderId, 'warehouse_id' => $warehouseId, 'status' => 'active']);
@@ -175,9 +177,12 @@ class BranchWarehouseManagementTest extends TestCase
 
     private function branchPayload(string $code): array
     {
+        $territory = $this->territory('BRANCH');
+
         return [
+            'department_id' => $territory['department']->id, 'province_id' => $territory['province']->id, 'district_id' => $territory['district']->id,
             'code' => $code, 'name' => 'Sede '.$code, 'address' => 'Av. Real 123',
-            'department' => 'Lima', 'province' => 'Lima', 'district' => 'Miraflores',
+            'department' => $territory['department']->name, 'province' => $territory['province']->name, 'district' => 'Miraflores',
             'reference' => null, 'phone' => null, 'email' => null, 'business_hours' => null,
             'pickup_instructions' => null, 'description' => null, 'allows_pickup' => true,
             'serves_public' => true, 'is_active' => true,

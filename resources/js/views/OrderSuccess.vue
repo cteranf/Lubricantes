@@ -1,73 +1,16 @@
 <template>
-    <AppLayout>
-        <div class="container mx-auto px-4 py-16 text-center">
-            <div v-if="loading" class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg">
-                <i class="pi pi-spin pi-spinner text-4xl text-blue-600"></i>
-                <p class="mt-4 text-gray-600">Cargando el pedido...</p>
-            </div>
-
-            <div v-else-if="error" class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg border border-red-100">
-                <i class="pi pi-exclamation-triangle text-5xl text-red-500"></i>
-                <h1 class="text-2xl font-bold mt-4">No se pudo mostrar el pedido</h1>
-                <p class="text-gray-600 my-6">{{ error }}</p>
-                <router-link to="/orders" class="text-blue-600 font-bold hover:underline">Ir a mis pedidos</router-link>
-            </div>
-
-            <div v-else class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg border border-green-100">
-                <div class="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <i class="pi pi-check text-4xl font-bold"></i>
-                </div>
-
-                <h1 class="text-3xl font-bold text-gray-800 mb-2">¡Pedido registrado!</h1>
-                <p class="text-gray-600 mb-8">Tu pedido fue registrado correctamente. Puedes consultar su estado desde el seguimiento.</p>
-
-                <div class="bg-gray-50 rounded-lg p-4 mb-8 text-left">
-                    <p class="text-sm text-gray-500 mb-1">Número de Pedido:</p>
-                    <p class="font-bold text-lg text-gray-800">#{{ order.id }}</p>
-                    <p class="text-sm text-gray-500 mt-3">Estado de pago: <span class="font-semibold">{{ order.payment_status }}</span></p>
-                </div>
-
-                <div class="space-y-4">
-                    <router-link :to="`/orders/${order.id}/tracking`" class="block w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2">
-                        <i class="pi pi-map-marker"></i>
-                        Seguir mi Pedido
-                    </router-link>
-                    <router-link to="/catalog" class="block w-full bg-gray-100 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-200 transition">
-                        Continuar Comprando
-                    </router-link>
-                </div>
-            </div>
-        </div>
-    </AppLayout>
+    <AppLayout><div class="container mx-auto px-4 py-16 text-center"><div v-if="loading" class="mx-auto max-w-lg rounded-lg bg-white p-8 shadow"><i class="pi pi-spin pi-spinner text-4xl text-blue-600"></i></div><div v-else-if="error" class="mx-auto max-w-lg rounded-lg bg-white p-8 text-red-700 shadow">{{ error }}</div><div v-else class="mx-auto max-w-lg rounded-lg border border-green-100 bg-white p-8 shadow"><i class="pi pi-check-circle text-6xl text-green-600"></i><h1 class="mt-4 text-3xl font-bold">¡Pedido registrado!</h1><p class="mt-2 text-slate-600">Pedido #{{ order.id }} · Pago {{ order.payment_status }}</p>
+        <div v-if="order.delivery_type === 'pickup'" class="my-6 rounded-lg bg-blue-50 p-4 text-left"><b>Recojo en sede · {{ order.pickup_branch_name_snapshot }}</b><p>{{ order.pickup_address_snapshot }}<template v-if="order.pickup_district_snapshot"> — {{ order.pickup_district_snapshot }}</template></p><p v-if="order.pickup_business_hours_snapshot" class="mt-2 text-sm">Horario: {{ order.pickup_business_hours_snapshot }}</p><p v-if="order.pickup_instructions_snapshot" class="mt-1 text-sm">{{ order.pickup_instructions_snapshot }}</p><p class="mt-2 text-sm text-slate-600">Te avisaremos cuando esté listo y comience el plazo de recojo.</p></div>
+        <div v-else class="my-6 rounded-lg bg-slate-50 p-4 text-left"><b>Envío a domicilio</b><p>{{ order.shipping_info?.address }} — {{ order.shipping_district_snapshot || order.shipping_info?.district }}</p><p class="mt-1 text-sm">Zona: {{ order.shipping_zone_name_snapshot || 'Configuración histórica' }}</p><p v-if="order.shipping_estimated_days_min_snapshot != null" class="text-sm">Plazo: {{ estimate(order) }}</p><p class="mt-2 font-bold">Costo de envío: S/ {{ order.shipping_amount || '0.00' }}</p></div>
+        <div class="mb-6 space-y-1 border-t pt-4 text-sm"><div class="flex justify-between"><span>Subtotal</span><span>S/ {{ order.subtotal || order.total }}</span></div><div class="flex justify-between"><span>Descuentos</span><span>− S/ {{ order.discount_total || '0.00' }}</span></div><div class="flex justify-between text-lg font-black"><span>Total</span><span>S/ {{ order.total }}</span></div></div>
+        <div class="space-y-3"><router-link :to="`/orders/${order.id}/tracking`" class="block rounded-lg bg-blue-600 py-3 font-bold text-white">Seguir mi pedido</router-link><router-link to="/catalog" class="block rounded-lg bg-slate-100 py-3 font-bold">Continuar comprando</router-link></div></div></div></AppLayout>
 </template>
-
 <script setup>
-import AppLayout from '@/layouts/AppLayout.vue';
-import api from '@/api';
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-
-const route = useRoute();
-const order = ref(null);
-const loading = ref(true);
-const error = ref(null);
-
-onMounted(async () => {
-    if (!route.params.id) {
-        error.value = 'Falta el identificador del pedido.';
-        loading.value = false;
-        return;
-    }
-
-    try {
-        const response = await api.get(`/orders/${route.params.id}`);
-        order.value = response.data;
-    } catch (e) {
-        error.value = e.response?.status === 404
-            ? 'El pedido no existe o no pertenece a tu cuenta.'
-            : 'Ocurrió un error al cargar el pedido.';
-    } finally {
-        loading.value = false;
-    }
-});
+import AppLayout from '@/layouts/AppLayout.vue';
+import api from '@/api';
+const route = useRoute(), order = ref(null), loading = ref(true), error = ref('');
+const estimate = value => value.shipping_estimated_days_min_snapshot === value.shipping_estimated_days_max_snapshot ? `${value.shipping_estimated_days_min_snapshot} día(s)` : `${value.shipping_estimated_days_min_snapshot}–${value.shipping_estimated_days_max_snapshot} días`;
+onMounted(async () => { try { order.value = (await api.get(`/orders/${route.params.id}`)).data; } catch (exception) { error.value = exception.response?.status === 404 ? 'El pedido no existe o no pertenece a tu cuenta.' : 'No se pudo cargar el pedido.'; } finally { loading.value = false; } });
 </script>

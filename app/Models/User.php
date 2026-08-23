@@ -58,6 +58,11 @@ class User extends Authenticatable
         return $this->hasMany(Order::class);
     }
 
+    public function savedAddresses()
+    {
+        return $this->hasMany(UserAddress::class);
+    }
+
     public function assignedContactInquiries()
     {
         return $this->hasMany(ContactInquiry::class, 'assigned_to');

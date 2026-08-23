@@ -15,11 +15,13 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use LogicException;
+use Tests\Concerns\CreatesShippingCoverage;
+use Tests\Concerns\CreatesTerritoryCatalog;
 use Tests\TestCase;
 
 class InventoryPhaseTwoTest extends TestCase
 {
-    use RefreshDatabase;
+    use CreatesShippingCoverage, CreatesTerritoryCatalog, RefreshDatabase;
 
     public function test_admin_can_create_branch_and_customer_cannot(): void
     {
@@ -355,18 +357,20 @@ class InventoryPhaseTwoTest extends TestCase
         unset($attributes['stock']);
         $product = Product::create(array_merge(['name' => 'Producto '.Str::random(6), 'slug' => 'producto-'.Str::uuid(), 'sku' => 'SKU-'.Str::random(8), 'price' => 10, 'is_active' => true], $attributes));
         $inventory = app(InventoryService::class);
-        $inventory->initializeProduct($product,$stock,$stock > 0 ? $inventory->defaultWarehouse() : null);
+        $inventory->initializeProduct($product, $stock, $stock > 0 ? $inventory->defaultWarehouse() : null);
 
         return $product->refresh();
     }
 
     private function branchPayload(string $code): array
     {
-        return ['code' => $code, 'name' => 'Sede '.$code, 'address' => 'Av. Prueba 123', 'department' => 'Lima', 'province' => 'Lima', 'district' => 'Miraflores', 'allows_pickup' => false, 'serves_public' => false, 'is_active' => true];
+        $territory = $this->territory('INVENTORY');
+
+        return $this->territoryIds('INVENTORY') + ['code' => $code, 'name' => 'Sede '.$code, 'address' => 'Av. Prueba 123', 'department' => $territory['department']->name, 'province' => $territory['province']->name, 'district' => $territory['district']->name, 'allows_pickup' => false, 'serves_public' => false, 'is_active' => true];
     }
 
-    private function orderPayload(Product $product,int $quantity): array
+    private function orderPayload(Product $product, int $quantity): array
     {
-        return ['shipping_info' => ['address' => 'Av. Prueba 123', 'city' => 'Lima'], 'payment_method' => 'transferencia', 'delivery_type' => 'delivery', 'items' => [['product_id' => $product->id, 'quantity' => $quantity]]];
+        return $this->withShippingCoverage(['shipping_info' => ['address' => 'Av. Prueba 123', 'city' => 'Lima'], 'payment_method' => 'transferencia', 'delivery_type' => 'delivery', 'items' => [['product_id' => $product->id, 'quantity' => $quantity]]]);
     }
 }

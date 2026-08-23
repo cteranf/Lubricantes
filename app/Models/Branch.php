@@ -11,6 +11,7 @@ class Branch extends Model
 
     protected $fillable = [
         'code', 'name', 'description', 'address', 'district', 'province', 'department',
+        'department_id', 'province_id', 'district_id',
         'reference', 'phone', 'email', 'business_hours', 'pickup_instructions',
         'allows_pickup', 'serves_public', 'is_main', 'is_active',
     ];
@@ -32,5 +33,20 @@ class Branch extends Model
     public function warehouses()
     {
         return $this->hasMany(Warehouse::class);
+    }
+
+    public function departmentRelation()
+    {
+        return $this->belongsTo(Department::class, 'department_id');
+    }
+
+    public function provinceRelation()
+    {
+        return $this->belongsTo(Province::class, 'province_id');
+    }
+
+    public function districtRelation()
+    {
+        return $this->belongsTo(District::class, 'district_id');
     }
 }

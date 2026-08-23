@@ -79,9 +79,18 @@
                             Información de {{ order.delivery_type === 'delivery' ? 'Envío' : 'Recojo' }}
                         </h3>
                         <div class="space-y-2 text-gray-700">
-                            <p v-if="order.delivery_type === 'delivery'"><span class="font-medium">Dirección:</span> {{ order.shipping_info.address }}</p>
-                            <p v-else class="font-bold text-blue-700">Recojo en Tienda Principal</p>
-                            <p><span class="font-medium">Ciudad:</span> {{ order.shipping_info.city }}</p>
+                            <template v-if="order.delivery_type === 'delivery'"><p><span class="font-medium">Dirección:</span> {{ order.shipping_info.address }}</p><p><span class="font-medium">Distrito:</span> {{ order.shipping_quote?.district || order.shipping_info?.district || 'Histórico' }}</p><p><span class="font-medium">Zona:</span> {{ order.shipping_quote?.zone_name || 'Configuración histórica' }}</p><p v-if="order.shipping_quote?.estimated_days_min != null"><span class="font-medium">Plazo estimado:</span> {{ order.shipping_quote.estimated_days_min }}–{{ order.shipping_quote.estimated_days_max }} días</p></template>
+                            <template v-else-if="order.pickup">
+                                <p class="font-bold text-blue-700">{{ order.pickup.name || 'Sede histórica' }}</p>
+                                <p><span class="font-medium">Dirección:</span> {{ order.pickup.address }}<template v-if="order.pickup.district"> — {{ order.pickup.district }}</template></p>
+                                <p v-if="order.pickup.business_hours"><span class="font-medium">Horario:</span> {{ order.pickup.business_hours }}</p>
+                                <p v-if="order.pickup.instructions"><span class="font-medium">Instrucciones:</span> {{ order.pickup.instructions }}</p>
+                                <p v-if="order.pickup.deadline_at"><span class="font-medium">Fecha límite:</span> {{ formatDateTime(order.pickup.deadline_at) }}</p>
+                                <p v-if="order.pickup.deadline_status==='expired'" class="rounded bg-amber-50 p-2 font-semibold text-amber-900">Recojo vencido. Requiere revisión administrativa.</p>
+                                <p v-else-if="order.pickup.deadline_status==='within_deadline'" class="font-semibold text-emerald-700">Dentro del plazo de recojo.</p>
+                                <p v-else-if="order.pickup.deadline_status==='picked_up'" class="font-semibold text-emerald-700">Pedido recogido.</p>
+                            </template>
+                            <p v-if="order.shipping_info?.city"><span class="font-medium">Ciudad:</span> {{ order.shipping_info.city }}</p>
                             <p><span class="font-medium">Teléfono:</span> {{ order.shipping_info.phone }}</p>
                             <div v-if="order.tracking_notes" class="mt-4 p-3 bg-gray-50 rounded italic text-sm border-l-4 border-blue-400">
                                 "{{ order.tracking_notes }}"
@@ -119,6 +128,7 @@
                                 </div>
                                 <p class="font-bold">S/ {{ (item.quantity * item.price).toFixed(2) }}</p>
                             </div>
+                            <div class="space-y-1 border-t pt-4 text-sm"><div class="flex justify-between"><span>Subtotal</span><span>S/ {{ order.subtotal }}</span></div><div class="flex justify-between"><span>Descuentos</span><span>− S/ {{ order.discount_total }}</span></div><div class="flex justify-between"><span>Envío</span><span>S/ {{ order.shipping_amount }}</span></div></div>
                             <div class="border-t pt-4 flex justify-between font-bold text-xl">
                                 <span>{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total del pedido' }}</span>
                                 <span class="text-blue-600">S/ {{ order.total }}</span>

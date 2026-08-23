@@ -2,20 +2,21 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Http\Controllers\Controller;
 use App\Exceptions\InventoryException;
+use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\InventoryService;
+use App\Services\MoneyService;
 use App\Services\OrderStateService;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PaymentController extends Controller
 {
-    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService) {}
+    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService, private MoneyService $money) {}
 
     /**
      * Create payment preference/checkout
@@ -31,6 +32,9 @@ class PaymentController extends Controller
         // Verify order belongs to authenticated user
         if ($order->user_id !== $request->user()->id) {
             return response()->json(['message' => 'Unauthorized'], 403);
+        }
+        if ($order->payment_method !== 'card') {
+            throw ValidationException::withMessages(['order_id' => ['Este pedido no utiliza pago con tarjeta.']]);
         }
 
         // Prepare order data for payment gateway
@@ -51,15 +55,16 @@ class PaymentController extends Controller
         ];
 
         try {
-            $gateway = PaymentGatewayFactory::create();
-            $paymentData = $gateway->createPayment($orderData);
+            $paymentData = DB::transaction(function () use ($order, $orderData) {
+                $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+                if ($locked->payment_id && is_array($locked->payment_data)) {
+                    return $locked->payment_data;
+                }
+                $created = PaymentGatewayFactory::create()->createPayment($orderData);
+                $locked->update(['payment_id' => $created['id'], 'payment_status' => 'pending', 'payment_data' => $created]);
 
-            // Update order with payment info
-            $order->update([
-                'payment_id' => $paymentData['id'],
-                'payment_status' => 'pending',
-                'payment_data' => $paymentData,
-            ]);
+                return $created;
+            });
 
             return response()->json([
                 'payment_id' => $paymentData['id'],
@@ -105,7 +110,7 @@ class PaymentController extends Controller
         } catch (ValidationException $e) {
             throw $e;
         } catch (InventoryException $e) {
-            throw ValidationException::withMessages(['inventory'=>[$e->getMessage()]]);
+            throw ValidationException::withMessages(['inventory' => [$e->getMessage()]]);
         } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
             throw $e;
         } catch (\Exception $e) {
@@ -225,26 +230,31 @@ class PaymentController extends Controller
     {
         try {
             $order = DB::transaction(function () use ($order, $paymentData) {
-            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            $wasCanceled = in_array($locked->status, ['canceled', 'rejected'], true);
-            $wasPaid = $locked->payment_status === 'approved' || $locked->paid_at || $this->inventoryService->orderHasConsumedReservation($locked);
-            $usesReservations = $this->inventoryService->orderUsesReservationFlow($locked);
-            $updated = $this->orderStateService->applyPaymentStatus($locked, $paymentData);
-            if ($updated->payment_status === 'approved') {
-                if ($usesReservations) $this->inventoryService->consumeOrderReservation($updated);
-                if (!$updated->paid_at) $updated->update(['paid_at'=>now()]);
-            } elseif (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
-                if ($wasPaid || !$usesReservations) {
-                    $updated->items()->with(['product', 'warehouse'])->get()
-                        ->each(fn ($item) => $this->inventoryService->returnCancellation($item));
-                } else {
-                    $this->inventoryService->releaseOrderReservation($updated);
+                $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+                $wasCanceled = in_array($locked->status, ['canceled', 'rejected'], true);
+                $wasPaid = $locked->payment_status === 'approved' || $locked->paid_at || $this->inventoryService->orderHasConsumedReservation($locked);
+                $usesReservations = $this->inventoryService->orderUsesReservationFlow($locked);
+                $updated = $this->orderStateService->applyPaymentStatus($locked, $paymentData);
+                if ($updated->payment_status === 'approved') {
+                    if ($usesReservations) {
+                        $this->inventoryService->consumeOrderReservation($updated);
+                    }
+                    if (! $updated->paid_at) {
+                        $updated->update(['paid_at' => now()]);
+                    }
+                } elseif (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
+                    if ($wasPaid || ! $usesReservations) {
+                        $updated->items()->with(['product', 'warehouse'])->get()
+                            ->each(fn ($item) => $this->inventoryService->returnCancellation($item));
+                    } else {
+                        $this->inventoryService->releaseOrderReservation($updated);
+                    }
                 }
-            }
-            return $updated->refresh();
+
+                return $updated->refresh();
             });
         } catch (InventoryException $e) {
-            throw ValidationException::withMessages(['inventory'=>[$e->getMessage()]]);
+            throw ValidationException::withMessages(['inventory' => [$e->getMessage()]]);
         }
 
         Log::info("Order #{$order->id} updated to payment_status: {$order->payment_status}");
@@ -268,7 +278,7 @@ class PaymentController extends Controller
         }
 
         if (array_key_exists('transaction_amount', $paymentData)
-            && abs((float) $paymentData['transaction_amount'] - (float) $order->total) > 0.01) {
+            && $this->money->toMinor((string) $paymentData['transaction_amount']) !== $this->money->toMinor((string) $order->total)) {
             throw ValidationException::withMessages([
                 'payment' => ['El monto confirmado no coincide con el total del pedido.'],
             ]);

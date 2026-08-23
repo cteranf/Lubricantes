@@ -64,9 +64,9 @@
                         <label class="text-sm font-medium">Código<input v-model="form.code" required maxlength="50" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
                         <label class="text-sm font-medium">Nombre<input v-model="form.name" required maxlength="255" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
                         <label class="text-sm font-medium md:col-span-2">Dirección<input v-model="form.address" required maxlength="255" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
-                        <label class="text-sm font-medium">Departamento<input v-model="form.department" required maxlength="100" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
-                        <label class="text-sm font-medium">Provincia<input v-model="form.province" required maxlength="100" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
-                        <label class="text-sm font-medium">Distrito<input v-model="form.district" required maxlength="100" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
+                        <label class="text-sm font-medium">Departamento<select v-model="form.department_id" required class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2" @change="changeDepartment"><option :value="null" disabled>Selecciona</option><option v-for="item in departments" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+                        <label class="text-sm font-medium">Provincia<select v-model="form.province_id" required :disabled="!form.department_id" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" @change="changeProvince"><option :value="null" disabled>Selecciona</option><option v-for="item in provinces" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+                        <label class="text-sm font-medium">Distrito<select v-model="form.district_id" required :disabled="!form.province_id" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100"><option :value="null" disabled>Selecciona</option><option v-for="item in districts" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
                         <label class="text-sm font-medium">Referencia <span class="font-normal text-slate-500">(opcional)</span><input v-model="form.reference" maxlength="500" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
                         <label class="text-sm font-medium">Teléfono <span class="font-normal text-slate-500">(opcional)</span><input v-model="form.phone" maxlength="30" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
                         <label class="text-sm font-medium">Correo <span class="font-normal text-slate-500">(opcional)</span><input v-model="form.email" type="email" maxlength="255" class="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 p-2"></label>
@@ -103,10 +103,11 @@ const loading = ref(false);
 const modal = ref(false);
 const saving = ref(false);
 const form = ref({});
+const departments = ref([]), provinces = ref([]), districts = ref([]);
 let timer;
 
 const emptyForm = () => ({
-    code: '', name: '', address: '', department: '', province: '', district: '', reference: '',
+    code: '', name: '', address: '', department_id: null, province_id: null, district_id: null, reference: '',
     phone: '', email: '', business_hours: '', pickup_instructions: '', description: '',
     allows_pickup: false, serves_public: false, is_active: true,
 });
@@ -122,7 +123,9 @@ function load() {
         finally { loading.value = false; }
     }, 180);
 }
-function open(item = null) { form.value = item ? { ...item } : emptyForm(); modal.value = true; }
+async function open(item = null) { form.value = item ? { ...item } : emptyForm(); provinces.value = form.value.department_id ? (await api.get('/location/provinces', { params: { department_id: form.value.department_id } })).data : []; districts.value = form.value.province_id ? (await api.get('/location/districts', { params: { province_id: form.value.province_id } })).data : []; modal.value = true; }
+async function changeDepartment() { form.value.province_id = null; form.value.district_id = null; districts.value = []; provinces.value = form.value.department_id ? (await api.get('/location/provinces', { params: { department_id: form.value.department_id } })).data : []; }
+async function changeProvince() { form.value.district_id = null; districts.value = form.value.province_id ? (await api.get('/location/districts', { params: { province_id: form.value.province_id } })).data : []; }
 function close() { if (!saving.value) modal.value = false; }
 async function save() {
     saving.value = true;
@@ -164,5 +167,5 @@ function remove(item) {
     });
 }
 
-onMounted(load);
+onMounted(async () => { departments.value = (await api.get('/location/departments')).data; load(); });
 </script>

@@ -1,117 +1,18 @@
 <template>
-    <AppLayout>
-         <div class="container mx-auto px-4 py-8">
-            <h1 class="text-3xl font-bold mb-8">Mis Pedidos</h1>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <!-- Sidebar (Should be component in real app) -->
-                <div class="bg-white rounded-lg shadow h-fit">
-                     <ul class="text-sm">
-                        <li><router-link to="/profile" class="block px-6 py-4 border-l-4 border-transparent hover:bg-gray-50 hover:text-blue-600">Información Personal</router-link></li>
-                        <li><router-link to="/orders" class="block px-6 py-4 border-l-4 border-blue-600 bg-blue-50 text-blue-700 font-bold">Mis Pedidos</router-link></li>
-                        <li><button @click="authStore.logout(); router.push('/login')" class="w-full text-left px-6 py-4 border-l-4 border-transparent hover:bg-red-50 hover:text-red-600 text-red-500">Cerrar Sesión</button></li>
-                    </ul>
-                </div>
-
-                <!-- Orders List -->
-                <div class="col-span-1 md:col-span-2 space-y-6">
-                    <div v-if="loading" class="text-center py-10">Cargando pedidos...</div>
-                    <div v-else-if="error" class="bg-white rounded-lg shadow p-8 text-center border border-red-100">
-                        <i class="pi pi-exclamation-triangle text-4xl text-red-500 mb-4"></i>
-                        <p class="text-gray-700">{{ error }}</p>
-                        <button @click="fetchOrders" class="mt-4 text-blue-600 font-bold hover:underline">Reintentar</button>
-                    </div>
-                    <div v-else-if="orders.length === 0" class="bg-white rounded-lg shadow p-8 text-center">
-                        <i class="pi pi-inbox text-4xl text-gray-300 mb-4"></i>
-                        <p class="text-gray-500">Aún no has realizado ningún pedido.</p>
-                        <router-link to="/catalog" class="mt-4 inline-block text-blue-600 hover:underline">Ir a comprar</router-link>
-                    </div>
-                    
-                    <div v-for="order in orders" :key="order.id" class="bg-white rounded-lg shadow overflow-hidden border">
-                        <div class="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
-                            <div>
-                                <h3 class="font-bold text-gray-700">Pedido #{{ order.id }}</h3>
-                                <p class="text-sm text-gray-500">{{ formatDate(order.created_at) }}</p>
-                            </div>
-                            <span :class="statusClass(order.status)" class="px-3 py-1 rounded-full text-xs font-bold uppercase">{{ order.status }}</span>
-                        </div>
-                        <div class="p-6">
-                            <div class="space-y-4 mb-4">
-                                <div v-for="item in order.items" :key="item.id" class="flex justify-between items-center">
-                                    <div class="flex items-center">
-                                        <span class="text-gray-500 text-sm font-bold mr-3">{{ item.quantity }}x</span>
-                                        <span>{{ item.product?.name || 'Producto' }}</span>
-                                    </div>
-                                    <span class="font-medium text-sm">S/ {{ item.subtotal }}</span>
-                                </div>
-                            </div>
-                            <div class="border-t pt-4 flex justify-between items-center">
-                                <router-link 
-                                    :to="`/orders/${order.id}/tracking`" 
-                                    class="text-blue-600 hover:text-blue-800 font-bold text-sm flex items-center gap-2"
-                                >
-                                    <i class="pi pi-map-marker"></i>
-                                    Seguir Pedido
-                                </router-link>
-                                <div class="text-right">
-                                    <span class="block text-gray-500 text-xs">Total del Pedido</span>
-                                    <span class="font-bold text-xl text-blue-600">S/ {{ order.total }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </AppLayout>
+    <AppLayout><div class="container mx-auto px-4 py-8"><h1 class="mb-8 text-3xl font-bold">Mis pedidos</h1><div class="grid gap-8 md:grid-cols-[16rem_1fr]"><aside class="h-fit rounded-lg bg-white shadow"><router-link to="/profile" class="block px-6 py-4 hover:bg-slate-50">Información personal</router-link><router-link to="/orders" class="block border-l-4 border-blue-600 bg-blue-50 px-6 py-4 font-bold text-blue-700">Mis pedidos</router-link><button class="w-full px-6 py-4 text-left text-red-600 hover:bg-red-50" @click="authStore.logout(); router.push('/login')">Cerrar sesión</button></aside><main class="space-y-5"><div v-if="loading" class="py-10 text-center">Cargando pedidos…</div><div v-else-if="error" class="rounded-lg bg-white p-8 text-center text-red-700 shadow">{{ error }} <button class="font-bold underline" @click="fetchOrders">Reintentar</button></div><div v-else-if="!orders.length" class="rounded-lg bg-white p-8 text-center text-slate-500 shadow">Aún no tienes pedidos.</div>
+        <article v-for="order in orders" :key="order.id" class="overflow-hidden rounded-lg border bg-white shadow"><header class="flex items-center justify-between border-b bg-slate-50 px-5 py-4"><div><b>Pedido #{{ order.id }}</b><p class="text-sm text-slate-500">{{ formatDate(order.created_at) }}</p></div><span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">{{ statusLabel(order) }}</span></header><div class="p-5"><div v-if="order.delivery_type === 'pickup'" class="mb-4 rounded-lg bg-blue-50 p-3 text-sm"><b>Recojo en sede · {{ order.pickup_branch_name_snapshot || 'Información histórica no disponible' }}</b><p>{{ order.pickup_address_snapshot }}<template v-if="order.pickup_district_snapshot"> — {{ order.pickup_district_snapshot }}</template></p><p v-if="order.pickup_deadline_at">Fecha límite: {{ formatDate(order.pickup_deadline_at) }} · {{ deadlineLabel(order.pickup_deadline_status) }}</p></div><div v-else class="mb-4 rounded-lg bg-slate-50 p-3 text-sm"><b>Envío a domicilio · {{ order.shipping_district_snapshot || order.shipping_info?.district || 'Dirección histórica' }}</b><p>{{ order.shipping_info?.address }}</p><p>{{ order.shipping_zone_name_snapshot || 'Configuración histórica' }} · Envío S/ {{ order.shipping_amount || '0.00' }}</p></div><div v-for="item in order.items" :key="item.id" class="flex justify-between py-2"><span>{{ item.quantity }}× {{ item.product?.name || 'Producto' }}</span><b>S/ {{ item.subtotal }}</b></div><footer class="mt-3 flex items-end justify-between border-t pt-4"><router-link :to="`/orders/${order.id}/tracking`" class="font-bold text-blue-600"><i class="pi pi-map-marker mr-2"></i>Ver seguimiento</router-link><div class="text-right"><span class="block text-xs text-slate-500">Envío S/ {{ order.shipping_amount || '0.00' }} · Total</span><b class="text-xl text-blue-600">S/ {{ order.total }}</b></div></footer></div></article>
+    </main></div></div></AppLayout>
 </template>
-
 <script setup>
+import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useAuthStore } from '@/stores/auth';
-import { useRouter } from 'vue-router';
-import { ref, onMounted } from 'vue';
 import api from '@/api';
-
-const authStore = useAuthStore();
-const router = useRouter();
-const orders = ref([]);
-const loading = ref(true);
-const error = ref(null);
-
-const fetchOrders = async () => {
-    loading.value = true;
-    error.value = null;
-    try {
-        const response = await api.get('/orders');
-        orders.value = response.data;
-    } catch (e) {
-        error.value = 'No se pudieron cargar tus pedidos. Inténtalo nuevamente.';
-    } finally {
-        loading.value = false;
-    }
-};
-
-const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString();
-};
-
-const statusClass = (status) => {
-    const classes = {
-        pending: 'bg-yellow-100 text-yellow-700',
-        paid: 'bg-blue-100 text-blue-700',
-        shipped: 'bg-indigo-100 text-indigo-700',
-        delivered: 'bg-green-100 text-green-700',
-        canceled: 'bg-red-100 text-red-700',
-    };
-    return classes[status] || 'bg-gray-100 text-gray-700';
-};
-
-onMounted(() => {
-    if (!authStore.isAuthenticated) {
-        router.push('/login');
-    } else {
-        fetchOrders();
-    }
-});
+const authStore = useAuthStore(), router = useRouter(), orders = ref([]), loading = ref(true), error = ref('');
+const formatDate = value => value ? new Date(value).toLocaleString('es-PE') : '—';
+const deadlineLabel = status => ({ preparing: 'En preparación', within_deadline: 'Dentro del plazo', expired: 'Recojo vencido', picked_up: 'Recogido' }[status] || '');
+const statusLabel = order => order.delivery_type === 'pickup' ? ({ ready_for_pickup: 'Listo para recoger', picked_up: 'Recogido', processing: 'En preparación', pending: 'Pendiente', confirmed: 'Confirmado', canceled: 'Cancelado' }[order.tracking_status] || order.tracking_status) : order.status;
+async function fetchOrders() { loading.value = true; error.value = ''; try { orders.value = (await api.get('/orders')).data; } catch { error.value = 'No se pudieron cargar tus pedidos.'; } finally { loading.value = false; } }
+onMounted(() => authStore.isAuthenticated ? fetchOrders() : router.push('/login'));
 </script>
