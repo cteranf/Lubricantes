@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ContactInquiryController as AdminContactInquiryController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\DeliveryDriverController as AdminDeliveryDriverController;
+use App\Http\Controllers\Api\V1\Admin\DeliveryVehicleController as AdminDeliveryVehicleController;
 use App\Http\Controllers\Api\V1\Admin\DepartmentController as AdminDepartmentController;
 use App\Http\Controllers\Api\V1\Admin\DistrictController as AdminDistrictController;
 use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
@@ -54,6 +56,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/sliders', [App\Http\Controllers\Api\V1\SliderController::class, 'index']);
     Route::get('/news', [App\Http\Controllers\Api\V1\NewsController::class, 'index']);
     Route::get('/news/{slug}', [App\Http\Controllers\Api\V1\NewsController::class, 'show']);
+
+    // Public Payment Methods
+    Route::get('/payment-methods', [App\Http\Controllers\Api\V1\PaymentMethodController::class, 'index']);
 
     // Payment Webhook (public - no auth required)
     Route::post('/payment/webhook', [App\Http\Controllers\Api\V1\PaymentController::class, 'webhook']);
@@ -143,6 +148,12 @@ Route::prefix('v1')->group(function () {
             Route::post('/orders/{order}/incidents', [AdminOrderPickingPackingController::class, 'reportIncident'])->name('orders.incidents.store');
             Route::patch('/orders/{order}/incidents/{incident}/resolve', [AdminOrderPickingPackingController::class, 'resolveIncident'])->name('orders.incidents.resolve');
             Route::get('/delivery/options', [AdminOrderDeliveryController::class, 'options'])->name('delivery.options');
+            Route::apiResource('delivery-drivers', AdminDeliveryDriverController::class)->only(['index', 'show', 'store', 'update']);
+            Route::patch('/delivery-drivers/{deliveryDriver}/status', [AdminDeliveryDriverController::class, 'status'])->name('delivery-drivers.status');
+            Route::patch('/delivery-drivers/{deliveryDriver}/availability', [AdminDeliveryDriverController::class, 'availability'])->name('delivery-drivers.availability');
+            Route::apiResource('delivery-vehicles', AdminDeliveryVehicleController::class)->only(['index', 'show', 'store', 'update']);
+            Route::patch('/delivery-vehicles/{deliveryVehicle}/status', [AdminDeliveryVehicleController::class, 'status'])->name('delivery-vehicles.status');
+            Route::patch('/delivery-vehicles/{deliveryVehicle}/availability', [AdminDeliveryVehicleController::class, 'availability'])->name('delivery-vehicles.availability');
             Route::get('/orders/{order}/delivery', [AdminOrderDeliveryController::class, 'show'])->name('orders.delivery.show');
             Route::post('/orders/{order}/delivery/initialize', [AdminOrderDeliveryController::class, 'initialize'])->name('orders.delivery.initialize');
             Route::patch('/orders/{order}/delivery/method', [AdminOrderDeliveryController::class, 'method'])->name('orders.delivery.method');
@@ -165,6 +176,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');
             Route::patch('/brands/{brand}/status', [AdminBrandController::class, 'status'])->name('brands.status');
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
+            Route::get('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'show'])->name('payment-settings.show');
+            Route::put('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'update'])->name('payment-settings.update');
             Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class)->only(['index', 'store', 'update', 'destroy']);
         });
     });

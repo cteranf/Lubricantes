@@ -3,19 +3,18 @@
 namespace App\Services\PaymentGateway;
 
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 
 /**
  * Mock Payment Gateway for testing without real credentials
- * Simulates MercadoPago behavior for development/testing
+ * Simulates card payment behavior for development and test environments
  */
 class MockPaymentGateway implements PaymentGatewayInterface
 {
     public function createPayment(array $orderData): array
     {
-        // Simulate creating a payment preference
-        $mockId = 'MOCK-'.uniqid();
+        $mockId = 'MOCK-'.Str::random(32);
 
-        // Generate mock checkout URL using url() helper (includes current host and port)
         $checkoutUrl = URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), [
             'paymentId' => $mockId,
             'order_id' => $orderData['order_id'],
@@ -30,21 +29,20 @@ class MockPaymentGateway implements PaymentGatewayInterface
 
     public function verifyPayment(string $paymentId): array
     {
-        // Simulate payment verification
         return [
             'id' => $paymentId,
-            'status' => 'approved', // Always approved in mock
+            'status' => 'approved',
             'status_detail' => 'accredited',
             'external_reference' => null,
             'transaction_amount' => 0,
-            'payment_method_id' => 'mock',
+            'payment_method_id' => 'mock_card',
         ];
     }
 
     public function refundPayment(string $paymentId, float $amount): array
     {
         return [
-            'id' => 'REFUND-'.uniqid(),
+            'id' => 'REFUND-'.Str::random(32),
             'status' => 'approved',
             'amount' => $amount,
         ];
@@ -52,14 +50,13 @@ class MockPaymentGateway implements PaymentGatewayInterface
 
     public function handleWebhook(array $payload): array
     {
-        // Mock webhook handling
         return [
             'id' => $payload['payment_id'] ?? 'MOCK-PAYMENT',
-            'status' => 'approved',
+            'status' => $payload['status'] ?? 'approved',
             'status_detail' => 'accredited',
             'external_reference' => $payload['order_id'] ?? null,
             'transaction_amount' => 0,
-            'payment_method_id' => 'mock',
+            'payment_method_id' => 'mock_card',
         ];
     }
 }

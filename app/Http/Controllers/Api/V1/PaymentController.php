@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Api\V1;
 use App\Exceptions\InventoryException;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\PaymentTransaction;
+use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
+use App\Services\OrderPaymentService;
 use App\Services\OrderStateService;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
+use App\Services\PaymentSettingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -16,7 +20,14 @@ use Illuminate\Validation\ValidationException;
 
 class PaymentController extends Controller
 {
-    public function __construct(private OrderStateService $orderStateService, private InventoryService $inventoryService, private MoneyService $money) {}
+    public function __construct(
+        private OrderStateService $orderStateService,
+        private InventoryService $inventoryService,
+        private MoneyService $money,
+        private PaymentSettingService $paymentSettings,
+        private OrderPaymentService $orderPaymentService,
+        private InventoryReservationExpirationService $reservationExpiration,
+    ) {}
 
     /**
      * Create payment preference/checkout
@@ -35,6 +46,36 @@ class PaymentController extends Controller
         }
         if ($order->payment_method !== 'card') {
             throw ValidationException::withMessages(['order_id' => ['Este pedido no utiliza pago con tarjeta.']]);
+        }
+        if (! $this->paymentSettings->isMethodAllowed('card', $order->delivery_type)) {
+            throw ValidationException::withMessages(['order_id' => ['El pago con tarjeta no está disponible actualmente.']]);
+        }
+        if ($order->payment_status === 'approved' || $order->paid_at) {
+            throw ValidationException::withMessages(['order_id' => ['El pedido ya se encuentra pagado.']]);
+        }
+        if (in_array($order->status, ['canceled', 'rejected'], true)) {
+            $this->logReservationExpired('POST /api/v1/payment/create', $order, 'order_terminal');
+
+            return response()->json([
+                'code' => 'reservation_expired',
+                'message' => 'El pedido o su reserva no se encuentran vigentes.',
+                'can_retry' => true,
+            ], 409);
+        }
+        if ($order->reserved_until && $order->reserved_until->isPast()) {
+            $this->logReservationExpired('POST /api/v1/payment/create', $order, 'reserved_until_expired');
+            if ($order->status === 'pending' && $order->payment_status === 'pending') {
+                if ($order->reservations()->where('status', \App\Models\InventoryReservation::ACTIVE)->exists()) {
+                    $this->reservationExpiration->expireOrder($order->id);
+                }
+                $order->update(['status' => 'canceled', 'tracking_status' => 'canceled']);
+            }
+
+            return response()->json([
+                'code' => 'reservation_expired',
+                'message' => 'La reserva de stock de este pedido ha expirado.',
+                'can_retry' => true,
+            ], 409);
         }
 
         // Prepare order data for payment gateway
@@ -57,7 +98,7 @@ class PaymentController extends Controller
         try {
             $paymentData = DB::transaction(function () use ($order, $orderData) {
                 $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->payment_id && is_array($locked->payment_data)) {
+                if ($locked->payment_id && is_array($locked->payment_data) && ! empty($locked->payment_data['init_point'])) {
                     return $locked->payment_data;
                 }
                 $created = PaymentGatewayFactory::create()->createPayment($orderData);
@@ -69,13 +110,15 @@ class PaymentController extends Controller
             return response()->json([
                 'payment_id' => $paymentData['id'],
                 'checkout_url' => config('payment.mercadopago.sandbox')
-                    ? $paymentData['sandbox_init_point']
+                    ? ($paymentData['sandbox_init_point'] ?? $paymentData['init_point'])
                     : $paymentData['init_point'],
             ]);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Payment creation failed: '.$e->getMessage());
 
-            return response()->json(['message' => 'Error creating payment'], 500);
+            return response()->json(['message' => 'Error al inicializar la pasarela de pagos. Por favor verifica la configuración.'], 500);
         }
     }
 
@@ -235,13 +278,28 @@ class PaymentController extends Controller
                 $wasPaid = $locked->payment_status === 'approved' || $locked->paid_at || $this->inventoryService->orderHasConsumedReservation($locked);
                 $usesReservations = $this->inventoryService->orderUsesReservationFlow($locked);
                 $updated = $this->orderStateService->applyPaymentStatus($locked, $paymentData);
+
                 if ($updated->payment_status === 'approved') {
+                    $this->orderPaymentService->recordCardAttempt(
+                        $updated,
+                        $paymentData['id'] ?? (string) $updated->id,
+                        PaymentTransaction::APPROVED,
+                        $paymentData
+                    );
                     if ($usesReservations) {
                         $this->inventoryService->consumeOrderReservation($updated);
                     }
                     if (! $updated->paid_at) {
                         $updated->update(['paid_at' => now()]);
                     }
+                } elseif ($updated->payment_status === 'rejected') {
+                    $this->orderPaymentService->recordCardAttempt(
+                        $updated,
+                        $paymentData['id'] ?? (string) $updated->id,
+                        PaymentTransaction::FAILED,
+                        $paymentData,
+                        $paymentData['status_detail'] ?? 'Pago rechazado por la pasarela'
+                    );
                 } elseif (! $wasCanceled && in_array($updated->status, ['canceled', 'rejected'], true)) {
                     if ($wasPaid || ! $usesReservations) {
                         $updated->items()->with(['product', 'warehouse'])->get()
@@ -273,7 +331,7 @@ class PaymentController extends Controller
 
     private function assertPaymentMatchesOrder(Order $order, array $paymentData): void
     {
-        if (config('payment.default_gateway') === 'mock') {
+        if (config('payment.default_gateway') === 'mock' || $this->paymentSettings->getActiveGateway() === 'mock') {
             return;
         }
 
@@ -290,5 +348,22 @@ class PaymentController extends Controller
                 'payment' => ['La moneda confirmada no coincide con la moneda del pedido.'],
             ]);
         }
+    }
+
+    private function logReservationExpired(string $endpoint, Order $order, string $reason): void
+    {
+        Log::info('Reservation expired response', [
+            'endpoint' => $endpoint,
+            'checkout_token' => $order->checkout_token,
+            'order_id' => $order->id,
+            'payment_method' => $order->payment_method,
+            'order_status' => $order->status,
+            'payment_status' => $order->payment_status,
+            'reserved_until' => optional($order->reserved_until)->toIso8601String(),
+            'reservation_status' => $order->reservations()->pluck('status')->implode(','),
+            'reservation_expires_at' => $order->reservations()->pluck('expires_at')->map(fn ($value) => optional($value)->toIso8601String())->implode(','),
+            'now' => now()->toIso8601String(),
+            'expiration_reason' => $reason,
+        ]);
     }
 }

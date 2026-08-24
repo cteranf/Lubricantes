@@ -59,6 +59,24 @@ Después, configurar la dirección real de la sede principal desde `/admin/branc
 
 Todas las rutas requieren Sanctum y usuario `admin`.
 
+
+## Flota de reparto propio
+
+El reparto propio reutiliza `order_deliveries` y `order_delivery_histories`. Los
+repartidores se administran en `delivery_drivers` y los vehículos en
+`delivery_vehicles`; la relación entre ambos solo existe en cada asignación.
+Las asignaciones nuevas guardan snapshots de código, nombre, documento, teléfono,
+placa y descripción para conservar el historial aunque se edite la ficha.
+
+Los usuarios antiguos con `can_deliver` siguen siendo compatibles con
+asignaciones legacy. No se crean cuentas ni contraseñas automáticamente. Una
+asignación nueva requiere un repartidor y un vehículo registrados, activos y
+disponibles, con picking y packing completos. En esta primera versión un SOAT o
+una revisión técnica vencida bloquea la asignación; los vencimientos próximos se
+muestran como advertencia administrativa.
+
+Las filas de `order_deliveries` existentes conservan sus campos textuales y no se
+convierten automáticamente en entidades de flota.
 ```json
 POST /api/v1/admin/branches
 {"code":"LIMA-NORTE","name":"Lima Norte","address":"Av. Principal 100","is_active":true}
@@ -97,3 +115,38 @@ Para una reversión controlada antes de recibir operaciones reales de Fase 2, us
 - Roles operativos específicos y permisos granulares.
 - Retiro de `products.stock` tras confirmar que ya no tiene consumidores.
 - Código de barras e integración SUNAT.
+
+## Reservas de inventario
+
+Las reservas activas solo retienen stock mientras el pedido esté pendiente de
+pago, tenga `reserved_until` definido y esa fecha siga vigente. La expiración
+centralizada se ejecuta con:
+
+```text
+php artisan inventory:expire-reservations --dry-run
+php artisan inventory:expire-reservations
+```
+
+El primer comando informa pedidos, reservas, productos y cantidades sin
+modificar datos. Se puede limitar con `--order=ID` o `--limit=100`. Las reservas
+pagadas/consumidas/liberadas no se expiran y una expiración repetida es
+idempotente.
+
+Para revisar diferencias entre `warehouse_inventories.reserved_quantity` y las
+reservas activas vigentes:
+
+```text
+php artisan inventory:reconcile-reservations --dry-run
+```
+
+El modo diagnóstico no corrige diferencias ambiguas. `--fix` debe usarse solo
+con autorización explícita y únicamente procesa vencimientos inequívocos.
+
+En producción Laravel necesita un proceso que invoque el scheduler cada minuto:
+
+```text
+* * * * * php /ruta/artisan schedule:run > /dev/null 2>&1
+```
+
+En Windows local puede ejecutarse `php artisan schedule:run` manualmente para
+probarlo. Esta tarea no configura el cron del sistema.

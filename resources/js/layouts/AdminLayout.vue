@@ -63,6 +63,9 @@ const navigation = [
     { label: 'Marcas', to: '/admin/brands', icon: 'pi pi-bookmark' },
     { label: 'Noticias', to: '/admin/news', icon: 'pi pi-megaphone' },
     { label: 'Pedidos', to: '/admin/orders', icon: 'pi pi-shopping-cart' },
+    { label: 'Repartidores', to: '/admin/delivery-drivers', icon: 'pi pi-id-card' },
+    { label: 'Vehículos', to: '/admin/delivery-vehicles', icon: 'pi pi-car' },
+    { label: 'Métodos de pago', to: '/admin/payment-settings', icon: 'pi pi-credit-card' },
     { label: 'Sliders', to: '/admin/sliders', icon: 'pi pi-images' },
 ];
 

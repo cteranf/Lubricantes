@@ -41,6 +41,7 @@ export const useCartStore = defineStore('cart', {
         clear() {
             this.items = [];
             this.save();
+            sessionStorage.removeItem('checkout:idempotency-token');
         },
         save() {
             localStorage.setItem('cartItems', JSON.stringify(this.items));

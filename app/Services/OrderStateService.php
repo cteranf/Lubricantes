@@ -110,7 +110,7 @@ class OrderStateService
                 $updates['status'] = 'confirmed';
                 $updates['tracking_status'] = 'confirmed';
             }
-        } elseif (in_array($normalizedPaymentStatus, ['rejected', 'refunded'], true)) {
+        } elseif ($normalizedPaymentStatus === 'refunded') {
             if (in_array($order->tracking_status, ['delivered', 'picked_up'], true)) {
                 $this->invalid('No se puede cancelar por pago un pedido ya finalizado.');
             }
@@ -118,6 +118,8 @@ class OrderStateService
             $updates['status'] = 'canceled';
             $updates['tracking_status'] = 'canceled';
         }
+        // Nota: Si $normalizedPaymentStatus === 'rejected', se actualiza payment_status = 'rejected',
+        // pero se mantiene status = 'pending' para permitir reintentos y preservar la reserva de stock.
 
         $order->update($updates);
 

@@ -46,7 +46,7 @@ class OrderFulfillmentService
                     $this->invalid('La reserva vencio o fue liberada; el pedido no puede prepararse.');
                 }
                 if ($reservations->contains('status', InventoryReservation::ACTIVE)) {
-                    if ($order->payment_method !== 'contra_entrega' && $order->payment_status !== 'approved') {
+                    if (! in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true) && $order->payment_status !== 'approved') {
                         $this->invalid('El pago debe estar aprobado antes de preparar este pedido.');
                     }
                     try {
@@ -131,7 +131,7 @@ class OrderFulfillmentService
             $from = $order->effectiveFulfillmentStatus();
             $this->requireState($from, Order::FULFILLMENT_READY, 'El pedido debe estar listo para recojo antes de registrarlo como recogido.');
             $this->assertInventoryConsumed($order);
-            if ($order->payment_method === 'contra_entrega') {
+            if (in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true)) {
                 if (! $moneyReceived || ! $collectionMethod) {
                     $this->invalid('Debe confirmar el cobro y su medio antes de registrar el recojo.');
                 }
@@ -167,7 +167,7 @@ class OrderFulfillmentService
             $this->assertInventoryConsumed($order);
             $deliveredAt = $order->delivered_at ?: now();
             $updates = ['fulfillment_status' => Order::FULFILLMENT_DELIVERED, 'delivered_at' => $deliveredAt, 'delivered_by' => $order->delivered_by ?: $user->id, 'status' => 'delivered', 'tracking_status' => $order->delivery_type === 'pickup' ? 'picked_up' : 'delivered'];
-            if ($order->payment_method === 'contra_entrega') {
+            if (in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true)) {
                 $updates['payment_status'] = 'approved';
                 $updates['paid_at'] = $order->paid_at ?: $deliveredAt;
             }
@@ -290,7 +290,7 @@ class OrderFulfillmentService
         $from = $order->effectiveFulfillmentStatus();
         $this->requireState($from, Order::FULFILLMENT_READY, 'Solo un pedido listo puede marcarse como entregado.');
         $this->assertInventoryConsumed($order);
-        if ($order->payment_method === 'contra_entrega') {
+        if (in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true)) {
             $payment = PaymentTransaction::where('order_id', $order->id)->where('payment_method', 'contra_entrega')->where('transaction_type', PaymentTransaction::PAYMENT)->where('status', PaymentTransaction::APPROVED)->first();
             if (! $payment) {
                 $this->invalid('El cobro contraentrega aprobado es obligatorio antes de finalizar la entrega.');

@@ -8,6 +8,7 @@ use App\Models\Branch;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\UserAddress;
+use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
 use App\Services\ShippingRateService;
@@ -25,6 +26,8 @@ class OrderController extends Controller
         private InventoryService $inventory,
         private ShippingRateService $shippingRates,
         private MoneyService $money,
+        private \App\Services\PaymentSettingService $paymentSettings,
+        private InventoryReservationExpirationService $reservationExpiration,
     ) {}
 
     public function index(Request $request)
@@ -39,7 +42,7 @@ class OrderController extends Controller
             'checkout_token' => 'nullable|string|max:100',
             'shipping_info' => 'nullable|array',
             'shipping_info.phone' => 'nullable|string|max:30',
-            'payment_method' => 'required|in:card,transferencia,contra_entrega',
+            'payment_method' => 'required|in:card,transferencia,contra_entrega,pago_en_sede',
             'delivery_type' => 'required|in:delivery,pickup',
             'pickup_branch_id' => 'required_if:delivery_type,pickup|prohibited_if:delivery_type,delivery|nullable|integer',
             'address_id' => 'required_if:delivery_type,delivery|prohibited_if:delivery_type,pickup|nullable|integer',
@@ -57,12 +60,45 @@ class OrderController extends Controller
         try {
             $duplicate = false;
             $order = DB::transaction(function () use ($request, $data, &$duplicate) {
+                if (! $this->paymentSettings->isMethodAllowed($data['payment_method'], $data['delivery_type'])) {
+                    throw ValidationException::withMessages([
+                        'payment_method' => ['El método de pago seleccionado no está disponible para la modalidad elegida.'],
+                    ]);
+                }
                 $existing = Order::where('checkout_token', $data['checkout_token'])
                     ->where('user_id', $request->user()->id)
                     ->lockForUpdate()
                     ->first();
                 if ($existing) {
                     $duplicate = true;
+
+                    $isPendingUnpaid = $existing->status === 'pending' && $existing->payment_status === 'pending';
+                    $isReservationExpired = ($existing->reserved_until && $existing->reserved_until->isPast())
+                        || ($isPendingUnpaid && $existing->reservations()->where('status', \App\Models\InventoryReservation::EXPIRED)->exists());
+
+                    if ($isPendingUnpaid && $isReservationExpired) {
+                        $this->logReservationExpired('POST /api/v1/orders', $data['checkout_token'], $existing, 'existing_token_expired');
+                        if ($existing->reservations()->where('status', \App\Models\InventoryReservation::ACTIVE)->exists()) {
+                            $this->reservationExpiration->expireOrder($existing->id);
+                        }
+                        $existing->update(['status' => 'canceled', 'tracking_status' => 'canceled']);
+
+                        return response()->json([
+                            'code' => 'reservation_expired',
+                            'message' => 'La reserva de stock de este pedido ha expirado.',
+                            'can_retry' => true,
+                        ], 409);
+                    }
+
+                    if (in_array($existing->status, ['canceled', 'rejected'], true)) {
+                        $this->logReservationExpired('POST /api/v1/orders', $data['checkout_token'], $existing, 'existing_order_terminal');
+
+                        return response()->json([
+                            'code' => 'reservation_expired',
+                            'message' => 'El pedido o su reserva ya no se encuentran vigentes.',
+                            'can_retry' => true,
+                        ], 409);
+                    }
 
                     return $existing;
                 }
@@ -95,7 +131,9 @@ class OrderController extends Controller
                 }
 
                 $warehouse = $this->inventory->defaultWarehouse();
-                $reservedUntil = now()->addMinutes(max(1, (int) config('inventory.reservation_minutes', 30)));
+                $isOfflinePayment = in_array($data['payment_method'], ['contra_entrega', 'pago_en_sede'], true);
+                $reservedUntil = $isOfflinePayment ? null : now()->addMinutes(max(1, (int) config('inventory.reservation_minutes', 30)));
+                $reservationExpiresAt = $reservedUntil ?: now()->addYears(10);
                 $subtotalMinor = 0;
                 $itemsToCreate = [];
 
@@ -132,7 +170,7 @@ class OrderController extends Controller
 
                 $order = Order::create([
                     'user_id' => $request->user()->id,
-                    'status' => 'pending',
+                    'status' => $isOfflinePayment ? 'confirmed' : 'pending',
                     'subtotal' => $subtotal,
                     'discount_total' => $discountTotal,
                     'shipping_amount' => $shippingAmount,
@@ -159,7 +197,7 @@ class OrderController extends Controller
                     'pickup_district_snapshot' => $pickupBranch?->district,
                     'pickup_business_hours_snapshot' => $pickupBranch?->business_hours,
                     'pickup_instructions_snapshot' => $pickupBranch?->pickup_instructions,
-                    'tracking_status' => 'pending',
+                    'tracking_status' => $isOfflinePayment ? 'confirmed' : 'pending',
                     'fulfillment_status' => Order::FULFILLMENT_RESERVED,
                     'delivery_flow_version' => 1,
                     'reserved_until' => $reservedUntil,
@@ -172,11 +210,15 @@ class OrderController extends Controller
                     ]);
                     $item->setRelation('product', $itemData['product']);
                     $item->setRelation('warehouse', $warehouse);
-                    $this->inventory->reserveForOrder($item, $reservedUntil);
+                    $this->inventory->reserveForOrder($item, $reservationExpiresAt);
                 }
 
                 return $order;
             });
+
+            if ($order instanceof \Illuminate\Http\JsonResponse) {
+                return $order;
+            }
 
             return response()->json($this->appendPickupPresentation($order->load(['items.warehouse', 'items.reservation'])), $duplicate ? 200 : 201);
         } catch (ValidationException $e) {
@@ -186,6 +228,16 @@ class OrderController extends Controller
         } catch (QueryException $e) {
             $existing = Order::where('checkout_token', $data['checkout_token'])->where('user_id', $request->user()->id)->first();
             if ($existing) {
+                if ($existing->reserved_until && $existing->reserved_until->isPast()) {
+                    $this->logReservationExpired('POST /api/v1/orders', $data['checkout_token'], $existing, 'query_exception_existing_token');
+
+                    return response()->json([
+                        'code' => 'reservation_expired',
+                        'message' => 'La reserva de stock de este pedido ha expirado.',
+                        'can_retry' => true,
+                    ], 409);
+                }
+
                 return response()->json($this->appendPickupPresentation($existing->load(['items.warehouse', 'items.reservation'])), 200);
             }
             if (Order::where('checkout_token', $data['checkout_token'])->where('user_id', '!=', $request->user()->id)->exists()) {
@@ -214,5 +266,23 @@ class OrderController extends Controller
         }
 
         return $order;
+    }
+
+    private function logReservationExpired(string $endpoint, string $checkoutToken, Order $order, string $reason): void
+    {
+        Log::info('Reservation expired response', [
+            'endpoint' => $endpoint,
+            'checkout_token' => $checkoutToken,
+            'matched_checkout_token' => $order->checkout_token,
+            'order_id' => $order->id,
+            'payment_method' => $order->payment_method,
+            'order_status' => $order->status,
+            'payment_status' => $order->payment_status,
+            'reserved_until' => optional($order->reserved_until)->toIso8601String(),
+            'reservation_status' => $order->reservations()->pluck('status')->implode(','),
+            'reservation_expires_at' => $order->reservations()->pluck('expires_at')->map(fn ($value) => optional($value)->toIso8601String())->implode(','),
+            'now' => now()->toIso8601String(),
+            'expiration_reason' => $reason,
+        ]);
     }
 }

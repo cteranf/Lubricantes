@@ -2,27 +2,31 @@
 
 namespace App\Services\PaymentGateway;
 
+use App\Services\PaymentSettingService;
+
 class PaymentGatewayFactory
 {
     /**
-     * Create payment gateway instance based on configuration
+     * Create payment gateway instance based on configuration and database settings.
      *
      * @param  string|null  $provider  Override default provider
      */
     public static function create(?string $provider = null): PaymentGatewayInterface
     {
-        $provider = $provider ?? config('payment.default_gateway');
+        $settingService = app(PaymentSettingService::class);
+        $provider = $provider ?? $settingService->getActiveGateway();
 
-        if ($provider === 'mock' && ! config('payment.mock.enabled')) {
-            throw new \RuntimeException('Mock payment gateway is disabled.');
+        if ($provider === 'mock') {
+            if (! $settingService->isMockActive()) {
+                throw new \RuntimeException('Mock payment gateway is only available in local/testing environments with mock enabled.');
+            }
+
+            return new MockPaymentGateway;
         }
 
         return match ($provider) {
             'mercadopago' => new MercadoPagoGateway,
-            'mock' => new MockPaymentGateway, // For testing without credentials
-            // Future providers can be added here:
-            // 'niubiz' => new NiubizGateway(),
-            // 'culqi' => new CulqiGateway(),
+            'mock' => new MockPaymentGateway,
             default => throw new \Exception("Payment gateway '{$provider}' not supported"),
         };
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services\PaymentGateway;
 
+use App\Models\PaymentSetting;
 use MercadoPago\Client\Payment\PaymentClient;
 use MercadoPago\Client\Preference\PreferenceClient;
 use MercadoPago\MercadoPagoConfig;
@@ -10,7 +11,14 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 {
     public function __construct()
     {
-        MercadoPagoConfig::setAccessToken(config('payment.mercadopago.access_token'));
+        $setting = PaymentSetting::current();
+        $token = $setting->mercadopago_access_token ?: config('payment.mercadopago.access_token');
+
+        if (empty($token)) {
+            throw new \RuntimeException('El Access Token de Mercado Pago no ha sido configurado en el sistema.');
+        }
+
+        MercadoPagoConfig::setAccessToken($token);
     }
 
     public function createPayment(array $orderData): array
@@ -71,8 +79,6 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 
     public function refundPayment(string $paymentId, float $amount): array
     {
-        // Note: Refunds in MercadoPago SDK v3 require RefundClient
-        // For now, we'll return a placeholder since refunds are not critical for initial implementation
         return [
             'id' => null,
             'status' => 'pending',
@@ -82,7 +88,6 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 
     public function handleWebhook(array $payload): array
     {
-        // MercadoPago sends payment ID in the notification
         if (isset($payload['data']['id'])) {
             $paymentId = $payload['data']['id'];
 

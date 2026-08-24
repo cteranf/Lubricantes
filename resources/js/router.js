@@ -48,6 +48,9 @@ const routes = [
     { path: '/admin/news', component: () => import('@/views/admin/News.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/sliders', component: AdminSliders, meta: { requiresAdmin: true } },
     { path: '/admin/orders', component: () => import('@/views/admin/Orders.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/delivery-drivers', component: () => import('@/views/admin/DeliveryDrivers.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/delivery-vehicles', component: () => import('@/views/admin/DeliveryVehicles.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/payment-settings', component: () => import('@/views/admin/PaymentSettings.vue'), meta: { requiresAdmin: true } },
 ];
 
 const router = createRouter({

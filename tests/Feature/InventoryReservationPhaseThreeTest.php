@@ -116,6 +116,53 @@ class InventoryReservationPhaseThreeTest extends TestCase
         $this->assertSame('canceled', $order->refresh()->status);
     }
 
+    public function test_expiration_dry_run_does_not_modify_inventory_or_reservation(): void
+    {
+        $product = $this->product(3);
+        $order = $this->createOrder($product, 2);
+        Order::whereKey($order->id)->update(['reserved_until' => now()->subMinute()]);
+        InventoryReservation::where('order_id', $order->id)->update(['expires_at' => now()->subMinute()]);
+
+        $this->artisan('inventory:expire-reservations', ['--dry-run' => true])
+            ->expectsOutputToContain('no se modificaron datos')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $order->id, 'status' => InventoryReservation::ACTIVE]);
+        $this->assertSame(2, $this->inventory($product)->reserved_quantity);
+    }
+
+    public function test_expiration_order_filter_does_not_process_other_orders(): void
+    {
+        $product = $this->product(5);
+        $first = $this->createOrder($product, 1);
+        $second = $this->createOrder($product, 1);
+        Order::whereKey($first->id)->update(['reserved_until' => now()->subMinute()]);
+        Order::whereKey($second->id)->update(['reserved_until' => now()->subMinute()]);
+
+        $this->artisan('inventory:expire-reservations', ['--order' => $first->id])
+            ->expectsOutputToContain('procesadas=1')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $first->id, 'status' => InventoryReservation::EXPIRED]);
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $second->id, 'status' => InventoryReservation::ACTIVE]);
+    }
+
+    public function test_reconciliation_dry_run_reports_difference_without_fixing_it(): void
+    {
+        $product = $this->product(3);
+        $order = $this->createOrder($product, 2);
+        $inventory = $this->inventory($product);
+        $inventory->update(['reserved_quantity' => 1]);
+
+        $this->artisan('inventory:reconcile-reservations', ['--dry-run' => true])
+            ->expectsOutputToContain('stored=1 valid=2')
+            ->expectsOutputToContain('no se modificaron datos')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('warehouse_inventories', ['id' => $inventory->id, 'reserved_quantity' => 1]);
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $order->id, 'status' => InventoryReservation::ACTIVE]);
+    }
+
     public function test_manual_out_correction_and_transfer_cannot_use_reserved_units(): void
     {
         $product = $this->product(5);
