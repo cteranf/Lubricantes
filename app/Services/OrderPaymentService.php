@@ -80,15 +80,23 @@ class OrderPaymentService
         $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
         $isApproved = $status === PaymentTransaction::APPROVED;
         $scope = $isApproved ? 'card-approved-order-'.$order->id : null;
-        $idempotencyKey = $isApproved
-            ? 'card-approved-order-'.$order->id.'-'.$paymentId
-            : 'card-attempt-order-'.$order->id.'-'.$paymentId.'-'.Str::random(8);
+        $gateway = $gatewayData['gateway'] ?? null;
+        $idempotencyKey = $gateway
+            ? 'gateway-'.$gateway.'-payment-'.$paymentId
+            : ($isApproved ? 'card-approved-order-'.$order->id.'-'.$paymentId : 'card-attempt-order-'.$order->id.'-'.$paymentId.'-'.Str::random(8));
 
         if ($isApproved) {
             $existing = PaymentTransaction::where('approved_scope_key', $scope)->first();
             if ($existing) {
                 return $existing;
             }
+        }
+        if ($gateway && ($existing = PaymentTransaction::where('gateway', $gateway)->where('provider_payment_id', $paymentId)->first())) {
+            if ((int) $existing->order_id !== (int) $order->id) {
+                $this->invalid('El pago remoto ya fue asociado a otro pedido.');
+            }
+
+            return $existing;
         }
 
         try {
@@ -102,13 +110,19 @@ class OrderPaymentService
                 'idempotency_key' => $idempotencyKey,
                 'approved_scope_key' => $scope,
                 'external_reference' => $paymentId,
+                'gateway' => $gateway,
+                'provider_payment_id' => $gatewayData['provider_payment_id'] ?? null,
+                'payment_preference_id' => $gatewayData['payment_preference_id'] ?? null,
+                'provider_status' => $gatewayData['provider_status'] ?? null,
+                'provider_status_detail' => $gatewayData['provider_status_detail'] ?? null,
+                'verified_at' => $gatewayData['verified_at'] ?? null,
                 'confirmed_at' => $isApproved ? now() : null,
                 'failed_at' => $isApproved ? null : now(),
                 'failure_reason' => $failureReason,
                 'metadata' => array_merge([
                     'source' => 'card_gateway',
                     'order_total_snapshot' => (string) $order->total,
-                ], $gatewayData),
+                ], array_filter($gatewayData, fn ($key) => ! in_array($key, ['gateway', 'provider_payment_id', 'payment_preference_id', 'provider_status', 'provider_status_detail', 'verified_at'], true), ARRAY_FILTER_USE_KEY)),
             ]);
         } catch (QueryException $e) {
             if ($isApproved && $scope) {

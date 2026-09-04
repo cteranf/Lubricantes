@@ -24,6 +24,7 @@ class MockPaymentGateway implements PaymentGatewayInterface
             'id' => $mockId,
             'init_point' => $checkoutUrl,
             'sandbox_init_point' => $checkoutUrl,
+            'external_reference' => $orderData['external_reference'],
         ];
     }
 
@@ -36,7 +37,13 @@ class MockPaymentGateway implements PaymentGatewayInterface
             'external_reference' => null,
             'transaction_amount' => 0,
             'payment_method_id' => 'mock_card',
+            'preference_id' => null,
         ];
+    }
+
+    public function findPreference(string $preferenceId): array
+    {
+        throw new \RuntimeException('Mock preferences are request-scoped and cannot be reconciled remotely.');
     }
 
     public function refundPayment(string $paymentId, float $amount): array

@@ -3,6 +3,7 @@
 namespace App\Services\PaymentGateway;
 
 use App\Models\PaymentSetting;
+use MercadoPago\Client\Common\RequestOptions;
 use MercadoPago\Client\Payment\PaymentClient;
 use MercadoPago\Client\Preference\PreferenceClient;
 use MercadoPago\MercadoPagoConfig;
@@ -48,16 +49,19 @@ class MercadoPagoGateway implements PaymentGatewayInterface
                 'pending' => config('payment.mercadopago.pending_url'),
             ],
             'auto_return' => 'approved',
-            'external_reference' => (string) $orderData['order_id'],
+            'external_reference' => $orderData['external_reference'],
             'notification_url' => config('payment.mercadopago.webhook_url'),
         ];
 
-        $preference = $client->create($preferenceData);
+        $options = new RequestOptions;
+        $options->setCustomHeaders(['X-Idempotency-Key' => $orderData['idempotency_key']]);
+        $preference = $client->create($preferenceData, $options);
 
         return [
             'id' => $preference->id,
             'init_point' => $preference->init_point,
             'sandbox_init_point' => $preference->sandbox_init_point,
+            'external_reference' => $orderData['external_reference'],
         ];
     }
 
@@ -74,7 +78,15 @@ class MercadoPagoGateway implements PaymentGatewayInterface
             'transaction_amount' => $payment->transaction_amount,
             'currency_id' => $payment->currency_id ?? null,
             'payment_method_id' => $payment->payment_method_id,
+            'preference_id' => $payment->preference_id ?? null,
         ];
+    }
+
+    public function findPreference(string $preferenceId): array
+    {
+        $preference = (new PreferenceClient)->get($preferenceId);
+
+        return ['id' => $preference->id, 'external_reference' => $preference->external_reference ?? null, 'init_point' => $preference->init_point ?? null, 'sandbox_init_point' => $preference->sandbox_init_point ?? null];
     }
 
     public function refundPayment(string $paymentId, float $amount): array

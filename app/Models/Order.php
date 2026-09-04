@@ -62,6 +62,7 @@ class Order extends Model
         'shipping_info',
         'payment_method',
         'payment_id',
+        'current_payment_preference_id',
         'payment_status',
         'payment_data',
         'reserved_until',
@@ -153,6 +154,16 @@ class Order extends Model
     public function paymentTransactions()
     {
         return $this->hasMany(PaymentTransaction::class);
+    }
+
+    public function currentPaymentPreference()
+    {
+        return $this->belongsTo(PaymentPreference::class, 'current_payment_preference_id');
+    }
+
+    public function paymentPreferences()
+    {
+        return $this->hasMany(PaymentPreference::class);
     }
 
     public function pickupBranch()

@@ -22,6 +22,7 @@ return [
     'mock' => [
         'enabled' => env('PAYMENT_MOCK_ENABLED', env('APP_ENV', 'production') !== 'production'),
     ],
+    'testing_legacy_webhook' => (bool) env('PAYMENT_TESTING_LEGACY_WEBHOOK', false),
 
     /*
     |--------------------------------------------------------------------------
@@ -36,6 +37,8 @@ return [
         'failure_url' => env('APP_URL').'/orders/payment-return?result=rejected',
         'pending_url' => env('APP_URL').'/orders/payment-return?result=pending',
         'webhook_url' => env('APP_URL').'/api/v1/payment/webhook',
+        'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET'),
+        'webhook_tolerance_seconds' => (int) env('MERCADOPAGO_WEBHOOK_TOLERANCE_SECONDS', 300),
     ],
 
     /*

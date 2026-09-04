@@ -13,6 +13,9 @@ class PaymentGatewayFactory
      */
     public static function create(?string $provider = null): PaymentGatewayInterface
     {
+        if (app()->bound(PaymentGatewayInterface::class)) {
+            return app(PaymentGatewayInterface::class);
+        }
         $settingService = app(PaymentSettingService::class);
         $provider = $provider ?? $settingService->getActiveGateway();
 
