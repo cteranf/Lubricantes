@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import api from '@/api';
+import { normalizeCartQuantity } from '@/utils/cartQuantity';
 
 export const useCartStore = defineStore('cart', {
     state: () => ({
@@ -13,16 +13,19 @@ export const useCartStore = defineStore('cart', {
         addItem(product) {
             const existing = this.items.find(i => i.product_id === product.id);
             if (existing) {
-                existing.quantity++;
+                this.updateQuantity(existing.product_id, existing.quantity + 1);
+                return;
             } else {
-                this.items.push({
+                const item = {
                     product_id: product.id,
                     name: product.name,
                     price: product.sale_price || product.price,
                     image: product.image_path,
                     quantity: 1,
                     product: product
-                });
+                };
+                item.quantity = normalizeCartQuantity(item.quantity, item).quantity;
+                if (item.quantity > 0) this.items.push(item);
             }
             this.save();
         },
@@ -33,7 +36,7 @@ export const useCartStore = defineStore('cart', {
         updateQuantity(productId, quantity) {
             const item = this.items.find(i => i.product_id === productId);
             if (item) {
-                item.quantity = quantity;
+                item.quantity = normalizeCartQuantity(quantity, item).quantity;
                 if (item.quantity <= 0) this.removeItem(productId);
                 else this.save();
             }

@@ -24,4 +24,15 @@ class DeliveryDriver extends Model
     {
         return trim($this->first_name.' '.$this->last_name);
     }
+
+    public function hasExpiredLicense(): bool
+    {
+        return $this->license_expires_at !== null
+            && $this->license_expires_at->isBefore(today());
+    }
+
+    public function hasLicenseCredentials(): bool
+    {
+        return filled($this->license_number) && $this->license_expires_at !== null;
+    }
 }

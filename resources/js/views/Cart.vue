@@ -35,10 +35,9 @@
                                         <input 
                                             type="number" 
                                             :value="item.quantity" 
-                                            @input="updateQuantityInput(item, $event)"
-                                            @blur="validateQuantity(item)"
+                                            @input="validateQuantity(item, $event)"
                                             min="1"
-                                            :max="item.product?.stock || 999"
+                                            :max="cartQuantityLimit(item)"
                                             class="w-16 text-center border rounded py-1 focus:ring-2 focus:ring-blue-500 outline-none"
                                         />
                                         <button 
@@ -103,17 +102,19 @@
 <script setup>
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useCartStore } from '@/stores/cart';
+import { cartQuantityLimit, normalizeCartQuantity } from '@/utils/cartQuantity';
 import { useToast } from 'primevue/usetoast';
 
 const cartStore = useCartStore();
 const toast = useToast();
 
 const incrementQuantity = (item) => {
-    if (!item.product?.stock || item.quantity >= item.product?.stock) {
+    const limit = cartQuantityLimit(item);
+    if (item.quantity >= limit) {
         toast.add({
             severity: 'warn',
             summary: 'Stock Limitado',
-            detail: `Solo hay ${item.product?.stock} unidades disponibles de "${item.name}".`,
+            detail: `Solo hay ${limit} unidades disponibles de "${item.name}".`,
             life: 3000
         });
         return;
@@ -127,40 +128,35 @@ const decrementQuantity = (item) => {
     }
 };
 
-const updateQuantityInput = (item, event) => {
-    const newQty = parseInt(event.target.value) || 1;
-    
-    // Don't update yet, just validate on blur
-    if (newQty < 1) {
-        event.target.value = 1;
-    } else if (item.product?.stock && newQty > item.product?.stock) {
-        event.target.value = item.product?.stock;
-    }
-};
+const validateQuantity = (item, valueOrEvent) => {
+    const input = valueOrEvent?.currentTarget || null;
+    const rawValue = input ? input.value : valueOrEvent;
+    const { quantity, reason, limit } = normalizeCartQuantity(rawValue, item);
 
-const validateQuantity = (item) => {
-    const input = event.target;
-    let newQty = parseInt(input.value) || 1;
-    
-    if (newQty < 1) {
-        newQty = 1;
+    if (reason === 'minimum') {
         toast.add({
             severity: 'warn',
             summary: 'Cantidad Inválida',
             detail: 'La cantidad mínima es 1.',
             life: 2000
         });
-    } else if (item.product?.stock && newQty > item.product?.stock) {
-        newQty = item.product?.stock;
+    } else if (reason === 'stock') {
         toast.add({
             severity: 'warn',
             summary: 'Stock Limitado',
-            detail: `Solo hay ${item.product?.stock} unidades disponibles de "${item.name}".`,
+            detail: `Solo hay ${limit} unidades disponibles de "${item.name}".`,
             life: 3000
         });
+    } else if (reason === 'invalid' || reason === 'decimal') {
+        toast.add({
+            severity: 'warn',
+            summary: 'Cantidad Inválida',
+            detail: reason === 'decimal' ? 'La cantidad debe ser un número entero.' : 'Ingresa una cantidad numérica válida.',
+            life: 2000
+        });
     }
-    
-    input.value = newQty;
-    cartStore.updateQuantity(item.product_id, newQty);
+
+    if (input) input.value = quantity;
+    if (item.quantity !== quantity) cartStore.updateQuantity(item.product_id, quantity);
 };
 </script>

@@ -8,6 +8,8 @@ class DeliveryVehicle extends Model
 {
     public const TYPES = ['motorcycle', 'car', 'van', 'truck', 'bicycle', 'other'];
 
+    public const LICENSE_EXEMPT_TYPES = ['bicycle'];
+
     public const OWNERSHIP_TYPES = ['company', 'driver', 'third_party'];
 
     protected $fillable = ['code', 'plate_number', 'vehicle_type', 'brand', 'model', 'year', 'color', 'load_capacity_kg', 'ownership_type', 'soat_expires_at', 'technical_inspection_expires_at', 'notes', 'is_active', 'is_available'];
@@ -26,6 +28,12 @@ class DeliveryVehicle extends Model
 
     public function hasExpiredDocuments(): bool
     {
-        return ($this->soat_expires_at && $this->soat_expires_at->isPast()) || ($this->technical_inspection_expires_at && $this->technical_inspection_expires_at->isPast());
+        return ($this->soat_expires_at && $this->soat_expires_at->isBefore(today()))
+            || ($this->technical_inspection_expires_at && $this->technical_inspection_expires_at->isBefore(today()));
+    }
+
+    public function requiresDriverLicense(): bool
+    {
+        return ! in_array($this->vehicle_type, self::LICENSE_EXEMPT_TYPES, true);
     }
 }

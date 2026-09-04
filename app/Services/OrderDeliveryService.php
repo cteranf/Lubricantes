@@ -106,21 +106,11 @@ class OrderDeliveryService
                 $this->invalid('El despacho no corresponde a reparto propio.');
             }
             $this->assertReady($order);
-            $driver = $driverId ? DeliveryDriver::whereKey($driverId)->lockForUpdate()->first() : null;
-            if ($driver) {
-                if (! $driver->is_active || ! $driver->is_available) {
-                    $this->invalid('El repartidor no está activo o disponible.');
-                }
-                if ($driver->deliveries()->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])->where('id', '!=', $d->id)->exists()) {
-                    $this->invalid('El repartidor ya tiene una entrega activa.');
-                }
-            } else {
-                $driver = User::whereKey($legacyUserId)->where('role', 'admin')->where('can_deliver', true)->first();
-                if (! $driver) {
-                    $this->invalid('El usuario no está habilitado como repartidor.');
-                }
-            }
+
             $vehicle = $vehicleId ? DeliveryVehicle::whereKey($vehicleId)->lockForUpdate()->first() : null;
+            if ($vehicleId && ! $vehicle) {
+                $this->invalid('El vehículo seleccionado ya no existe.');
+            }
             if ($vehicle) {
                 if (! $vehicle->is_active || ! $vehicle->is_available) {
                     $this->invalid('El vehículo no está activo o disponible.');
@@ -128,8 +118,27 @@ class OrderDeliveryService
                 if ($vehicle->hasExpiredDocuments()) {
                     $this->invalid('El vehículo tiene documentos vencidos.');
                 }
-                if ($vehicle->deliveries()->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])->where('id', '!=', $d->id)->exists()) {
+                if ($this->vehicleHasAnotherActiveDelivery($vehicle, $d)) {
                     $this->invalid('El vehículo ya tiene una entrega activa.');
+                }
+            }
+
+            $driver = $driverId ? DeliveryDriver::whereKey($driverId)->lockForUpdate()->first() : null;
+            if ($driverId && ! $driver) {
+                $this->invalid('El repartidor seleccionado ya no existe.');
+            }
+            if ($driver) {
+                if (! $driver->is_active || ! $driver->is_available) {
+                    $this->invalid('El repartidor no está activo o disponible.');
+                }
+                if ($this->driverHasAnotherActiveDelivery($driver, $d)) {
+                    $this->invalid('El repartidor ya tiene una entrega activa.');
+                }
+                $this->validateDriverLicense($driver, $vehicle);
+            } else {
+                $driver = User::whereKey($legacyUserId)->where('role', 'admin')->where('can_deliver', true)->first();
+                if (! $driver) {
+                    $this->invalid('El usuario no está habilitado como repartidor.');
                 }
             }
             if (! in_array($d->status, [OrderDelivery::PENDING, OrderDelivery::SCHEDULED, OrderDelivery::RESCHEDULED, OrderDelivery::FAILED_ATTEMPT, OrderDelivery::ASSIGNED], true)) {
@@ -185,26 +194,40 @@ class OrderDeliveryService
                 $this->invalid('Debe existir una asignación antes del despacho.');
             }
             if ($d->method === OrderDelivery::OWN_DELIVERY) {
+                $vehicle = null;
+                if ($d->vehicle_id) {
+                    $vehicle = DeliveryVehicle::whereKey($d->vehicle_id)->lockForUpdate()->first();
+                    if (! $vehicle) {
+                        $this->invalid('El vehículo asignado ya no existe.');
+                    }
+                    if (! $vehicle->is_active) {
+                        $this->invalid('El vehículo está inactivo.');
+                    }
+                    if ($vehicle->hasExpiredDocuments()) {
+                        $this->invalid('El vehículo tiene documentos vencidos.');
+                    }
+                    if ($this->vehicleHasAnotherActiveDelivery($vehicle, $d)) {
+                        $this->invalid('El vehículo ya tiene otra entrega activa.');
+                    }
+                } elseif ($d->vehicle_code_snapshot) {
+                    $this->invalid('El vehículo asignado ya no existe.');
+                }
+
                 $driver = $d->driver_id ? DeliveryDriver::whereKey($d->driver_id)->lockForUpdate()->first() : null;
                 if ($driver) {
                     if (! $driver->is_active) {
                         $this->invalid('El repartidor está inactivo.');
                     }
-                    if ($driver->deliveries()->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])->where('id', '!=', $d->id)->exists()) {
+                    if ($this->driverHasAnotherActiveDelivery($driver, $d)) {
                         $this->invalid('El repartidor ya tiene otra entrega activa.');
                     }
+                    $this->validateDriverLicense($driver, $vehicle);
+                } elseif ($d->driver_code_snapshot) {
+                    $this->invalid('El repartidor asignado ya no existe.');
                 } elseif (! $d->delivery_user_id) {
                     $this->invalid('Debe asignar un repartidor.');
                 }
-                $vehicle = $d->vehicle_id ? DeliveryVehicle::whereKey($d->vehicle_id)->lockForUpdate()->first() : null;
-                if ($vehicle) {
-                    if (! $vehicle->is_active) {
-                        $this->invalid('El vehículo está inactivo.');
-                    }
-                    if ($vehicle->deliveries()->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])->where('id', '!=', $d->id)->exists()) {
-                        $this->invalid('El vehículo ya tiene otra entrega activa.');
-                    }
-                } elseif (($d->driver_id || $d->vehicle_id) && (! $d->vehicle_plate || trim($d->vehicle_plate) === '')) {
+                if (! $vehicle && $d->driver_id && (! $d->vehicle_plate || trim($d->vehicle_plate) === '')) {
                     $this->invalid('Debe asignar un vehículo.');
                 }
             }
@@ -429,6 +452,35 @@ class OrderDeliveryService
         }if ($order->reservations()->where('status', '!=', InventoryReservation::CONSUMED)->exists()) {
             $this->invalid('El inventario debe estar consumido antes del despacho.');
         }
+    }
+
+    private function validateDriverLicense(DeliveryDriver $driver, ?DeliveryVehicle $vehicle): void
+    {
+        if (! $vehicle || ! $vehicle->requiresDriverLicense()) {
+            return;
+        }
+        if ($driver->hasExpiredLicense()) {
+            $this->invalid('El repartidor tiene la licencia vencida.');
+        }
+        if (! $driver->hasLicenseCredentials()) {
+            $this->invalid('El repartidor no tiene una licencia vigente para este vehículo.');
+        }
+    }
+
+    private function driverHasAnotherActiveDelivery(DeliveryDriver $driver, OrderDelivery $delivery): bool
+    {
+        return $driver->deliveries()
+            ->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])
+            ->where('id', '!=', $delivery->id)
+            ->exists();
+    }
+
+    private function vehicleHasAnotherActiveDelivery(DeliveryVehicle $vehicle, OrderDelivery $delivery): bool
+    {
+        return $vehicle->deliveries()
+            ->whereIn('status', [OrderDelivery::ASSIGNED, OrderDelivery::DISPATCHED, OrderDelivery::OUT_FOR_DELIVERY])
+            ->where('id', '!=', $delivery->id)
+            ->exists();
     }
 
     private function record(Order $o, OrderDelivery $d, string $event, ?string $from, ?string $to, User $u, string $key, ?OrderDeliveryAttempt $attempt = null, ?string $observation = null, array $metadata = []): void
