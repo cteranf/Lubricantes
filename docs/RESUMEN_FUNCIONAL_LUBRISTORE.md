@@ -75,3 +75,11 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 Entre las ampliaciones naturales están nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, automatización de notificaciones, aplicaciones para repartidores, reportes comerciales y pruebas de interfaz automatizadas.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
+
+## Dashboard gerencial
+
+El panel administrativo ofrece una vista ejecutiva de ventas reconocidas según la fecha de pago, pedidos, ticket promedio, unidades, inventario actual, reservas y alertas operativas. Incluye filtros por periodo y modalidad, pestañas de resumen, ventas, inventario y operaciones, y enlaces para atender incidencias. Las métricas de inventario son una fotografía actual y no sustituyen reportes de costos, rentabilidad, segmentación avanzada o pronósticos, que quedan como ampliaciones futuras.
+
+El dashboard carga una respuesta completa al abrirse. Las pestañas organizan visualmente esa respuesta y cambiar entre ellas no realiza nuevas solicitudes; aplicar filtros o actualizar vuelve a cargar el dashboard completo. La carga segmentada por sección es una optimización futura y el contrato `section` se mantiene experimental.
+
+La pestaña Inventario distingue existencias físicas, reservas y disponibilidad actuales, además de mostrar concentración por almacén, movimientos y reservas por estado. La salida de productos se compara únicamente con el periodo elegido.

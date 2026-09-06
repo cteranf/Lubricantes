@@ -1,207 +1,57 @@
 <template>
     <AdminLayout>
-        <div class="container mx-auto px-6 py-8">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-gray-700 text-3xl font-medium">Dashboard</h3>
-                
-                <!-- Date Filters -->
-                <div class="flex gap-3 items-center">
-                    <select v-model="filters.year" @change="fetchData" class="border rounded px-3 py-2 text-sm">
-                        <option v-for="y in availableYears" :key="y" :value="y">{{ y }}</option>
-                    </select>
-                    
-                    <select v-model="filters.month" @change="fetchData" class="border rounded px-3 py-2 text-sm">
-                        <option :value="null">Todos los meses</option>
-                        <option value="1">Enero</option>
-                        <option value="2">Febrero</option>
-                        <option value="3">Marzo</option>
-                        <option value="4">Abril</option>
-                        <option value="5">Mayo</option>
-                        <option value="6">Junio</option>
-                        <option value="7">Julio</option>
-                        <option value="8">Agosto</option>
-                        <option value="9">Septiembre</option>
-                        <option value="10">Octubre</option>
-                        <option value="11">Noviembre</option>
-                        <option value="12">Diciembre</option>
-                    </select>
-                    
-                    <button @click="resetFilters" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm">
-                        <i class="pi pi-refresh mr-1"></i> Resetear
-                    </button>
-                </div>
-            </div>
-
-            <!-- Metrics Cards -->
-            <div class="mt-4">
-                <div class="flex flex-wrap -mx-6">
-                    <div class="w-full px-6 sm:w-1/2 xl:w-1/4">
-                        <div class="flex items-center px-5 py-6 shadow-sm rounded-md bg-white">
-                            <div class="p-3 rounded-full bg-indigo-600 bg-opacity-75">
-                                <i class="pi pi-dollar text-white text-2xl"></i>
-                            </div>
-                            <div class="mx-5">
-                                <h4 class="text-2xl font-semibold text-gray-700">S/ {{ stats.total_sales?.toLocaleString() }}</h4>
-                                <div class="text-gray-500">Ventas Totales</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="w-full px-6 sm:w-1/2 xl:w-1/4 mt-4 sm:mt-0">
-                        <div class="flex items-center px-5 py-6 shadow-sm rounded-md bg-white">
-                            <div class="p-3 rounded-full bg-orange-600 bg-opacity-75">
-                                <i class="pi pi-shopping-cart text-white text-2xl"></i>
-                            </div>
-                            <div class="mx-5">
-                                <h4 class="text-2xl font-semibold text-gray-700">{{ stats.orders_count }}</h4>
-                                <div class="text-gray-500">Pedidos</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="w-full px-6 sm:w-1/2 xl:w-1/4 mt-4 xl:mt-0">
-                        <div class="flex items-center px-5 py-6 shadow-sm rounded-md bg-white">
-                             <div class="p-3 rounded-full bg-pink-600 bg-opacity-75">
-                                <i class="pi pi-box text-white text-2xl"></i>
-                            </div>
-                            <div class="mx-5">
-                                <h4 class="text-2xl font-semibold text-gray-700">{{ stats.products_count }}</h4>
-                                <div class="text-gray-500">Productos</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="w-full px-6 sm:w-1/2 xl:w-1/4 mt-4 xl:mt-0">
-                        <div class="flex items-center px-5 py-6 shadow-sm rounded-md bg-white">
-                            <div class="p-3 rounded-full bg-green-600 bg-opacity-75">
-                                <i class="pi pi-users text-white text-2xl"></i>
-                            </div>
-                            <div class="mx-5">
-                                <h4 class="text-2xl font-semibold text-gray-700">{{ stats.client_count }}</h4>
-                                <div class="text-gray-500">Clientes</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Charts & Tables -->
-            <div class="mt-8">
-                <div class="flex flex-col md:flex-row gap-8">
-                    <!-- Sales Chart -->
-                    <div class="w-full md:w-2/3 bg-white rounded-lg shadow p-6">
-                        <h4 class="text-lg font-bold mb-4">Ventas Mensuales ({{ filters.year }}{{ filters.month ? ' - ' + getMonthName(filters.month) : '' }})</h4>
-                        <Chart v-if="salesChartData" type="bar" :data="salesChartData" />
-                    </div>
-
-                    <!-- Top Products Table -->
-                    <div class="w-full md:w-1/3 bg-white rounded-lg shadow p-6">
-                         <h4 class="text-lg font-bold mb-4">Productos Más Vendidos</h4>
-                         <ul class="space-y-4">
-                             <li v-for="product in stats.top_products" :key="product.id" class="flex justify-between items-center border-b pb-2">
-                                 <div class="flex items-center">
-                                     <div class="w-10 h-10 bg-gray-200 rounded mr-3">
-                                         <img v-if="product.image_path" :src="product.image_path" class="w-full h-full object-cover rounded">
-                                     </div>
-                                     <span class="text-sm font-medium">{{ product.name.substring(0, 20) }}...</span>
-                                 </div>
-                                 <span class="font-bold text-blue-600">{{ product.total_sold }} un.</span>
-                             </li>
-                         </ul>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Low Stock Alert -->
-            <div class="mt-8" v-if="stats.low_stock_products?.length > 0">
-                <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow">
-                    <h4 class="text-red-700 font-bold mb-2">Alerta de Stock Bajo</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div v-for="prod in stats.low_stock_products" :key="prod.id" class="flex justify-between items-center bg-white p-2 rounded border">
-                            <span class="text-sm">{{ prod.name }}</span>
-                            <span class="bg-red-100 text-red-800 text-xs font-bold px-2 py-1 rounded">{{ prod.stock }} unid.</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
+        <div class="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+            <header class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div><p class="text-sm font-semibold uppercase tracking-wide text-blue-700">Centro de control</p><h1 class="text-3xl font-black text-slate-900">Dashboard gerencial</h1><p class="text-sm text-slate-500">Ventas, inventario y operación en una sola vista.</p></div>
+                <div class="flex flex-wrap items-center gap-2"><span class="text-xs text-slate-500">Actualizado {{ updatedAt || '—' }}</span><button class="min-h-11 rounded-lg border px-4 font-semibold" :disabled="loading" @click="fetchData"><i class="pi pi-refresh mr-2"></i>Actualizar</button></div>
+            </header>
+            <section class="grid gap-3 rounded-xl bg-white p-4 shadow-sm md:grid-cols-4">
+                <label class="text-sm font-semibold">Periodo<select v-model="filters.period" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"><option value="this_year">Este año</option><option value="today">Hoy</option><option value="last_7_days">Últimos 7 días</option><option value="last_30_days">Últimos 30 días</option><option value="this_month">Este mes</option><option value="previous_month">Mes anterior</option><option value="custom">Rango personalizado</option></select></label>
+                <label v-if="filters.period==='custom'" class="text-sm font-semibold">Desde<input v-model="filters.date_from" type="date" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"></label><label v-if="filters.period==='custom'" class="text-sm font-semibold">Hasta<input v-model="filters.date_to" type="date" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"></label>
+                <label class="text-sm font-semibold">Modalidad<select v-model="filters.delivery_type" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"><option value="">Todas</option><option value="delivery">Delivery</option><option value="pickup">Pickup</option></select></label><label class="text-sm font-semibold">Categoría<select v-model="filters.category_id" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"><option value="">Todas</option><option v-for="item in (data.sales?.by_category || [])" :key="item.key" :value="item.key">{{ item.label }}</option></select></label><label class="text-sm font-semibold">Marca<select v-model="filters.brand_id" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"><option value="">Todas</option><option v-for="item in (data.sales?.by_brand || [])" :key="item.key" :value="item.key">{{ item.label }}</option></select></label><label class="text-sm font-semibold">Método de pago<select v-model="filters.payment_method" class="mt-1 min-h-11 w-full rounded-lg border px-3" @change="applyFilters"><option value="">Todos</option><option v-for="item in (data.sales?.by_payment_method || [])" :key="item.payment_method" :value="item.payment_method">{{ item.payment_method || 'Sin clasificar' }}</option></select></label>
+            </section>
+            <nav class="flex gap-2 overflow-x-auto border-b" aria-label="Secciones del dashboard"><button v-for="tab in tabs" :key="tab.key" class="min-h-11 whitespace-nowrap border-b-2 px-4 font-semibold" :class="activeTab===tab.key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500'" @click="setTab(tab.key)">{{ tab.label }}</button></nav>
+            <div v-if="error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"><p class="font-bold">No se pudo cargar el dashboard</p><button class="mt-2 underline" @click="fetchData">Reintentar</button></div>
+            <div v-if="loading" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><div v-for="n in 8" :key="n" class="h-28 animate-pulse rounded-xl bg-slate-200"></div></div>
+            <template v-else>
+                <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><article v-for="card in cards" :key="card.key" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div class="flex items-start justify-between"><span class="text-sm font-semibold text-slate-500">{{ card.label }}</span><i :class="card.icon" class="text-blue-600"></i></div><strong class="mt-2 block text-2xl font-black text-slate-900">{{ format(card.value, card.unit) }}</strong><p class="mt-1 text-xs" :class="card.variation === null ? 'text-slate-500' : card.delta >= 0 ? 'text-emerald-700' : 'text-red-700'">{{ comparison(card) }}</p></article></section>
+                <section v-if="activeTab==='summary' || activeTab==='sales'" class="grid gap-6 lg:grid-cols-[2fr_1fr]"><article class="rounded-xl bg-white p-5 shadow-sm"><div class="mb-4 flex items-center justify-between"><div><h2 class="text-lg font-black">Ventas reconocidas</h2><p class="text-xs text-slate-500">Ventas reconocidas según la fecha de pago.</p></div><span class="text-xs text-slate-500">{{ data.period?.label }}</span></div><Chart v-if="salesChart" type="line" :data="salesChart" :options="chartOptions" /><p v-else class="py-16 text-center text-slate-500">Sin ventas reconocidas en el periodo.</p></article><article class="rounded-xl bg-white p-5 shadow-sm"><h2 class="mb-4 text-lg font-black">Productos más vendidos (Top 5)</h2><div v-if="data.sales?.top_products?.length" class="space-y-3"><div v-for="item in data.sales.top_products" :key="item.id" class="flex items-center justify-between gap-3 border-b pb-2"><span class="truncate text-sm font-semibold">{{ item.name }}</span><span class="whitespace-nowrap text-sm font-bold text-blue-700">{{ item.units }} un.</span></div></div><p v-else class="py-10 text-center text-slate-500">Sin datos.</p></article></section>
+                <section v-if="activeTab==='sales'" class="grid gap-6 md:grid-cols-2"><article v-for="dimension in salesDimensions" :key="dimension.key" class="rounded-xl bg-white p-5 shadow-sm"><h2 class="mb-1 text-lg font-black">{{ dimension.label }}</h2><p class="mb-3 text-xs text-slate-500">Ventas reconocidas del periodo.</p><Chart v-if="dimensionData(dimension.key).length" type="bar" :data="barData(dimensionData(dimension.key))" :options="barOptions" /><p v-else class="py-10 text-center text-slate-500">No hay ventas reconocidas para los filtros seleccionados.</p></article></section>
+                <section v-if="activeTab==='summary' || activeTab==='inventory'" class="grid gap-6 lg:grid-cols-2"><article class="rounded-xl bg-white p-5 shadow-sm"><h2 class="mb-4 text-lg font-black">Inventario accionable</h2><p class="mb-3 text-xs text-slate-500">Fotografía actual del inventario; no necesariamente del periodo.</p><div class="grid grid-cols-3 gap-2 text-center"><div class="rounded-lg bg-slate-50 p-3"><b class="block text-xl">{{ data.inventory?.physical || 0 }}</b><small>Físico</small></div><div class="rounded-lg bg-slate-50 p-3"><b class="block text-xl">{{ data.inventory?.available || 0 }}</b><small>Disponible</small></div><div class="rounded-lg bg-amber-50 p-3"><b class="block text-xl">{{ data.inventory?.reserved || 0 }}</b><small>Reservado actual</small></div></div><div class="mt-4 overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b text-slate-500"><th class="p-2">Producto</th><th class="p-2">Almacén</th><th class="p-2">Disponible</th></tr></thead><tbody><tr v-for="item in (data.inventory?.table || []).slice(0,8)" :key="`${item.product_id}-${item.warehouse_id}`" class="border-b"><td class="p-2"><b>{{ item.name }}</b><small class="block text-slate-500">{{ item.sku }}</small></td><td class="p-2">{{ item.warehouse_name }}</td><td class="p-2 font-bold" :class="item.available_quantity <= 0 ? 'text-red-700' : 'text-slate-800'">{{ item.available_quantity }}</td></tr></tbody></table></div></article><article class="rounded-xl bg-white p-5 shadow-sm"><h2 class="mb-4 text-lg font-black">Requiere atención</h2><div v-if="data.alerts?.length" class="space-y-3"><a v-for="alert in data.alerts" :key="alert.title" :href="alert.route" class="block rounded-lg border-l-4 border-red-500 bg-red-50 p-3 hover:bg-red-100"><div class="flex justify-between gap-3"><b>{{ alert.title }}</b><span class="font-black">{{ alert.count }}</span></div><small class="text-slate-600">Revisar módulo operativo</small></a></div><p v-else class="rounded-lg bg-emerald-50 p-6 text-center text-emerald-800">No hay alertas críticas.</p><h3 class="mt-6 mb-3 font-bold">Operación</h3><div class="grid grid-cols-2 gap-2 text-sm"><span>Pago pendiente <b>{{ data.operations?.pending_payment || 0 }}</b></span><span>Preparando <b>{{ data.operations?.preparing || 0 }}</b></span><span>Listos <b>{{ data.operations?.ready || 0 }}</b></span><span>En tránsito <b>{{ data.operations?.in_transit || 0 }}</b></span><span>Pickup <b>{{ data.operations?.awaiting_pickup || 0 }}</b></span><span>Fallidas <b>{{ data.operations?.failed_deliveries || 0 }}</b></span></div></article></section>
+            </template>
+            <section v-if="activeTab==='inventory'" class="grid gap-6 md:grid-cols-2" aria-label="Gráficos de inventario"><article v-for="chart in inventoryCharts" :key="chart.key" class="min-h-72 rounded-xl bg-white p-5 shadow-sm"><h2 class="text-lg font-black">{{ chart.title }}</h2><p class="mb-3 text-xs text-slate-500">{{ chart.description }}</p><Chart v-if="inventoryData(chart.key).length" :type="chart.type" :data="inventoryChartData(chart.key)" :options="chartOptions" /><p v-else class="py-10 text-center text-slate-500">Sin datos para mostrar.</p></article></section>
+            <section v-if="activeTab==='operations'" class="space-y-6" aria-label="Operaciones"><p class="text-sm text-slate-500">Situación operativa actual al {{ data.operations?.metadata?.as_of || updatedAt }}.</p><div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><article v-for="(value,key) in (data.operations?.current_backlog || {})" :key="key" class="rounded-xl bg-white p-5 shadow-sm"><span class="text-sm text-slate-500">{{ key.replaceAll('_',' ') }}</span><strong class="mt-2 block text-2xl">{{ format(value) }}</strong></article></div><div class="grid gap-4 md:grid-cols-2" aria-label="Tiempos de preparación"><article v-for="metric in cycleMetrics" :key="metric.key" class="rounded-xl bg-white p-5 shadow-sm"><h2 class="text-lg font-black">{{ metric.label }}</h2><template v-if="metric.available"><p class="mt-3 text-sm">Promedio: <strong>{{ safeMetric(metric.average_minutes) }} min</strong></p><p class="text-sm">Mediana: <strong>{{ safeMetric(metric.median_minutes) }} min</strong></p><p class="text-sm">Muestras: <strong>{{ metric.sample_count }}</strong></p><p class="text-sm">Rango: <strong>{{ safeMetric(metric.minimum_minutes) }}–{{ safeMetric(metric.maximum_minutes) }} min</strong></p></template><p v-else class="mt-4 text-sm text-slate-500">Sin muestras suficientes</p><p class="mt-3 text-xs text-slate-400">Fuente: procesos operativos; el periodo usa la fecha de finalización.</p></article></div><div class="grid gap-6 lg:grid-cols-2"><article class="rounded-xl bg-white p-5 shadow-sm"><h2 class="text-lg font-black">Flujo del periodo</h2><Chart v-if="Object.keys(data.operations?.period_flow || {}).length" type="bar" :data="operationFlowChart" :options="barOptions" /></article><article class="rounded-xl bg-white p-5 shadow-sm"><h2 class="text-lg font-black">Estados de entrega</h2><Chart v-if="data.operations?.delivery_outcomes?.length" type="bar" :data="operationOutcomesChart" :options="barOptions" /><p v-else class="py-10 text-center text-slate-500">Sin datos para mostrar.</p></article></div></section>
         </div>
     </AdminLayout>
 </template>
 
 <script setup>
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import AdminLayout from '@/layouts/AdminLayout.vue';
 import Chart from '@/components/Chart.vue';
-import { ref, onMounted, computed } from 'vue';
 import api from '@/api';
 
-const stats = ref({});
-const filters = ref({
-    year: new Date().getFullYear(),
-    month: null,
-    start_date: null,
-    end_date: null
-});
-
-const availableYears = computed(() => {
-    const currentYear = new Date().getFullYear();
-    return Array.from({ length: 5 }, (_, i) => currentYear - i);
-});
-
-const salesChartData = computed(() => {
-    if (!stats.value.sales_chart) return null;
-    
-    const labels = stats.value.sales_chart.map(d => {
-        const date = new Date();
-        date.setMonth(d.month - 1);
-        return date.toLocaleString('es-PE', { month: 'short' });
-    });
-    
-    const data = stats.value.sales_chart.map(d => d.total);
-
-    return {
-        labels,
-        datasets: [{
-            label: 'Ventas (S/)',
-            data: data,
-            backgroundColor: '#4F46E5',
-            borderRadius: 5,
-        }]
-    };
-});
-
-const fetchData = async () => {
-    try {
-        const params = {};
-        if (filters.value.year) params.year = filters.value.year;
-        if (filters.value.month) params.month = filters.value.month;
-        if (filters.value.start_date) params.start_date = filters.value.start_date;
-        if (filters.value.end_date) params.end_date = filters.value.end_date;
-        
-        const response = await api.get('/admin/dashboard', { params });
-        stats.value = response.data;
-    } catch (e) {
-        console.error(e);
-    }
-};
-
-const resetFilters = () => {
-    filters.value = {
-        year: new Date().getFullYear(),
-        month: null,
-        start_date: null,
-        end_date: null
-    };
-    fetchData();
-};
-
-const getMonthName = (month) => {
-    const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
-                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-    return months[month - 1];
-};
-
-onMounted(() => {
-    fetchData();
-});
+const route = useRoute(); const router = useRouter(); const data = ref({}); const loading = ref(false); const error = ref(''); const updatedAt = ref(''); const activeTab = ref(route.query.tab || 'summary'); const tabs = [{ key: 'summary', label: 'Resumen' }, { key: 'sales', label: 'Ventas' }, { key: 'inventory', label: 'Inventario' }, { key: 'operations', label: 'Operaciones' }];
+const filters = ref({ period: route.query.period || 'this_year', date_from: route.query.date_from || '', date_to: route.query.date_to || '', delivery_type: route.query.delivery_type || '', category_id: route.query.category_id || '', brand_id: route.query.brand_id || '', payment_method: route.query.payment_method || '' });
+const cards = computed(() => { const s = data.value.summary || {}; return [{ key: 'sales_net', label: 'Ventas netas', icon: 'pi pi-dollar', ...s.sales_net }, { key: 'recognized_orders', label: 'Pedidos con venta', icon: 'pi pi-shopping-cart', ...s.recognized_orders }, { key: 'average_ticket', label: 'Ticket promedio', icon: 'pi pi-chart-line', ...s.average_ticket }, { key: 'units_sold', label: 'Unidades vendidas', icon: 'pi pi-box', ...s.units_sold }, { key: 'buyers', label: 'Clientes compradores', icon: 'pi pi-users', ...s.buyers }, { key: 'cancellation_rate', label: 'Tasa de cancelación', icon: 'pi pi-ban', ...s.cancellation_rate }, { key: 'pending_attention', label: 'Pendientes de atención', icon: 'pi pi-clock', ...s.pending_attention }, { key: 'reserved_stock', label: 'Stock reservado', icon: 'pi pi-lock', ...s.reserved_stock }]; });
+const salesChart = computed(() => { const rows = data.value.sales?.series || []; if (!rows.length) return null; return { labels: rows.map(x => x.label || x.period), datasets: [{ label: 'Ventas netas (S/)', data: rows.map(x => Number(x.sales ?? x.total ?? 0)), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,.12)', fill: true, tension: .3 }, { label: 'Pedidos', data: rows.map(x => Number(x.orders ?? x.orders_count ?? 0)), borderColor: '#7c3aed', backgroundColor: 'transparent', tension: .3 }] }; });
+const salesDimensions = [{ key: 'by_category', label: 'Ventas por categoría' }, { key: 'by_brand', label: 'Ventas por marca' }, { key: 'by_delivery_type', label: 'Ventas por modalidad' }, { key: 'by_payment_method', label: 'Ventas por método de pago' }, { key: 'by_district', label: 'Ventas por distrito' }];
+const dimensionData = key => data.value.sales?.[key] || [];
+const barData = rows => ({ labels: rows.map(x => x.label || x.delivery_type || x.payment_method || 'Sin clasificar'), datasets: [{ label: 'Ventas (S/)', data: rows.map(x => Number(x.sales ?? x.total ?? 0)), backgroundColor: '#2563eb' }] });
+const barOptions = { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+const inventoryCharts = [{ key: 'by_warehouse', title: 'Stock por almacén', description: 'Físico, reservado y disponible vendible.', type: 'bar' }, { key: 'highest_outflow', title: 'Productos con mayor salida', description: 'Unidades salientes durante el periodo seleccionado.', type: 'bar' }, { key: 'movement_types', title: 'Movimientos por tipo', description: 'Entradas y salidas operativas del periodo.', type: 'bar' }, { key: 'reservation_statuses', title: 'Reservas por estado', description: 'Estado real de las reservas.', type: 'doughnut' }];
+const inventoryData = key => data.value.inventory?.[key] || [];
+const inventoryChartData = key => { const rows = inventoryData(key); if (key === 'by_warehouse') return { labels: rows.map(x => x.warehouse_name), datasets: [{ label: 'Físico', data: rows.map(x => x.physical), backgroundColor: '#2563eb' }, { label: 'Reservado', data: rows.map(x => x.reserved), backgroundColor: '#f59e0b' }, { label: 'Disponible vendible', data: rows.map(x => x.available), backgroundColor: '#059669' }] }; return { labels: rows.map(x => x.warehouse_name || x.name || x.type || x.status || 'Sin clasificar'), datasets: [{ label: 'Unidades', data: rows.map(x => Number(x.available ?? x.units ?? 0)), backgroundColor: '#0f766e' }] }; };
+const operationFlowChart = computed(() => ({ labels: Object.keys(data.value.operations?.period_flow || {}), datasets: [{ label: 'Pedidos', data: Object.values(data.value.operations?.period_flow || {}), backgroundColor: '#7c3aed' }] }));
+const operationOutcomesChart = computed(() => ({ labels: (data.value.operations?.delivery_outcomes || []).map(x => x.status), datasets: [{ label: 'Pedidos', data: (data.value.operations?.delivery_outcomes || []).map(x => x.orders), backgroundColor: '#0f766e' }] }));
+const cycleMetrics = computed(() => ['picking_duration', 'packing_duration', 'assignment_to_dispatch', 'dispatch_to_delivery', 'ready_to_delivery', 'ready_to_pickup'].map(key => data.value.operations?.cycle_times?.[key]).filter(Boolean));
+const safeMetric = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';
+const chartOptions = { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } };
+const format = (value, unit) => { const n = Number(value); const safe = Number.isFinite(n) ? n : 0; return unit === 'S/' ? `S/ ${safe.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : unit === '%' ? `${safe.toFixed(1)}%` : Math.round(safe).toLocaleString('es-PE'); };
+const comparison = card => card.variation === null ? 'Sin base de comparación' : `${card.delta >= 0 ? '▲' : '▼'} ${Math.abs(Number(card.variation).toFixed(1))}% vs. periodo anterior`;
+async function applyFilters() { const query = Object.fromEntries(Object.entries(filters.value).filter(([, v]) => v !== '')); await router.replace({ query }); await fetchData(); }
+async function setTab(tab) { activeTab.value = tab; await router.replace({ query: { ...route.query, tab } }); }
+async function fetchData() { loading.value = true; error.value = ''; try { const response = await api.get('/admin/dashboard', { params: filters.value }); data.value = response.data; data.value.inventory?.table?.forEach(item => { item.available_quantity = item.sellable_available; }); updatedAt.value = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { error.value = e.message; } finally { loading.value = false; } }
+onMounted(fetchData);
 </script>

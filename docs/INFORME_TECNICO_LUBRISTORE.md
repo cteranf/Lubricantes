@@ -573,3 +573,21 @@ Los `$fillable`, `$casts`, constantes y relaciones exactos deben consultarse en 
 | Territorios | `/admin/territories/import/*` | `TerritoryImportController` | `TerritoryImportService` | territory/import | `Territories.vue` | `TerritoryImportTest` |
 | Zonas/tarifas | `/admin/shipping-zones`, `/admin/shipping-rates` | controllers homónimos | `ShippingRateService` | Zone/Rate/District | `ShippingZones.vue` | `ShippingRatesCheckoutTest` |
 | Consultas | `/contact-inquiries`, `/admin/contact-inquiries/*` | controllers homónimos | `ContactInquiryService` | inquiry/note/history | `Contact.vue`, `ContactInquiries.vue` | `ContactInquiryModuleTest` |
+
+# 38. Dashboard gerencial
+
+El endpoint `GET /api/v1/admin/dashboard` está protegido por `auth:sanctum` e `is_admin`. La implementación productiva se concentra en `ManagementDashboardService` y conserva las claves históricas que consumía la portada administrativa.
+
+Una venta reconocida es exclusivamente un pedido cuyo `payment_status` es `approved` dentro del periodo seleccionado. El periodo usa `paid_at` cuando existe y, como compatibilidad limitada, `created_at` cuando no existe timestamp financiero. Los pedidos pendientes, rechazados, cancelados, reembolsados o con pago en proceso no incrementan ventas, pedidos reconocidos, ticket ni unidades vendidas. Los importes se leen de los snapshots del pedido y de sus detalles; el backend no acepta totales calculados por el navegador.
+
+Los periodos disponibles son `today`, `last_7_days`, `last_30_days`, `this_month`, `previous_month`, `this_year` y `custom`; también se conservan `year` y `month` por compatibilidad. El rango personalizado exige ambas fechas y tiene un máximo interactivo de 366 días. Los filtros de sede, almacén, categoría, marca, modalidad, método de pago y estado se validan en el controlador y se aplican en las consultas del servicio.
+
+La respuesta agrupa `summary`, `sales`, `inventory`, `customers`, `operations` y `alerts`. Inventario distingue físico, reservado y disponible (`quantity - reserved_quantity`); el reservado gerencial solo suma reservas `active` cuyo `expires_at` todavía no venció. No se presenta como margen, costo, pronóstico ni rotación porque esos datos no existen de forma confiable en el modelo actual. Las alertas son operativas (disponibilidad cero, reservas próximas a vencer y preferencias de pago fallidas/huérfanas) y deben interpretarse como pendientes de revisión, no como decisiones automáticas.
+
+La interfaz `resources/js/views/admin/Dashboard.vue` mantiene filtros en la URL, estados de carga/error/vacío, actualización manual y diseño adaptable. El gráfico usa el componente compartido `Chart.vue` y Chart.js ya instalado. La evidencia de esta modificación es código inspeccionado y la prueba `ManagementDashboardTest`; no se afirma una verificación visual automatizada de todos los anchos.
+
+La arquitectura actual realiza una sola petición completa al montar el dashboard. Las cuatro pestañas son una separación visual local y cambiar de pestaña no genera nuevas solicitudes; aplicar filtros o actualizar vuelve a solicitar el dashboard completo. `section` existe como contrato experimental, pero `Dashboard.vue` no lo utiliza y no hay aislamiento real de consultas ni caché segmentada activa. La optimización por sección queda pendiente. La suite actual documentada es de 339 pruebas pasadas (0 fallos, 0 errores, 0 omitidas; 85.87 s; exit code 0); el smoke interactivo de navegador permanece pendiente.
+
+## 39. Dashboard de inventario
+
+La sección `inventory` usa `warehouse_inventories` como fuente operativa. Expone `physical`, `reserved`, `available`, `by_warehouse`, `highest_outflow`, `movement_types`, `reservation_statuses`, `product_inventory` y `metadata`. La existencia actual no depende del periodo comercial; la salida y los movimientos sí se filtran por el periodo seleccionado. Disponible se calcula como `max(physical - reserved, 0)` y las reservas vigentes se mantienen separadas de reservas generadas históricas. No se calculan costos, valorización, rotación ni cobertura sin una fórmula comercial aprobada.
