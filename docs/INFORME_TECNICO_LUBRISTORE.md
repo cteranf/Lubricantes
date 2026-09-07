@@ -18,6 +18,14 @@ source_commit: e24f89c
 
 # 1. Resumen ejecutivo
 
+## Reportes gerenciales (interfaz administrativa)
+
+La ruta protegida `/admin/reports/management` presenta seis pestañas: Ventas, Inventario, Movimientos, Operaciones, Tiempos de ciclo y Catálogos. Cada cambio de pestaña solicita únicamente el contrato JSON de la sección activa; no se cargan reportes ocultos. Los filtros admitidos se conservan en la query string y la exportación utiliza exactamente esos mismos parámetros mediante el endpoint `/api/v1/admin/reports/management/{section}/export`.
+
+Movimientos admite periodo, fechas personalizadas, almacén, producto, categoría, marca, tipo y dirección. Operaciones admite modalidad, severidad, razón, etapa y vencido. Ciclos admite periodo, fechas, modalidad y las siete métricas certificadas. Catálogos admite las doce opciones (`products`, `categories`, `brands`, `warehouses`, `branches`, `drivers`, `vehicles`, `departments`, `provinces`, `districts`, `shipping_zones`, `shipping_rates`) y sus filtros específicos. No existen endpoints ligeros de opciones para departamentos, provincias, distritos o zonas; la interfaz no descarga esos catálogos masivos y deja esos selectores sin opciones hasta que se publique un contrato paginado.
+
+El Dashboard es una vista gerencial agregada distinta de Reportes: el primero conserva su respuesta completa y pestañas visuales locales; Reportes consulta bajo demanda una sección y muestra sus filas, totales, metadatos y truncamiento. Los CSV son UTF-8 con BOM, cabeceras explícitas y neutralización contra inyección de fórmulas. Las respuestas no exponen datos personales. La suite actual validada contiene 390 pruebas exitosas; la interacción visual con navegador (smoke manual) sigue pendiente.
+
 LubriStore es un comercio electrónico de lubricantes. Resuelve la venta de productos con catálogo, carrito, checkout, reservas de inventario, pago, preparación, despacho, entrega y recojo en sede. Los actores reales son clientes y administradores; existen entidades operativas para repartidores y vehículos.
 
 El backend es Laravel 9.52.21 sobre PHP 8.3 y MySQL; el frontend es Vue 3 con Vite, Vue Router, Pinia, Axios y PrimeVue. Sanctum protege las sesiones API. Mercado Pago está integrado junto con un gateway mock para pruebas.
@@ -586,7 +594,7 @@ La respuesta agrupa `summary`, `sales`, `inventory`, `customers`, `operations` y
 
 La interfaz `resources/js/views/admin/Dashboard.vue` mantiene filtros en la URL, estados de carga/error/vacío, actualización manual y diseño adaptable. El gráfico usa el componente compartido `Chart.vue` y Chart.js ya instalado. La evidencia de esta modificación es código inspeccionado y la prueba `ManagementDashboardTest`; no se afirma una verificación visual automatizada de todos los anchos.
 
-La arquitectura actual realiza una sola petición completa al montar el dashboard. Las cuatro pestañas son una separación visual local y cambiar de pestaña no genera nuevas solicitudes; aplicar filtros o actualizar vuelve a solicitar el dashboard completo. `section` existe como contrato experimental, pero `Dashboard.vue` no lo utiliza y no hay aislamiento real de consultas ni caché segmentada activa. La optimización por sección queda pendiente. La suite actual documentada es de 339 pruebas pasadas (0 fallos, 0 errores, 0 omitidas; 85.87 s; exit code 0); el smoke interactivo de navegador permanece pendiente.
+La arquitectura actual realiza una sola petición completa al montar el dashboard. Las cuatro pestañas son una separación visual local y cambiar de pestaña no genera nuevas solicitudes; aplicar filtros o actualizar vuelve a solicitar el dashboard completo. `section` existe como contrato experimental, pero `Dashboard.vue` no lo utiliza y no hay aislamiento real de consultas ni caché segmentada activa. La optimización por sección queda pendiente. La suite actual ejecutada es de 390 pruebas pasadas; el smoke interactivo de navegador permanece pendiente.
 
 ## 39. Dashboard de inventario
 

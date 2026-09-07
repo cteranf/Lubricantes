@@ -53,6 +53,7 @@ let previousOverflow = '';
 const navigation = [
     { label: 'Dashboard', to: '/admin/dashboard', icon: 'pi pi-home' },
     { label: 'Consultas', to: '/admin/contact-inquiries', icon: 'pi pi-inbox' },
+    { label: 'Reportes gerenciales', to: '/admin/reports/management', icon: 'pi pi-chart-bar' },
     { label: 'Productos', to: '/admin/products', icon: 'pi pi-box' },
     { label: 'Sedes', to: '/admin/branches', icon: 'pi pi-map-marker' },
     { label: 'Ubicaciones', to: '/admin/locations', icon: 'pi pi-globe' },

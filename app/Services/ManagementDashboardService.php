@@ -80,6 +80,13 @@ class ManagementDashboardService
         };
     }
 
+    public function reportOperations(array $filters): array
+    {
+        [$start, $end] = $this->period($filters);
+
+        return ['attention_queue' => $this->attentionQueue(), 'cycle_times' => $this->cycleTimes($start, $end)];
+    }
+
     public function summarySection(array $filters): array
     {
         $legacy = $this->legacyDashboard($filters);

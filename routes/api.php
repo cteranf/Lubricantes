@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Admin\DepartmentController as AdminDepartmentCon
 use App\Http\Controllers\Api\V1\Admin\DistrictController as AdminDistrictController;
 use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
 use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
+use App\Http\Controllers\Api\V1\Admin\ManagementReportController;
 use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliveryController;
 use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
@@ -87,6 +88,8 @@ Route::prefix('v1')->group(function () {
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
             Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+            Route::get('/reports/management/{section}', [ManagementReportController::class, 'show'])->name('reports.management.show');
+            Route::get('/reports/management/{section}/export', [ManagementReportController::class, 'export'])->name('reports.management.export');
             Route::get('/territories/import/template', [AdminTerritoryImportController::class, 'template'])->name('territories.import.template');
             Route::post('/territories/import/preview', [AdminTerritoryImportController::class, 'preview'])->middleware('throttle:10,1')->name('territories.import.preview');
             Route::post('/territories/import/confirm', [AdminTerritoryImportController::class, 'confirm'])->middleware('throttle:5,1')->name('territories.import.confirm');

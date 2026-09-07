@@ -8,6 +8,14 @@ project: LubriStore
 
 # LubriStore
 
+## Reportes gerenciales
+
+El panel administrativo incluye una sección de Reportes gerenciales con seis pestañas: Ventas, Inventario, Movimientos, Operaciones, Tiempos de ciclo y Catálogos. Cada pestaña se carga cuando se selecciona, conserva sus filtros en la dirección del navegador y permite actualizar o exportar los mismos resultados a CSV UTF-8.
+
+Los filtros varían según la pestaña: fechas, modalidad, categorías, marcas, almacenes, productos, tipos de movimiento, severidad, razones, etapas, vencimiento y métricas de ciclo. Catálogos permite consultar productos, categorías, marcas, almacenes, sedes, repartidores, vehículos y el catálogo territorial y de tarifas. Los resultados muestran totales, fecha de generación, límite y aviso cuando existe truncamiento.
+
+El Dashboard y Reportes son módulos diferentes: Dashboard ofrece indicadores agregados para supervisión; Reportes permite revisar filas y exportarlas bajo demanda. La exportación protege el contenido frente a fórmulas de hojas de cálculo y no incluye datos personales. La solución cuenta actualmente con 390 pruebas automatizadas exitosas. Falta completar el smoke manual en navegador para validar navegación, filtros, descargas y tamaños de pantalla.
+
 ## Propósito
 
 LubriStore es una tienda digital especializada en lubricantes. Permite mostrar productos, recibir pedidos, reservar existencias y coordinar entrega a domicilio o recojo en una sede.
