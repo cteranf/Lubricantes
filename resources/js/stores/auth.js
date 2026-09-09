@@ -40,7 +40,7 @@ export const useAuthStore = defineStore('auth', {
             if (!this.token) return;
             try {
                 const response = await api.get('/auth/user');
-                this.user = response.data;
+                this.user = response.data.data || response.data;
             } catch (e) {
                 this.logout();
             }

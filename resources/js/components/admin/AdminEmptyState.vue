@@ -1,0 +1,2 @@
+<template><div class="p-12 text-center"><i :class="icon" class="mb-3 text-3xl text-slate-400" aria-hidden="true"></i><p class="font-bold text-slate-700">{{ title }}</p><p class="mt-1 text-sm text-slate-500">{{ description }}</p><slot /></div></template>
+<script setup>defineProps({ icon: { type: String, default: 'pi pi-inbox' }, title: { type: String, required: true }, description: { type: String, required: true } });</script>

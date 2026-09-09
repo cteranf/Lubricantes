@@ -23,6 +23,7 @@ class User extends Authenticatable
         'password',
         'role',
         'can_deliver',
+        'is_active',
         'phone',
         'addresses',
     ];
@@ -46,11 +47,27 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'addresses' => 'array',
         'can_deliver' => 'boolean',
+        'is_active' => 'boolean',
     ];
 
     public function isAdmin()
     {
         return $this->role === 'admin';
+    }
+
+    public function isTreasury(): bool
+    {
+        return $this->role === 'treasury';
+    }
+
+    /**
+     * Models created before the pending state migration do not receive the
+     * database default in Eloquent's in-memory attributes. Treat that absence
+     * as active; the persisted column remains the source of truth once applied.
+     */
+    public function getIsActiveAttribute($value): bool
+    {
+        return $value === null ? true : (bool) $value;
     }
 
     public function orders()

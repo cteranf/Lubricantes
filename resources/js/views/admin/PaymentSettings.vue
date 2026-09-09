@@ -1,11 +1,8 @@
 <template>
     <AdminLayout>
-        <div class="space-y-6 max-w-5xl">
-            <div class="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-900">Métodos de Pago y Pasarelas</h1>
-                    <p class="text-sm text-slate-500">Configura qué medios de pago están disponibles para tus clientes y administra las pasarelas activas.</p>
-                </div>
+        <main class="mx-auto max-w-7xl space-y-6" aria-labelledby="payment-settings-title">
+            <AdminPageHeader eyebrow="CONFIGURACIÓN COMERCIAL" title="Métodos de pago" title-id="payment-settings-title" description="Configura las alternativas de pago disponibles para los clientes.">
+                <template #action>
                 <button
                     type="button"
                     :disabled="saving"
@@ -16,12 +13,19 @@
                     <i v-else class="pi pi-save"></i>
                     <span>{{ saving ? 'Guardando...' : 'Guardar Cambios' }}</span>
                 </button>
-            </div>
+                </template>
+            </AdminPageHeader>
 
             <div v-if="loading" class="bg-white rounded-2xl p-12 text-center text-slate-500 shadow-sm">
                 <i class="pi pi-spin pi-spinner text-3xl text-blue-600 mb-3"></i>
                 <p>Cargando configuración de pagos...</p>
             </div>
+
+            <section v-else-if="loadError" class="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900" role="alert">
+                <p class="font-bold"><i class="pi pi-exclamation-circle mr-2" aria-hidden="true"></i>No se pudo cargar la configuración</p>
+                <p class="mt-1 text-sm">{{ loadError }}</p>
+                <button type="button" class="mt-3 rounded-lg border border-red-300 px-3 py-2 text-sm font-bold" @click="loadSettings">Reintentar</button>
+            </section>
 
             <div v-else class="space-y-6">
                 <!-- 1. Card / Online Gateway Card -->
@@ -236,7 +240,7 @@
                 </div>
 
             </div>
-        </div>
+        </main>
     </AdminLayout>
 </template>
 
@@ -245,10 +249,12 @@ import { onMounted, ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import api from '@/api';
 import AdminLayout from '@/layouts/AdminLayout.vue';
+import AdminPageHeader from '@/components/admin/AdminPageHeader.vue';
 
 const toast = useToast();
 const loading = ref(true);
 const saving = ref(false);
+const loadError = ref('');
 
 const form = ref({
     card_enabled: true,
@@ -284,11 +290,13 @@ const form = ref({
 
 async function loadSettings() {
     loading.value = true;
+    loadError.value = '';
     try {
         const response = await api.get('/admin/payment-settings');
         Object.assign(form.value, response.data);
         form.value.mercadopago_access_token = '';
     } catch (e) {
+        loadError.value = e.response?.data?.message || 'No se pudo cargar la configuración de pagos.';
         toast.add({
             severity: 'error',
             summary: 'Error',

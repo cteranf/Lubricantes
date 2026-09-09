@@ -16,7 +16,13 @@ source_commit: e24f89c
 
 > Este documento describe el estado confirmado del repositorio en la fecha y commit indicados. El código y las migraciones tienen precedencia si posteriormente existe una diferencia.
 
+> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). Es un diagnóstico de lectura y una propuesta futura; no implica que el módulo de Tesorería esté implementado.
+
 # 1. Resumen ejecutivo
+
+## Navegación administrativa
+
+`AdminLayout.vue` mantiene todas las rutas y permisos existentes y ahora ofrece un sidebar desktop expandido (18rem) o contraído (5rem), con preferencia persistida en `localStorage` bajo `lubristore.admin.sidebar.collapsed`. En viewport menor a 1024px funciona como drawer superpuesto de 18rem con overlay, botón hamburguesa, cierre por Escape, clic externo y navegación. La detección usa `matchMedia`, limpia listeners al desmontar y restaura el overflow del documento. Los iconos conservan nombres accesibles, las opciones contraídas muestran tooltip CSS en hover/focus y la ruta activa contempla rutas anidadas. El cambio es exclusivamente frontend; no altera backend, rutas ni permisos.
 
 ## Reportes gerenciales (interfaz administrativa)
 
@@ -30,7 +36,7 @@ LubriStore es un comercio electrónico de lubricantes. Resuelve la venta de prod
 
 El backend es Laravel 9.52.21 sobre PHP 8.3 y MySQL; el frontend es Vue 3 con Vite, Vue Router, Pinia, Axios y PrimeVue. Sanctum protege las sesiones API. Mercado Pago está integrado junto con un gateway mock para pruebas.
 
-**Estado:** catálogo, carrito, territorios, sedes, inventario, reservas, fulfillment, pickup/delivery, gestión de consultas y simulación de pagos tienen implementación y pruebas automatizadas. Mercado Pago persistente dispone de endurecimiento y cuatro migraciones pendientes en la base local revisada. La activación en staging/producción exige variables, migraciones controladas, HTTPS, webhook, correo, colas y pruebas MySQL de concurrencia.
+**Estado:** catálogo, carrito, territorios, sedes, inventario, reservas, fulfillment, pickup/delivery, gestión de consultas y simulación de pagos tienen implementación y pruebas automatizadas. Mercado Pago persistente dispone de endurecimiento; `migrate:status` local confirma ejecutadas sus migraciones de preferencias, gateway, webhooks y referencia actual. La activación en staging/producción exige variables, HTTPS, webhook, correo, colas y pruebas MySQL de concurrencia.
 
 Funciones que requieren configuración: credenciales de Mercado Pago, destinatarios de correo, zonas/tarifas comerciales, sedes y almacenes productivos, repartidores/vehículos, colas y scheduler. La zona Carabayllo S/ 8.00 descrita más adelante es exclusivamente local de desarrollo.
 
@@ -125,7 +131,7 @@ flowchart LR
   R -->|pago/confirmación| U[Reserva consumed]
   U --> S[Movimiento sale]
   R -->|cancelación/timeout| L[released/expired]
-  L --> CR[Movimiento cancellation_return]
+  U -->|cancelación posterior| CR[Movimiento cancellation_return]
   U --> P[Picking] --> K[Packing] --> F[Ready]
 ```
 
@@ -199,7 +205,7 @@ Modelos persistentes:
 
 La idempotencia usa claves únicas, referencia externa opaca y eventos persistentes. Pagos aprobados no se aplican dos veces. `refunded`, `charged_back` y `canceled` requieren intervención/flujo financiero controlado; no deben reponer inventario automáticamente sin una política explícita.
 
-Comandos disponibles: `payments:backfill-legacy-preferences` y `payments:reconcile-preferences`; ambos deben ejecutarse primero en dry-run y `--apply` solo con respaldo. Las migraciones `2026_09_04_070500` a `070530` están pendientes en la base local revisada; fueron certificadas en una base aislada MySQL 8 según el historial del proyecto, no se ejecutaron aquí.
+Comandos disponibles: `payments:backfill-legacy-preferences` y `payments:reconcile-preferences`; ambos deben ejecutarse primero en dry-run y `--apply` solo con respaldo. La consulta actual `php artisan migrate:status` del 2026-09-08 registra las migraciones `2026_09_04_070500` a `070530` como ejecutadas en la base local. Ese estado debe comprobarse de nuevo antes de cualquier despliegue.
 
 ```mermaid
 sequenceDiagram
@@ -423,7 +429,7 @@ Confirmado en la base local revisada: catálogo INEI cargado; sede principal fic
 
 | Nivel | Evidencia/impacto | Recomendación | Bloqueo |
 |---|---|---|---|
-| Crítico | migraciones de pagos pendientes localmente | aplicar solo en staging con respaldo y MySQL 8 | staging/producción |
+| Crítico | conciliación y revisión manual de transferencias aún no implementadas | implementar Tesorería con respaldo y pruebas MySQL 8 | staging/producción |
 | Alto | credenciales, webhook y correo dependen de entorno | secretos gestionados, HTTPS, worker y smoke tests | producción |
 | Alto | SQLite no prueba todos los locks/concurrencia | certificación MySQL 8 y pruebas paralelas | producción |
 | Medio | bundle Vite supera 500 KB; Browserslist desactualizado | code splitting y actualizar caniuse-lite | no bloquea local |
@@ -599,3 +605,27 @@ La arquitectura actual realiza una sola petición completa al montar el dashboar
 ## 39. Dashboard de inventario
 
 La sección `inventory` usa `warehouse_inventories` como fuente operativa. Expone `physical`, `reserved`, `available`, `by_warehouse`, `highest_outflow`, `movement_types`, `reservation_statuses`, `product_inventory` y `metadata`. La existencia actual no depende del periodo comercial; la salida y los movimientos sí se filtran por el periodo seleccionado. Disponible se calcula como `max(physical - reserved, 0)` y las reservas vigentes se mantienen separadas de reservas generadas históricas. No se calculan costos, valorización, rotación ni cobertura sin una fórmula comercial aprobada.
+
+## 40. Usuarios y perfil
+
+El modelo actual conserva los tipos `admin` y `customer` en `users.role`; no usa Spatie Permission ni se introducen roles nuevos. `can_deliver` se mantiene únicamente como compatibilidad del flujo legacy de reparto y no crea ni altera registros del catálogo `DeliveryDriver`.
+
+La migración `2026_09_07_070500_add_is_active_to_users_table` añade el estado persistente `is_active` y un índice para la comprobación de administradores activos. La consulta actual `php artisan migrate:status` del 2026-09-08 la registra como ejecutada en la base local. En cualquier otro entorno debe aplicarse de manera controlada antes de desplegar endpoints que consulten esa columna.
+
+Las rutas administrativas `GET/POST /api/v1/admin/users`, `GET/PUT /api/v1/admin/users/{user}`, `PATCH /api/v1/admin/users/{user}/status` y `PUT /api/v1/admin/users/{user}/password` exigen `auth:sanctum`, usuario activo e `is_admin`. Usan respuestas reducidas: identificador, nombre, correo, teléfono, tipo, estado, capacidad legacy y fecha de creación; no entregan hashes, tokens, `remember_token` ni relaciones. La búsqueda se limita a nombre/correo, los filtros a estado/tipo y el orden es fijo.
+
+`UserAdministrationService` aplica transacciones y `lockForUpdate()` para estado, degradación de tipo y restablecimiento de contraseña. Impide autodesactivación y que se desactive o degrade el último administrador activo. Desactivar revoca todos los tokens Sanctum; reactivar no restaura ninguno. El middleware `active_user` rechaza además cualquier token que llegara a sobrevivir a una revocación. No existe una infraestructura de auditoría general compatible, por lo que no se registran auditorías parciales ni secretos.
+
+El perfil usa exclusivamente `request()->user()` mediante `GET/PUT /api/v1/profile` y `PUT /api/v1/profile/password`. Solo permite nombre, correo normalizado y teléfono. La contraseña requiere la contraseña actual, confirmación y mínimo de ocho caracteres; se rechaza reutilizar la actual y se revocan todos los tokens, obligando a iniciar sesión nuevamente. Existe la columna `email_verified_at`, pero la verificación no está implementada por el modelo ni por rutas, así que el cambio de correo no intenta iniciar un flujo ficticio.
+
+La evidencia automatizada actual incluye `UserAdministrationTest`, `AdminUsersFrontendTest` y `ProfileFrontendTest`; la suite posterior registró 403 pruebas aprobadas en 82.25 segundos. Las pruebas de interfaz son estáticas y el smoke manual responsivo sigue pendiente.
+
+La interfaz administrativa de Usuarios usa un encabezado de seguridad, tarjeta de total global, filtros accesibles, tabla responsive con avatares derivados localmente, badges textuales de rol/estado, acciones iconográficas con tooltip y `aria-label`, confirmación PrimeVue para activar/desactivar, modales separados y paginación basada exclusivamente en la metadata del backend. La tabla limita el desplazamiento horizontal a su contenedor; la validación visual real de anchos sigue pendiente.
+
+### Primera etapa del sistema visual administrativo
+
+La primera etapa reutiliza cabecera, badge de estado, botón iconográfico con tooltip, estado vacío y paginación en Categorías, Marcas y Sliders; Métodos de pago adopta la cabecera estándar y estado de error sin cambiar su contrato. Estas vistas conservan endpoints, payloads, permisos y validaciones existentes. Sus tablas mantienen columnas explícitas y desplazamiento horizontal interno; Usuarios, Dashboard, Reportes y las vistas operativas complejas no se rediseñan en esta etapa. La comprobación visual manual responsive queda pendiente.
+
+### Segunda etapa visual: operación y delivery
+
+Sedes, Almacenes y Tarifas de envío usan la cabecera administrativa reutilizable, sin modificar sus contratos. Sus APIs devuelven listados paginados de 20 registros; las vistas continúan usando los filtros existentes (búsqueda; sede en almacenes; búsqueda/estado/zona en tarifas). Repartidores y Vehículos conservan sus contratos paginados y sus filtros actuales, pero requieren una migración posterior de tarjetas y modales al sistema compartido completo. La verificación de interacción y responsive real sigue pendiente.

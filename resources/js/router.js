@@ -36,6 +36,7 @@ const routes = [
 
     // Admin Routes
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/users', component: () => import('@/views/admin/Users.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/contact-inquiries', component: () => import('@/views/admin/ContactInquiries.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/reports/management', name: 'admin-management-reports', component: () => import('@/views/admin/ManagementReports.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/products', component: AdminProducts, meta: { requiresAdmin: true } },
@@ -52,6 +53,7 @@ const routes = [
     { path: '/admin/delivery-drivers', component: () => import('@/views/admin/DeliveryDrivers.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/delivery-vehicles', component: () => import('@/views/admin/DeliveryVehicles.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/payment-settings', component: () => import('@/views/admin/PaymentSettings.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/treasury/receiving-accounts', name: 'admin-treasury-receiving-accounts', component: () => import('@/views/admin/TreasuryReceivingAccounts.vue'), meta: { requiresAdmin: true } },
 ];
 
 const router = createRouter({

@@ -1,60 +1,23 @@
 <template>
-    <AppLayout>
-        <div class="container mx-auto px-4 py-8">
-            <h1 class="text-3xl font-bold mb-8">Mi Perfil</h1>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <!-- Sidebar Menu (could be a component) -->
-                <div class="bg-white rounded-lg shadow h-fit">
-                    <ul class="text-sm">
-                        <li><router-link to="/profile" class="block px-6 py-4 border-l-4 border-blue-600 bg-blue-50 text-blue-700 font-bold">Información Personal</router-link></li>
-                        <li><router-link to="/orders" class="block px-6 py-4 border-l-4 border-transparent hover:bg-gray-50 hover:text-blue-600">Mis Pedidos</router-link></li>
-                        <li><button @click="authStore.logout(); router.push('/login')" class="w-full text-left px-6 py-4 border-l-4 border-transparent hover:bg-red-50 hover:text-red-600 text-red-500">Cerrar Sesión</button></li>
-                    </ul>
-                </div>
-
-                <!-- Content -->
-                <div class="col-span-1 md:col-span-2">
-                    <div class="bg-white rounded-lg shadow-lg p-8">
-                         <h2 class="text-xl font-bold mb-6 border-b pb-4">Datos de la Cuenta</h2>
-                         
-                         <form @submit.prevent class="space-y-6">
-                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                 <div>
-                                     <label class="block text-gray-700 font-medium mb-2">Nombre Completo</label>
-                                     <input :value="authStore.user?.name" disabled class="w-full bg-gray-100 border rounded px-4 py-2 cursor-not-allowed text-gray-500">
-                                 </div>
-                                  <div>
-                                     <label class="block text-gray-700 font-medium mb-2">Email</label>
-                                     <input :value="authStore.user?.email" disabled class="w-full bg-gray-100 border rounded px-4 py-2 cursor-not-allowed text-gray-500">
-                                 </div>
-                             </div>
-
-                             <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-                                <p class="text-sm text-yellow-700">Para actualizar tus datos sensibles, por favor contacta a soporte.</p>
-                             </div>
-                         </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </AppLayout>
+  <AppLayout><main class="container mx-auto max-w-4xl px-4 py-8" aria-labelledby="profile-title"><h1 id="profile-title" class="mb-6 text-3xl font-bold">Mi perfil</h1><p v-if="notice" class="mb-4 rounded-lg bg-emerald-50 p-3 text-emerald-800" aria-live="polite">{{ notice }}</p><p v-if="error" class="mb-4 rounded-lg bg-red-50 p-3 text-red-800" role="alert">{{ error }}</p><div class="grid gap-6 md:grid-cols-[1fr_16rem]"><section class="space-y-6"><form class="rounded-xl bg-white p-6 shadow" @submit.prevent="saveProfile"><h2 class="mb-5 text-xl font-bold">Datos personales</h2><div class="grid gap-4 sm:grid-cols-2"><label>Nombre<input v-model="profile.name" required class="field" autocomplete="name" /></label><label>Correo<input v-model="profile.email" required class="field" type="email" autocomplete="email" /></label><label>Teléfono<input v-model="profile.phone" class="field" autocomplete="tel" /></label></div><button class="mt-6 min-h-11 rounded-lg bg-blue-700 px-4 font-semibold text-white" :disabled="savingProfile">{{ savingProfile ? 'Guardando…' : 'Guardar datos' }}</button></form><form class="rounded-xl bg-white p-6 shadow" @submit.prevent="savePassword"><h2 class="mb-1 text-xl font-bold">Seguridad</h2><p class="mb-5 text-sm text-slate-600">Al cambiar tu contraseña, se cerrarán todas tus sesiones y deberás iniciar sesión otra vez.</p><div class="space-y-4"><label>Contraseña actual<input v-model="password.current_password" required class="field" :type="showPasswords ? 'text' : 'password'" autocomplete="current-password" /></label><label>Nueva contraseña<input v-model="password.password" required minlength="8" class="field" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" /><span class="mt-1 block text-xs text-slate-500">Mínimo 8 caracteres.</span></label><label>Confirmar nueva contraseña<input v-model="password.password_confirmation" required class="field" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" /></label><label class="flex items-center gap-2 text-sm"><input v-model="showPasswords" type="checkbox" /> Mostrar contraseñas</label></div><button class="mt-6 min-h-11 rounded-lg bg-slate-900 px-4 font-semibold text-white" :disabled="savingPassword">{{ savingPassword ? 'Actualizando…' : 'Cambiar contraseña' }}</button></form></section><aside class="h-fit rounded-xl bg-white p-6 shadow"><h2 class="font-bold">Cuenta</h2><dl class="mt-4 space-y-3 text-sm"><div><dt class="text-slate-500">Rol</dt><dd class="font-semibold">{{ account.role_label || '—' }}</dd></div><div><dt class="text-slate-500">Estado</dt><dd class="font-semibold">{{ account.is_active ? 'Activa' : 'Inactiva' }}</dd></div></dl></aside></div></main></AppLayout>
 </template>
 
 <script setup>
-import AppLayout from '@/layouts/AppLayout.vue';
-import { useAuthStore } from '@/stores/auth';
+import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { onMounted } from 'vue';
+import AppLayout from '@/layouts/AppLayout.vue';
+import api from '@/api';
+import { useAuthStore } from '@/stores/auth';
 
-const authStore = useAuthStore();
-const router = useRouter();
-
-onMounted(() => {
-    if (!authStore.isAuthenticated) {
-        router.push('/login');
-    } else {
-        authStore.fetchUser();
-    }
-});
+const authStore = useAuthStore(), router = useRouter();
+const profile = reactive({ name: '', email: '', phone: '' }), account = ref({}), password = reactive({ current_password: '', password: '', password_confirmation: '' });
+const savingProfile = ref(false), savingPassword = ref(false), showPasswords = ref(false), error = ref(''), notice = ref('');
+function errorMessage(e) { return e.response?.data?.message || Object.values(e.response?.data?.errors || {}).flat().join(' ') || 'No se pudo guardar la información.'; }
+function hydrate(user) { account.value = user; Object.assign(profile, { name: user.name || '', email: user.email || '', phone: user.phone || '' }); }
+async function load() { try { hydrate((await api.get('/profile')).data.data); } catch (e) { error.value = errorMessage(e); } }
+async function saveProfile() { savingProfile.value = true; error.value = ''; notice.value = ''; try { const user = (await api.put('/profile', profile)).data.data; hydrate(user); authStore.user = { ...authStore.user, ...user }; notice.value = 'Datos personales actualizados.'; } catch (e) { error.value = errorMessage(e); } finally { savingProfile.value = false; } }
+async function savePassword() { savingPassword.value = true; error.value = ''; notice.value = ''; try { await api.put('/profile/password', password); Object.assign(password, { current_password: '', password: '', password_confirmation: '' }); await authStore.logout(); router.replace({ path: '/login', query: { message: 'Contraseña actualizada. Inicia sesión nuevamente.' } }); } catch (e) { error.value = errorMessage(e); } finally { savingPassword.value = false; } }
+onMounted(load);
 </script>
+
+<style scoped>.field{display:block;width:100%;min-height:2.75rem;border:1px solid #cbd5e1;border-radius:.5rem;padding:.6rem .75rem;margin-top:.3rem}.field:focus{outline:2px solid #2563eb;outline-offset:1px}</style>

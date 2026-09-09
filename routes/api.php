@@ -16,11 +16,13 @@ use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliveryController;
 use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
+use App\Http\Controllers\Api\V1\Admin\PaymentReceivingAccountController as AdminPaymentReceivingAccountController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\ProvinceController as AdminProvinceController;
 use App\Http\Controllers\Api\V1\Admin\ShippingRateController as AdminShippingRateController;
 use App\Http\Controllers\Api\V1\Admin\ShippingZoneController as AdminShippingZoneController;
 use App\Http\Controllers\Api\V1\Admin\TerritoryImportController as AdminTerritoryImportController;
+use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BrandController;
@@ -32,6 +34,7 @@ use App\Http\Controllers\Api\V1\ContactInquiryController;
 use App\Http\Controllers\Api\V1\LocationOptionController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\UserAddressController;
 use Illuminate\Support\Facades\Route;
 
@@ -65,9 +68,12 @@ Route::prefix('v1')->group(function () {
     Route::post('/payment/webhook', [App\Http\Controllers\Api\V1\PaymentController::class, 'webhook']);
 
     // Protected Routes
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active_user'])->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/auth/user', [AuthController::class, 'user']);
+        Route::get('/profile', [ProfileController::class, 'show']);
+        Route::put('/profile', [ProfileController::class, 'update']);
+        Route::put('/profile/password', [ProfileController::class, 'password']);
 
         // Cart & Checkout
         Route::post('/cart', [CartController::class, 'store']); // Sync cart
@@ -87,6 +93,9 @@ Route::prefix('v1')->group(function () {
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::patch('/users/{user}/status', [AdminUserController::class, 'status'])->name('users.status');
+            Route::put('/users/{user}/password', [AdminUserController::class, 'password'])->name('users.password');
+            Route::apiResource('users', AdminUserController::class)->only(['index', 'store', 'show', 'update']);
             Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
             Route::get('/reports/management/{section}', [ManagementReportController::class, 'show'])->name('reports.management.show');
             Route::get('/reports/management/{section}/export', [ManagementReportController::class, 'export'])->name('reports.management.export');
@@ -181,6 +190,13 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'show'])->name('payment-settings.show');
             Route::put('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'update'])->name('payment-settings.update');
+            Route::get('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'index'])->name('treasury.receiving-accounts.index');
+            Route::post('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'store'])->name('treasury.receiving-accounts.store');
+            Route::get('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'show'])->name('treasury.receiving-accounts.show');
+            Route::put('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'update'])->name('treasury.receiving-accounts.update');
+            Route::patch('/treasury/receiving-accounts/{account}/status', [AdminPaymentReceivingAccountController::class, 'status'])->name('treasury.receiving-accounts.status');
+            Route::post('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'replaceQr'])->name('treasury.receiving-accounts.qr.replace');
+            Route::get('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'qr'])->name('treasury.receiving-accounts.qr.show');
             Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class)->only(['index', 'store', 'update', 'destroy']);
         });
     });

@@ -90,4 +90,12 @@ El panel administrativo ofrece una vista ejecutiva de ventas reconocidas según 
 
 El dashboard carga una respuesta completa al abrirse. Las pestañas organizan visualmente esa respuesta y cambiar entre ellas no realiza nuevas solicitudes; aplicar filtros o actualizar vuelve a cargar el dashboard completo. La carga segmentada por sección es una optimización futura y el contrato `section` se mantiene experimental.
 
+## Usuarios y perfil
+
+Los administradores pueden gestionar cuentas desde el panel: buscar usuarios, crear cuentas, actualizar datos autorizados, activar o desactivar accesos y restablecer contraseñas. El sistema conserva el historial comercial y operativo: las cuentas no se eliminan desde esta administración. También protege que siempre permanezca al menos un administrador activo.
+
+Cada persona autenticada dispone de “Mi perfil” para actualizar sus propios datos de contacto y cambiar su contraseña tras confirmar la actual. El cambio de contraseña cierra las sesiones activas como medida de seguridad y requiere iniciar sesión otra vez. Los roles, permisos administrativos y estado de la cuenta no se modifican desde el perfil personal.
+
+La validación automática actual cubre estas reglas de acceso y privacidad; antes de una puesta en marcha debe realizarse una comprobación manual en los dispositivos y navegadores objetivo.
+
 La pestaña Inventario distingue existencias físicas, reservas y disponibilidad actuales, además de mostrar concentración por almacén, movimientos y reservas por estado. La salida de productos se compara únicamente con el periodo elegido.
