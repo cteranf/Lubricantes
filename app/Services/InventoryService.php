@@ -127,6 +127,17 @@ class InventoryService
             if ($reservations->count() !== $order->items()->count()) {
                 throw new InventoryException('El pedido no tiene todas sus reservas de inventario.');
             }
+            // Acquire every balance row in the same canonical order used by
+            // expiration. Two orders that touch the same inventories therefore
+            // cannot invert their WarehouseInventory locks while consuming.
+            $inventoryKeys = $reservations
+                ->map(fn (InventoryReservation $reservation) => [$reservation->warehouse_id, $reservation->product_id])
+                ->unique(fn (array $pair) => $pair[0].':'.$pair[1])
+                ->sortBy(fn (array $pair) => $pair[0].':'.$pair[1]);
+            $inventories = collect();
+            foreach ($inventoryKeys as [$warehouseId, $productId]) {
+                $inventories->put($warehouseId.':'.$productId, WarehouseInventory::where('warehouse_id', $warehouseId)->where('product_id', $productId)->lockForUpdate()->firstOrFail());
+            }
             foreach ($reservations as $reservation) {
                 if ($reservation->status === InventoryReservation::CONSUMED) {
                     $skipped++;
@@ -136,7 +147,7 @@ class InventoryService
                 if ($reservation->status !== InventoryReservation::ACTIVE) {
                     throw new InventoryException('La reserva ya no esta activa y no puede consumirse.');
                 }
-                $inventory = WarehouseInventory::where('warehouse_id', $reservation->warehouse_id)->where('product_id', $reservation->product_id)->lockForUpdate()->firstOrFail();
+                $inventory = $inventories->get($reservation->warehouse_id.':'.$reservation->product_id);
                 if ($inventory->reserved_quantity < $reservation->quantity || $inventory->quantity < $reservation->quantity) {
                     throw new InventoryException('El inventario reservado es inconsistente.');
                 }

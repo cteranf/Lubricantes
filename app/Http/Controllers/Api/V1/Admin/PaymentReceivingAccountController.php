@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ReplacePaymentReceivingAccountQrRequest;
 use App\Http\Requests\Admin\StorePaymentReceivingAccountRequest;
+use App\Http\Requests\Admin\UpdatePaymentReceivingAccountDefaultRequest;
 use App\Http\Requests\Admin\UpdatePaymentReceivingAccountRequest;
 use App\Http\Requests\Admin\UpdatePaymentReceivingAccountStatusRequest;
 use App\Http\Resources\PaymentReceivingAccountResource;
@@ -62,6 +63,11 @@ class PaymentReceivingAccountController extends Controller
     public function status(UpdatePaymentReceivingAccountStatusRequest $request, PaymentReceivingAccount $account)
     {
         return new PaymentReceivingAccountResource($this->service->changeStatus($account, $request->boolean('is_active'), $request->user()));
+    }
+
+    public function makeDefault(UpdatePaymentReceivingAccountDefaultRequest $request, PaymentReceivingAccount $account)
+    {
+        return new PaymentReceivingAccountResource($this->service->makeDefault($account, $request->user()));
     }
 
     public function replaceQr(ReplacePaymentReceivingAccountQrRequest $request, PaymentReceivingAccount $account)

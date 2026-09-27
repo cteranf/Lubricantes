@@ -11,7 +11,7 @@
             @keydown="handleSidebarKeydown"
         >
             <div class="flex h-16 items-center justify-between border-b border-slate-800 px-5">
-                <router-link to="/admin/dashboard" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isCollapsed && !isMobileViewport ? 'LubriStore Admin' : undefined" @click="closeMobileMenu"><span v-if="!isCollapsed || isMobileViewport">Lubri<span class="text-blue-400">Store</span> Admin</span><span v-else class="text-blue-400" aria-hidden="true">LS</span></router-link>
+                <router-link :to="isTreasury ? '/treasury/payments' : '/admin/dashboard'" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isCollapsed && !isMobileViewport ? 'LubriStore Admin' : undefined" @click="closeMobileMenu"><span v-if="!isCollapsed || isMobileViewport">Lubri<span class="text-blue-400">Store</span> {{ isTreasury ? 'Tesorería' : 'Admin' }}</span><span v-else class="text-blue-400" aria-hidden="true">LS</span></router-link>
                 <button ref="closeButton" type="button" class="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 md:hidden" aria-label="Cerrar menú administrativo" @click="closeMobileMenu"><i class="pi pi-times" aria-hidden="true"></i></button>
                 <button v-if="!isMobileViewport" type="button" class="collapse-toggle flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :aria-label="isCollapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'" :title="isCollapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'" @click="toggleCollapsed"><i :class="isCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'" aria-hidden="true"></i></button>
             </div>
@@ -19,7 +19,7 @@
             <nav class="min-w-0 flex-1 overflow-y-auto px-3 py-4" aria-label="Navegación administrativa">
                 <router-link v-for="item in navigation" :key="item.to" :to="item.to" active-class="bg-slate-800 text-blue-300" class="admin-nav-link mb-1 flex min-h-11 items-center rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :class="{ 'justify-center px-2': isCollapsed && !isMobileViewport }" :data-label="item.label" :aria-label="item.label" :aria-current="isRouteActive(item.to) ? 'page' : undefined" @click="closeMobileMenu">
                     <i :class="[item.icon, { 'mr-0': isCollapsed && !isMobileViewport }]" class="mr-3 w-5 text-center" aria-hidden="true"></i><span :class="{ 'sr-only': isCollapsed && !isMobileViewport }">{{ item.label }}</span>
-                    <span v-if="item.to === '/admin/contact-inquiries' && pendingCount > 0" class="ml-auto flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-black text-white" :aria-label="`${pendingCount} consultas pendientes o en atención`">{{ pendingCount > 99 ? '99+' : pendingCount }}</span>
+                    <span v-if="!isTreasury && item.to === '/admin/contact-inquiries' && pendingCount > 0" class="ml-auto flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-black text-white" :aria-label="`${pendingCount} consultas pendientes o en atención`">{{ pendingCount > 99 ? '99+' : pendingCount }}</span>
                 </router-link>
             </nav>
             <div class="shrink-0 border-t border-slate-800 p-3">
@@ -38,7 +38,7 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import api from '@/api';
@@ -57,7 +57,7 @@ let mediaQuery;
 let previousOverflow = '';
 const SIDEBAR_STORAGE_KEY = 'lubristore.admin.sidebar.collapsed';
 
-const navigation = [
+const adminNavigation = [
     { label: 'Dashboard', to: '/admin/dashboard', icon: 'pi pi-home' },
     { label: 'Usuarios', to: '/admin/users', icon: 'pi pi-users' },
     { label: 'Mi perfil', to: '/profile', icon: 'pi pi-user' },
@@ -79,8 +79,15 @@ const navigation = [
     { label: 'Cuentas receptoras', to: '/admin/treasury/receiving-accounts', icon: 'pi pi-wallet' },
     { label: 'Sliders', to: '/admin/sliders', icon: 'pi pi-images' },
 ];
+const treasuryNavigation = [
+    { label: 'Bandeja de pagos', to: '/treasury/payments', icon: 'pi pi-wallet' },
+    { label: 'Mi perfil', to: '/profile', icon: 'pi pi-user' },
+];
+const isTreasury = computed(() => authStore.isTreasury);
+const navigation = computed(() => isTreasury.value ? treasuryNavigation : adminNavigation);
 
 async function loadPendingCount() {
+    if (isTreasury.value) return;
     try { pendingCount.value = Number((await api.get('/admin/contact-inquiries/pending-count')).data.count || 0); }
     catch { /* El contador nunca bloquea el menú. */ }
 }

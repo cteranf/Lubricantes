@@ -71,6 +71,7 @@
                 </div>
 
                 <!-- Details Grid -->
+                <CustomerTransferPaymentPanel v-if="order.payment_method === 'transferencia'" :order="order" />
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <!-- Shipping Info -->
                     <div class="bg-white rounded-lg shadow p-6">
@@ -147,6 +148,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import api from '@/api';
 import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
+import CustomerTransferPaymentPanel from '@/components/CustomerTransferPaymentPanel.vue';
 
 const route = useRoute();
 const order = ref(null);
@@ -191,7 +193,6 @@ const fetchTracking = async () => {
         error.value = e.response?.status === 404
             ? 'El pedido no existe o no pertenece a tu cuenta.'
             : 'No se pudo cargar la información de seguimiento.';
-        console.error(e);
     } finally {
         loading.value = false;
     }

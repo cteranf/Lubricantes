@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Order;
 use App\Models\PaymentSubmission;
+use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 
 class TreasuryPaymentService
@@ -39,8 +40,15 @@ class TreasuryPaymentService
         $bank = $bank === null ? null : trim($bank);
         if (in_array($channel, ['yape', 'plin'], true) && ! preg_match('/^\d{4}$/', (string) $last4)) {
             $this->invalid('Yape y Plin requieren los últimos cuatro dígitos del celular de origen.');
-        } if ($channel === 'bank_transfer' && $bank !== null && strlen($bank) > config('treasury.origin_bank_max_length')) {
+        }
+        if ($channel === 'bank_transfer' && $bank !== null && strlen($bank) > config('treasury.origin_bank_max_length')) {
             $this->invalid('El banco de origen supera la longitud permitida.');
+        }
+
+        if (in_array($channel, ['yape', 'plin'], true)) {
+            $bank = null;
+        } else {
+            $last4 = null;
         }
 
         return compact('channel', 'last4', 'bank');
@@ -68,6 +76,17 @@ class TreasuryPaymentService
     public function safeHistoryMetadata(array $metadata): array
     {
         return array_intersect_key($metadata, array_flip(['channel', 'expected_amount', 'currency', 'review_expires_at']));
+    }
+
+    public function isUniqueViolation(QueryException $exception): bool
+    {
+        $state = (string) ($exception->errorInfo[0] ?? $exception->getCode());
+        $driverCode = (int) ($exception->errorInfo[1] ?? 0);
+        $message = strtolower($exception->getMessage());
+
+        return $state === '23505'
+            || $driverCode === 1062
+            || ($driverCode === 19 && str_contains($message, 'unique constraint failed'));
     }
 
     private function invalid(string $message): never

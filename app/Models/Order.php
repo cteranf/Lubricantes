@@ -9,6 +9,12 @@ class Order extends Model
 {
     use HasFactory;
 
+    /**
+     * Payment-submission details are Treasury-only. Administrative order
+     * responses expose only the explicit safe summary attributes.
+     */
+    protected $hidden = ['paymentSubmission'];
+
     public const FULFILLMENT_RESERVED = 'reserved';
 
     public const FULFILLMENT_PREPARING = 'preparing';
@@ -154,6 +160,22 @@ class Order extends Model
     public function paymentTransactions()
     {
         return $this->hasMany(PaymentTransaction::class);
+    }
+
+    public function paymentSubmission()
+    {
+        return $this->hasOne(PaymentSubmission::class);
+    }
+
+    /**
+     * This accessor deliberately does not query. Callers that need the value
+     * must eager-load paymentSubmission to avoid an N+1 query.
+     */
+    public function getPaymentSubmissionStatusAttribute(): ?string
+    {
+        return $this->relationLoaded('paymentSubmission')
+            ? $this->paymentSubmission?->status
+            : null;
     }
 
     public function currentPaymentPreference()

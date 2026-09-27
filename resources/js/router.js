@@ -27,6 +27,7 @@ const routes = [
     { path: '/login', component: Login },
     { path: '/register', component: Register },
     { path: '/profile', component: Profile, meta: { requiresAuth: true } },
+    { path: '/treasury/payments', name: 'treasury-payments', component: () => import('@/views/treasury/TreasuryPayments.vue'), meta: { requiresTreasury: true } },
     { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true } },
     { path: '/orders/payment-return', name: 'PaymentReturn', component: PaymentReturn, meta: { requiresAuth: true } },
     { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess, meta: { requiresAuth: true } },
@@ -88,6 +89,14 @@ router.beforeEach(async (to, from, next) => {
         if (!authStore.isAuthenticated) {
             next({ path: '/login', query: { redirect: to.fullPath } });
         } else if (!authStore.isAdmin) {
+            next('/');
+        } else {
+            next();
+        }
+    } else if (to.meta.requiresTreasury) {
+        if (!authStore.isAuthenticated) {
+            next({ path: '/login', query: { redirect: to.fullPath } });
+        } else if (!authStore.isTreasury) {
             next('/');
         } else {
             next();

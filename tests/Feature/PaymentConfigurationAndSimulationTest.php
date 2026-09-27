@@ -197,7 +197,7 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         $this->assertDatabaseHas('payment_transactions', [
             'order_id' => $order->id,
             'status' => PaymentTransaction::APPROVED,
-            'approved_scope_key' => 'card-approved-order-'.$order->id,
+            'approved_scope_key' => PaymentTransaction::approvedScopeKeyForOrder($order->id),
         ]);
 
         // Fulfillment history recorded

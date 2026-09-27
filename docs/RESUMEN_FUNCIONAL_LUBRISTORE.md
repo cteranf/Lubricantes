@@ -28,6 +28,7 @@ LubriStore es una tienda digital especializada en lubricantes. Permite mostrar p
 - Inventario por sedes y almacenes.
 - Reservas temporales de stock.
 - Pago con tarjeta, transferencia, contraentrega y pago en sede según configuración.
+- Registro seguro de transferencias mediante Yape, Plin o banco, con recuperación de la presentación del cliente.
 - Preparación de pedidos, picking y packing.
 - Despacho propio o mediante courier.
 - Seguimiento y confirmación de entrega o recojo.
@@ -50,7 +51,7 @@ Las existencias se controlan por almacén. Las reservas evitan vender simultáne
 
 ## Pagos
 
-La plataforma puede trabajar con Mercado Pago y con métodos manuales. Las confirmaciones de tarjeta se verifican con el proveedor y los eventos se procesan de forma idempotente. Transferencias y cobros al entregar o recoger requieren revisión operativa según las reglas configuradas.
+La plataforma puede trabajar con Mercado Pago y con métodos manuales. Las confirmaciones de tarjeta se verifican con el proveedor y los eventos se procesan de forma idempotente. Para transferencia, el cliente puede elegir Yape, Plin o banco, consultar un QR seguro cuando corresponde y registrar su operación; queda pendiente de validación por Tesorería. La operación se protege contra duplicados y no confirma el pago ni descuenta inventario por sí sola.
 
 ## Delivery y pickup
 
@@ -58,7 +59,7 @@ Delivery utiliza zonas y tarifas configurables. Pickup muestra únicamente sedes
 
 ## Seguridad
 
-Las cuentas utilizan autenticación basada en tokens. El acceso administrativo está separado del acceso de clientes. El servidor vuelve a validar precios, disponibilidad, propiedad de pedidos, cobertura y pagos; el navegador no puede confirmar por sí solo una transacción financiera.
+Las cuentas utilizan autenticación basada en tokens. El acceso administrativo está separado del acceso de clientes y existe una capacidad de Tesorería diferenciada para la siguiente fase. El servidor vuelve a validar precios, disponibilidad, propiedad de pedidos, cobertura y pagos; el navegador no puede confirmar por sí solo una transacción financiera. Los QR de transferencia se obtienen desde almacenamiento privado y los datos bancarios completos solo se muestran al propietario autorizado de un pedido elegible.
 
 ## Beneficios
 
@@ -80,7 +81,7 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 
 ## Posibles ampliaciones
 
-Entre las ampliaciones naturales están nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, automatización de notificaciones, aplicaciones para repartidores, reportes comerciales y pruebas de interfaz automatizadas.
+La siguiente ampliación prevista es una bandeja de Tesorería para revisar, observar o rechazar presentaciones con historial y motivos obligatorios. No aprobará pagos ni consumirá inventario todavía. Entre las demás ampliaciones naturales están nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, automatización de notificaciones, aplicaciones para repartidores, reportes comerciales y pruebas de interfaz automatizadas.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
 
@@ -99,3 +100,18 @@ Cada persona autenticada dispone de “Mi perfil” para actualizar sus propios 
 La validación automática actual cubre estas reglas de acceso y privacidad; antes de una puesta en marcha debe realizarse una comprobación manual en los dispositivos y navegadores objetivo.
 
 La pestaña Inventario distingue existencias físicas, reservas y disponibilidad actuales, además de mostrar concentración por almacén, movimientos y reservas por estado. La salida de productos se compara únicamente con el periodo elegido.
+## Estado de transferencias
+
+Los clientes pueden registrar una transferencia y Tesorería puede revisarla, observarla o rechazarla con trazabilidad. Si una reserva vence después de un pago informado, la tienda no reactiva productos ni solicita un segundo pago: el caso queda en revisión manual y puede orientarse por el canal de soporte configurado.
+
+La siguiente afirmación pertenece al estado histórico previo a la aprobación certificada descrita en la sección siguiente. La política para pagos informados después de un vencimiento sigue pendiente de definición comercial.
+
+## Aprobación de transferencias por Tesorería
+
+La fase técnica de aprobación de transferencias está disponible para el equipo de Tesorería. Cuando una presentación válida está pendiente y la reserva sigue vigente, Tesorería puede confirmar el pago de manera controlada. El sistema registra la validación, actualiza el pago del pedido y descuenta el inventario una sola vez; una repetición coherente no duplica el cobro ni la salida de productos.
+
+El cliente ve una confirmación clara de pago validado y una referencia de operación enmascarada. Los administradores operativos no reciben un segundo botón competidor: los pedidos con presentación de Tesorería indican su estado (“Pendiente”, “Observado”, “Aprobado”, “Rechazado”, “Vencido” o “Cancelado”) y mantienen separados los permisos de cada equipo. Los pedidos históricos sin presentación conservan su flujo operativo anterior.
+
+El smoke local del pedido #15 confirmó una aprobación Yape de PEN 131.86: una transacción vinculada, una reserva consumida, una sola salida de inventario y preparación aún sin iniciar. Para proteger la privacidad, la referencia se muestra solo mediante una máscara segura (`•••11`).
+
+Siguen pendientes las decisiones comerciales sobre pagos con reservas vencidas, devoluciones, reasignaciones, notificaciones, monitoreo financiero y la puesta en producción.

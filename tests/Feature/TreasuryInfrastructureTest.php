@@ -9,11 +9,13 @@ use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
 use App\Models\User;
 use App\Services\TreasuryPaymentService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
+use PDOException;
 use Tests\TestCase;
 
 class TreasuryInfrastructureTest extends TestCase
@@ -173,5 +175,53 @@ class TreasuryInfrastructureTest extends TestCase
         $history = PaymentSubmissionHistory::create(['payment_submission_id' => $submission->id, 'event' => 'submitted', 'to_status' => 'pending_review', 'occurred_at' => now()]);
         $this->expectException(\LogicException::class);
         $history->delete();
+    }
+
+    public function test_unique_violation_classifier_is_specific_to_supported_database_drivers(): void
+    {
+        $service = app(TreasuryPaymentService::class);
+
+        foreach ([
+            'postgres unique SQLSTATE' => ['23505', 0, 'duplicate key value violates unique constraint', true],
+            'mysql duplicate driver code' => ['23000', 1062, 'Duplicate entry', true],
+            'sqlite unique constraint' => ['HY000', 19, 'UNIQUE constraint failed: payment_submissions.idempotency_key', true],
+            'sqlite generic constraint' => ['HY000', 19, 'FOREIGN KEY constraint failed', false],
+            'mysql generic integrity SQLSTATE' => ['23000', 0, 'Integrity constraint violation', false],
+            'foreign key violation' => ['23000', 1452, 'Cannot add or update a child row: a foreign key constraint fails', false],
+            'not null violation' => ['23000', 1048, "Column 'channel' cannot be null", false],
+            'connection error' => ['HY000', 2002, 'Connection refused', false],
+            'syntax error' => ['42000', 1064, 'You have an error in your SQL syntax', false],
+            'generic query exception' => ['HY000', 0, 'Database error', false],
+        ] as $label => [$state, $driverCode, $message, $expected]) {
+            $this->assertSame($expected, $service->isUniqueViolation($this->queryException($state, $driverCode, $message)), $label);
+        }
+    }
+
+    public function test_reservation_extension_configuration_uses_bounded_environment_defaults(): void
+    {
+        foreach ([
+            'observation valid' => ['TREASURY_OBSERVATION_CORRECTION_MINUTES', 'observation_correction_minutes', '45', 45],
+            'reservation valid' => ['TREASURY_RESERVATION_EXTENSION_MINUTES', 'reservation_extension_minutes', '90', 90],
+            'observation zero' => ['TREASURY_OBSERVATION_CORRECTION_MINUTES', 'observation_correction_minutes', '0', 120],
+            'reservation negative' => ['TREASURY_RESERVATION_EXTENSION_MINUTES', 'reservation_extension_minutes', '-1', 120],
+            'observation non numeric' => ['TREASURY_OBSERVATION_CORRECTION_MINUTES', 'observation_correction_minutes', 'invalid', 120],
+            'reservation excessive' => ['TREASURY_RESERVATION_EXTENSION_MINUTES', 'reservation_extension_minutes', '1441', 120],
+        ] as $label => [$environmentKey, $configKey, $value, $expected]) {
+            putenv($environmentKey.'='.$value);
+            try {
+                $treasury = require base_path('config/treasury.php');
+                $this->assertSame($expected, $treasury[$configKey], $label);
+            } finally {
+                putenv($environmentKey);
+            }
+        }
+    }
+
+    private function queryException(string $state, int $driverCode, string $message): QueryException
+    {
+        $previous = new PDOException($message, $driverCode);
+        $previous->errorInfo = [$state, $driverCode, $message];
+
+        return new QueryException('insert into payment_submissions values (?)', [], $previous);
     }
 }

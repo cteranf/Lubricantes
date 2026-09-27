@@ -16,7 +16,7 @@ source_commit: e24f89c
 
 > Este documento describe el estado confirmado del repositorio en la fecha y commit indicados. El código y las migraciones tienen precedencia si posteriormente existe una diferencia.
 
-> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). Es un diagnóstico de lectura y una propuesta futura; no implica que el módulo de Tesorería esté implementado.
+> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). Infraestructura, cuentas receptoras y Fase 2B1 están implementadas; la revisión y aprobación de Tesorería permanecen pendientes.
 
 # 1. Resumen ejecutivo
 
@@ -221,6 +221,14 @@ sequenceDiagram
   L->>L: Persistir evento/transacción y actualizar pedido
 ```
 
+# 10A. Tesorería y transferencias manuales
+
+La infraestructura de Tesorería está ejecutada localmente: `payment_submissions`, `payment_submission_histories` y `payment_receiving_accounts` fueron creadas por las migraciones `2026_09_08_070540`, `070550` y `070560`. Existe el rol `treasury` y el middleware `is_treasury`; la configuración de cuentas receptoras continúa protegida por `auth:sanctum`, `active_user` e `is_admin` hasta que exista una bandeja financiera específica. Las cuentas Yape, Plin y banco se cifran cuando corresponde, usan un default activo único por canal y sirven QR desde disco privado. Las pruebas validan restricciones y UNIQUE; falta certificación concurrente real en MySQL.
+
+Fase 2B1-A expone opciones de transferencia y QR privado al propietario autenticado del pedido elegible. Fase 2B1-B registra `PaymentSubmission` con `Idempotency-Key`, importe desde `orders.total`, PEN, fingerprint, historial append-only, locks y extensión sincronizada de reserva; no altera `payment_status`, `paid_at`, inventario ni `PaymentTransaction`. Fase 2B1-C integra el panel cliente en tracking: recupera primero la presentación, sigue a opciones solo ante `404 payment_submission_not_found`, obtiene QR como blob y libera ObjectURL. Tracking expone `reserved_until` ISO o `null`.
+
+El smoke local del pedido #13 verificó Yape, creación y recuperación de una presentación `pending_review`, operación enmascarada, igualdad entre vencimientos de pedido/reserva y permanencia de pago `pending`. El QR de ese smoke es de prueba. Tesorería aún no puede observar, rechazar ni aprobar desde una bandeja; 2B2 atenderá esas acciones sin crear `PaymentTransaction` ni consumir inventario. El botón legacy de aprobación en Pedidos sigue existente hasta la futura 2B3.
+
 # 11. Preparación, despacho y entrega
 
 `OrderPickingPackingController`/`OrderPickingPackingService` gestionan picking y packing manual con snapshots, cantidades, incidentes e historial. `OrderFulfillmentService` centraliza estados de preparación. `OrderDeliveryService` gestiona métodos `store_pickup`, `own_delivery`, `external_courier`, programación, asignación, despacho, intentos, fallos, reprogramación y confirmación.
@@ -369,7 +377,7 @@ Mutantes: `php artisan migrate`, `db:seed`, backfill, `reconcile --apply`, limpi
 
 **Local:** `.env` local, mock de pago, catálogo oficial, sedes/almacenes de prueba, workers opcionales.
 
-**Staging:** respaldo, rama/commit aprobado, `APP_ENV=staging`, `APP_DEBUG=false`, HTTPS, variables MP sandbox, webhook público, mail/queue/scheduler, migraciones pendientes y smoke tests.
+**Staging:** respaldo, rama/commit aprobado, `APP_ENV=staging`, `APP_DEBUG=false`, HTTPS, variables MP sandbox, webhook público, mail/queue/scheduler, aplicar únicamente migraciones aprobadas para ese entorno y smoke tests.
 
 **Producción:** respaldo probado y restaurable, credenciales reales en secreto gestionado, `APP_DEBUG=false`, dominio HTTPS, webhook firmado, workers supervisados, scheduler, observabilidad, límites, pruebas de rollback y aprobación comercial de tarifas.
 
@@ -629,3 +637,22 @@ La primera etapa reutiliza cabecera, badge de estado, botón iconográfico con t
 ### Segunda etapa visual: operación y delivery
 
 Sedes, Almacenes y Tarifas de envío usan la cabecera administrativa reutilizable, sin modificar sus contratos. Sus APIs devuelven listados paginados de 20 registros; las vistas continúan usando los filtros existentes (búsqueda; sede en almacenes; búsqueda/estado/zona en tarifas). Repartidores y Vehículos conservan sus contratos paginados y sus filtros actuales, pero requieren una migración posterior de tarjetas y modales al sistema compartido completo. La verificación de interacción y responsive real sigue pendiente.
+## Cierre 2B2 y preparación inicial de 2B3 (histórico)
+
+La Fase 2B2 queda certificada como capa de presentación y revisión de transferencias: bandeja exclusiva de Tesorería, decisiones observada/rechazada con historial append-only, corrección idempotente desde observada, extensión sincronizada de reservas activas y UI cliente/Tesorería. Una reserva vencida no reactiva stock ni invita a pagar nuevamente; se muestra revisión manual y soporte configurable solo mediante `VITE_WHATSAPP_PHONE`.
+
+Este apartado describe el estado previo al cierre vigente de 2B3 documentado a continuación. En ese corte, `payment_transactions` no poseía FK ni UNIQUE hacia `payment_submissions` y la aprobación financiera requería una migración y servicio atómico nuevos. La política para reservas vencidas, reasignación, devolución o aplicación a un nuevo pedido continúa pendiente.
+
+## Cierre vigente de Fase 2B3
+
+Este cierre reemplaza la nota histórica anterior. La migración 070570 está aplicada en `lubricantes`: `payment_transactions.payment_submission_id` es nullable para compatibilidad legacy, usa FK restrictiva a `payment_submissions`, UNIQUE por presentación y conserva los UNIQUE de idempotencia/alcance aprobado. Las relaciones son `PaymentSubmission::paymentTransaction()` y `PaymentTransaction::paymentSubmission()`; las claves internas no se serializan.
+
+La aprobación se realiza exclusivamente con `PATCH /api/v1/treasury/payment-submissions/{submission}/approve`, bajo autenticación, usuario activo y Treasury. El body es vacío; el servicio construye claves deterministas en servidor, bloquea los registros necesarios y, para una presentación `pending_review` con reserva activa/vigente, crea la transacción vinculada, registra historial `approved`, marca presentación y pedido como aprobados, fija `paid_at` y consume inventario. El consumo reduce saldo físico y reservado, crea un movimiento `sale`, sincroniza `Product.stock` y no inicia picking/packing. Reintentos coherentes son idempotentes; inconsistencias son conflictos seguros y reservas vencidas requieren resolución manual.
+
+La certificación cubrió rollback atómico SQLite, MySQL 8.4.3 aislado y treinta carreras físicas (10 aprobación/aprobación, 10 aprobación/expiración y 10 aprobación/cancelación), sin estados parciales ni deadlocks. La prueba con trigger `RAISE(ABORT)` se omite únicamente bajo MySQL por ser sintaxis SQLite; su rollback se conserva certificado en SQLite.
+
+La interfaz Treasury permite aprobar solo presentaciones `pending_review` elegibles y no ofrece acciones posteriores cuando quedan aprobadas. El Resource cliente devuelve “Pago validado por Tesorería.”, `validated_at` y operación enmascarada; no ofrece QR ni formulario después de recuperar una presentación. En el smoke local del pedido #15 / presentación #4 (Yape, PEN 131.86) se verificaron una transacción, una reserva consumida, un movimiento `sale`, historial `submitted → approved`, inventario sincronizado y picking/packing sin iniciar. La operación no se almacena en este informe; su máscara segura es `•••11`.
+
+El endpoint legacy de aprobación sigue disponible para pedidos históricos sin `PaymentSubmission`; para pedidos con presentación responde `409 treasury_approval_required`. El listado/detalle administrativo de pedidos usa `withExists` y carga eager limitada para exponer solo `has_payment_submission` y `payment_submission_status`; `Orders.vue` reemplaza visualmente el botón legacy por una etiqueta informativa y no enlaza al admin a la ruta restringida de Treasury.
+
+Quedan fuera de este cierre: resolución comercial de reservas vencidas, reasignaciones, devoluciones, notificaciones, saneamiento histórico eventual de `approved_scope_key`, despliegue/producción y monitoreo financiero.

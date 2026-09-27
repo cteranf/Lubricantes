@@ -206,6 +206,21 @@ class TreasuryReceivingAccountTest extends TestCase
         $this->getJson('/api/v1/admin/treasury/receiving-accounts?channel=bank_transfer&is_active=1')->assertOk()->assertJsonMissingPath('data.0.account_number')->assertJsonStructure(['data', 'meta' => ['current_page', 'last_page', 'total']]);
     }
 
+    public function test_admin_can_set_only_an_operational_account_as_default_per_channel(): void
+    {
+        Sanctum::actingAs($admin = User::factory()->create(['role' => 'admin']));
+        $first = $this->qrAccount('DEFAULT-ONE');
+        $second = $this->qrAccount('DEFAULT-TWO');
+        $this->patchJson('/api/v1/admin/treasury/receiving-accounts/'.$first->id.'/default', ['is_default' => true])->assertOk();
+        $this->patchJson('/api/v1/admin/treasury/receiving-accounts/'.$second->id.'/default', ['is_default' => true])->assertOk()->assertJsonPath('data.is_default', true);
+        $this->assertFalse($first->fresh()->is_default);
+        $this->assertTrue($second->fresh()->is_default);
+        $this->assertSame('bank_transfer', $second->fresh()->active_default_channel);
+        $this->assertSame($admin->id, $second->fresh()->updated_by);
+        $second->update(['is_active' => false]);
+        $this->patchJson('/api/v1/admin/treasury/receiving-accounts/'.$second->id.'/default', ['is_default' => true])->assertUnprocessable();
+    }
+
     private function qrAccount(string $code): PaymentReceivingAccount
     {
         return PaymentReceivingAccount::create(['code' => $code, 'channel' => 'bank_transfer', 'display_name' => 'Banco', 'holder_name' => 'Titular', 'currency' => 'PEN', 'bank_name' => 'Banco', 'account_number' => '123456', 'is_active' => true]);

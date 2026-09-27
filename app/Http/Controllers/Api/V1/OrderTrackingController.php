@@ -37,6 +37,7 @@ class OrderTrackingController extends Controller
                 'estimated_delivery_date' => $order->estimated_delivery_date?->format('Y-m-d'),
                 'delivered_at' => $this->iso($order->delivered_at),
                 'created_at' => $this->iso($order->created_at),
+                'reserved_until' => $this->iso($order->reserved_until),
                 'total' => $order->total,
                 'payment_method' => $order->payment_method,
                 'payment_status' => $order->payment_status,

@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderDelivery;
 use App\Models\OrderDeliveryHistory;
 use App\Models\OrderFulfillmentHistory;
+use App\Models\PaymentSubmission;
 use App\Models\PaymentTransaction;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -74,6 +75,12 @@ class OrderFulfillmentService
             $order = $this->lock($order);
             if ($order->payment_method !== 'transferencia') {
                 $this->invalid('Solo los pedidos por transferencia se aprueban manualmente.');
+            }
+            if (PaymentSubmission::query()->where('order_id', $order->id)->exists()) {
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
+                    'message' => 'La aprobación de esta transferencia debe realizarse desde Tesorería.',
+                    'code' => 'treasury_approval_required',
+                ], 409));
             }
             if ($order->payment_status === 'approved') {
                 return $this->present($order);
@@ -245,15 +252,20 @@ class OrderFulfillmentService
 
     public function present(Order $order): array
     {
-        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name']);
+        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'paymentSubmission:id,order_id,status', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name']);
         $state = $order->effectiveFulfillmentStatus();
         $legacy = ! $this->inventory->orderUsesReservationFlow($order);
         $canStart = $state === Order::FULFILLMENT_RESERVED && ($legacy || $order->payment_method === 'contra_entrega' || $order->payment_status === 'approved');
         $handling = $this->handling->getOperationalSummary($order);
+        // getOperationalSummary may refresh the model; add these ephemeral,
+        // safe presentation attributes only after that work has completed.
+        $hasPaymentSubmission = $order->paymentSubmission !== null;
+        $order->setAttribute('has_payment_submission', $hasPaymentSubmission);
+        $order->append('payment_submission_status');
         $handlingAllowsReady = ! ($handling['available'] ?? false) || ($handling['actions']['mark_ready'] ?? false);
         $hasDelivery = OrderDelivery::where('order_id', $order->id)->exists();
         $canMarkReady = $state === Order::FULFILLMENT_PREPARING && $handlingAllowsReady;
-        $actions = ['approve_payment' => $state === Order::FULFILLMENT_RESERVED && $order->payment_method === 'transferencia' && $order->payment_status !== 'approved', 'start_preparation' => $canStart, 'mark_ready' => $canMarkReady, 'mark_ready_for_pickup' => $canMarkReady && $order->isPickup(), 'mark_picked_up' => $state === Order::FULFILLMENT_READY && $order->isPickup(), 'mark_delivered' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && ! $order->delivery_flow_version, 'manage_delivery' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && (bool) $order->delivery_flow_version, 'cancel' => in_array($state, [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY], true) && ! $hasDelivery];
+        $actions = ['approve_payment' => $state === Order::FULFILLMENT_RESERVED && $order->payment_method === 'transferencia' && $order->payment_status !== 'approved' && ! $hasPaymentSubmission, 'start_preparation' => $canStart, 'mark_ready' => $canMarkReady, 'mark_ready_for_pickup' => $canMarkReady && $order->isPickup(), 'mark_picked_up' => $state === Order::FULFILLMENT_READY && $order->isPickup(), 'mark_delivered' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && ! $order->delivery_flow_version, 'manage_delivery' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && (bool) $order->delivery_flow_version, 'cancel' => in_array($state, [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY], true) && ! $hasDelivery];
         $reservationStatuses = $order->items->pluck('reservation.status')->filter()->unique()->values();
 
         return ['order' => $order, 'fulfillment' => [

@@ -60,6 +60,22 @@ class TreasuryReceivingAccountService
         });
     }
 
+    public function makeDefault(PaymentReceivingAccount $account, User $actor): PaymentReceivingAccount
+    {
+        return DB::transaction(function () use ($account, $actor) {
+            $locked = PaymentReceivingAccount::whereKey($account->id)->lockForUpdate()->firstOrFail();
+            $candidate = $locked->only(['channel', 'phone', 'bank_name', 'account_number', 'cci', 'qr_path']);
+            $candidate['is_active'] = $locked->is_active;
+            $candidate['is_default'] = true;
+            $this->validateRules($candidate);
+            $this->lockChannel($locked->channel);
+            $this->clearOtherDefaults($locked->channel, true, $locked->id);
+            $locked->update(['is_default' => true, 'updated_by' => $actor->id]);
+
+            return $locked->refresh();
+        });
+    }
+
     public function replaceQr(PaymentReceivingAccount $account, UploadedFile $file, User $actor): PaymentReceivingAccount
     {
         $disk = config('treasury.qr_disk');

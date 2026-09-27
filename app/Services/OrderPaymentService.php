@@ -25,7 +25,7 @@ class OrderPaymentService
             }
 
             $key = 'cod-collection-order-'.$order->id;
-            $scope = 'cod-approved-order-'.$order->id;
+            $scope = PaymentTransaction::approvedScopeKeyForOrder($order->id);
             $existing = PaymentTransaction::where('idempotency_key', $key)->first();
             if ($existing) {
                 if ((int) $existing->order_id !== (int) $order->id || ! in_array($existing->payment_method, ['contra_entrega', 'pago_en_sede'], true) || $existing->transaction_type !== PaymentTransaction::PAYMENT) {
@@ -40,6 +40,11 @@ class OrderPaymentService
                 return $existing;
             }
             if ($approved = PaymentTransaction::where('approved_scope_key', $scope)->first()) {
+                $this->syncProjection($order, $approved);
+
+                return $approved;
+            }
+            if ($approved = $this->approvedTransactionForOrder($order)) {
                 $this->syncProjection($order, $approved);
 
                 return $approved;
@@ -79,7 +84,7 @@ class OrderPaymentService
     ): PaymentTransaction {
         $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
         $isApproved = $status === PaymentTransaction::APPROVED;
-        $scope = $isApproved ? 'card-approved-order-'.$order->id : null;
+        $scope = $isApproved ? PaymentTransaction::approvedScopeKeyForOrder($order->id) : null;
         $gateway = $gatewayData['gateway'] ?? null;
         $idempotencyKey = $gateway
             ? 'gateway-'.$gateway.'-payment-'.$paymentId
@@ -88,6 +93,9 @@ class OrderPaymentService
         if ($isApproved) {
             $existing = PaymentTransaction::where('approved_scope_key', $scope)->first();
             if ($existing) {
+                return $existing;
+            }
+            if ($existing = $this->approvedTransactionForOrder($order)) {
                 return $existing;
             }
         }
@@ -147,6 +155,14 @@ class OrderPaymentService
     }
 
     public function approvedPaymentFor(Order $order): ?PaymentTransaction
+    {
+        return PaymentTransaction::where('order_id', $order->id)
+            ->where('transaction_type', PaymentTransaction::PAYMENT)
+            ->where('status', PaymentTransaction::APPROVED)
+            ->first();
+    }
+
+    private function approvedTransactionForOrder(Order $order): ?PaymentTransaction
     {
         return PaymentTransaction::where('order_id', $order->id)
             ->where('transaction_type', PaymentTransaction::PAYMENT)

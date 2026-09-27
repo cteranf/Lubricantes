@@ -30,6 +30,28 @@ class OrderStabilizationTest extends TestCase
             ->assertJsonPath('order.id', $order->id);
     }
 
+    public function test_tracking_serializes_reserved_until_without_mutating_order_or_reservation(): void
+    {
+        $customer = $this->customer();
+        $order = $this->orderFor($customer, ['reserved_until' => now()->addHour()]);
+        $reservation = $order->reservations()->firstOrFail();
+        $before = [$order->updated_at->format('c'), $reservation->updated_at->format('c'), $reservation->expires_at->format('c')];
+        Sanctum::actingAs($customer);
+
+        $this->getJson("/api/v1/orders/{$order->id}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.reserved_until', $order->reserved_until->copy()->utc()->toIso8601String());
+
+        $this->assertSame($before[0], $order->fresh()->updated_at->format('c'));
+        $this->assertSame($before[1], $reservation->fresh()->updated_at->format('c'));
+        $this->assertSame($before[2], $reservation->fresh()->expires_at->format('c'));
+
+        $order->update(['reserved_until' => null]);
+        $this->getJson("/api/v1/orders/{$order->id}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.reserved_until', null);
+    }
+
     public function test_customer_cannot_view_another_customers_tracking(): void
     {
         $owner = $this->customer();

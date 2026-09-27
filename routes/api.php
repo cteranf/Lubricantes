@@ -84,7 +84,22 @@ Route::prefix('v1')->group(function () {
         Route::get('/location/districts', [LocationOptionController::class, 'districts']);
         Route::apiResource('addresses', UserAddressController::class)->only(['index', 'store', 'update']);
         Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
+        Route::get('/orders/{order}/payment-options', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'index']);
+        Route::get('/orders/{order}/payment-options/{account}/qr', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'qr']);
+        Route::post('/orders/{order}/payment-submission', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'store']);
+        Route::put('/orders/{order}/payment-submission/correction', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'correct']);
+        Route::get('/orders/{order}/payment-submission', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'show']);
         Route::get('/orders/{id}/tracking', [App\Http\Controllers\Api\V1\OrderTrackingController::class, 'show']);
+
+        // Treasury review queue: deliberately separate from administrative configuration.
+        Route::middleware('is_treasury')->prefix('treasury')->as('treasury.')->group(function () {
+            Route::get('/payment-submissions', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'index'])->name('payment-submissions.index');
+            Route::get('/payment-submissions/{submission}', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'show'])->name('payment-submissions.show');
+            Route::get('/payment-submissions/{submission}/history', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'history'])->name('payment-submissions.history');
+            Route::patch('/payment-submissions/{submission}/observe', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'observe'])->name('payment-submissions.observe');
+            Route::patch('/payment-submissions/{submission}/reject', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'reject'])->name('payment-submissions.reject');
+            Route::patch('/payment-submissions/{submission}/approve', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'approve'])->name('payment-submissions.approve');
+        });
 
         // Payment
         Route::post('/payment/create', [App\Http\Controllers\Api\V1\PaymentController::class, 'createPayment']);
@@ -195,6 +210,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'show'])->name('treasury.receiving-accounts.show');
             Route::put('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'update'])->name('treasury.receiving-accounts.update');
             Route::patch('/treasury/receiving-accounts/{account}/status', [AdminPaymentReceivingAccountController::class, 'status'])->name('treasury.receiving-accounts.status');
+            Route::patch('/treasury/receiving-accounts/{account}/default', [AdminPaymentReceivingAccountController::class, 'makeDefault'])->name('treasury.receiving-accounts.default');
             Route::post('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'replaceQr'])->name('treasury.receiving-accounts.qr.replace');
             Route::get('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'qr'])->name('treasury.receiving-accounts.qr.show');
             Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class)->only(['index', 'store', 'update', 'destroy']);
