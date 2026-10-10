@@ -229,12 +229,9 @@ class OrderFulfillmentService
                 if ($order->reservations()->where('status', InventoryReservation::ACTIVE)->exists()) {
                     $this->inventory->releaseOrderReservation($order);
                 }
-                $consumed = $order->reservations()->where('status', InventoryReservation::CONSUMED)->with(['orderItem.product', 'orderItem.warehouse'])->lockForUpdate()->get();
-                foreach ($consumed as $reservation) {
-                    $this->inventory->returnCancellation($reservation->orderItem, $user);
-                }
+                $this->inventory->returnOrderCancellation($order, $user);
             } else {
-                $order->items()->with(['product', 'warehouse'])->get()->each(fn ($item) => $this->inventory->returnCancellation($item, $user));
+                $this->inventory->returnOrderCancellation($order, $user);
             }
 
             $this->handling->cancelForOrder($order, $user, $reason);

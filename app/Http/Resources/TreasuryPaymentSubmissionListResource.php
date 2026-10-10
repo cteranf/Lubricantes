@@ -49,12 +49,31 @@ class TreasuryPaymentSubmissionListResource extends JsonResource
 
     protected function reservationStatus(): string
     {
-        $reservations = $this->order?->reservations ?? collect();
-        if ($reservations->contains(fn ($reservation) => $reservation->status === InventoryReservation::ACTIVE && $reservation->expires_at?->isFuture())) {
-            return 'active';
+        if (! $this->relationLoaded('order') || ! $this->order?->relationLoaded('items')) {
+            return 'none';
         }
 
-        return $reservations->isEmpty() ? 'none' : 'expired';
+        $statuses = $this->order->items
+            ->map(function ($item): ?string {
+                if (! $item->relationLoaded('currentReservation') || ! $item->currentReservation) {
+                    return null;
+                }
+
+                $reservation = $item->currentReservation;
+
+                return $reservation->status === InventoryReservation::ACTIVE && ! $reservation->expires_at?->isFuture()
+                    ? InventoryReservation::EXPIRED
+                    : $reservation->status;
+            })
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($statuses->isEmpty()) {
+            return 'none';
+        }
+
+        return $statuses->count() === 1 ? $statuses->first() : 'mixed';
     }
 
     protected function iso($date): ?string

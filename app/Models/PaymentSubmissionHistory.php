@@ -7,7 +7,9 @@ use LogicException;
 
 class PaymentSubmissionHistory extends Model
 {
-    public const EVENTS = ['submitted', 'observed', 'corrected', 'approved', 'rejected', 'expired', 'canceled'];
+    public const REASSIGNMENT_APPROVED = 'reassignment_approved';
+
+    public const EVENTS = ['submitted', 'observed', 'corrected', 'approved', 'rejected', 'expired', 'canceled', 'resolution_opened', self::REASSIGNMENT_APPROVED];
 
     public const UPDATED_AT = null;
 

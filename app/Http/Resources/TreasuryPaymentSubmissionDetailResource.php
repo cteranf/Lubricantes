@@ -4,6 +4,18 @@ namespace App\Http\Resources;
 
 class TreasuryPaymentSubmissionDetailResource extends TreasuryPaymentSubmissionListResource
 {
+    private bool $canOpenResolution = false;
+
+    private bool $canReassignAndApprove = false;
+
+    public function withAvailability(bool $canOpenResolution, bool $canReassignAndApprove): self
+    {
+        $this->canOpenResolution = $canOpenResolution;
+        $this->canReassignAndApprove = $canReassignAndApprove;
+
+        return $this;
+    }
+
     public function toArray($request): array
     {
         return array_merge(parent::toArray($request), [
@@ -41,6 +53,12 @@ class TreasuryPaymentSubmissionDetailResource extends TreasuryPaymentSubmissionL
                     'name' => $this->paymentTransaction->confirmer->name,
                 ] : null,
             ] : null),
+            'resolution' => $this->when($this->relationLoaded('resolutionCase'), fn () => $this->resolutionCase ? [
+                'status' => $this->resolutionCase->status,
+                'type' => $this->resolutionCase->type,
+            ] : null),
+            'can_open_resolution' => $this->canOpenResolution,
+            'can_reassign_and_approve' => $this->canReassignAndApprove,
         ]);
     }
 }

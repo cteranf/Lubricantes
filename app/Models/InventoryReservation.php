@@ -21,6 +21,12 @@ class InventoryReservation extends Model
 
     protected $fillable = ['order_id', 'order_item_id', 'product_id', 'warehouse_id', 'quantity', 'status', 'expires_at', 'consumed_at', 'released_at', 'idempotency_key', 'metadata'];
 
+    /**
+     * Reservation internals are never part of raw order serializations.
+     * Dedicated operational services can still access the model attributes.
+     */
+    protected $hidden = ['reservation_sequence', 'resolution_case_id', 'idempotency_key', 'metadata'];
+
     protected $casts = ['reservation_sequence' => 'integer', 'resolution_case_id' => 'integer', 'quantity' => 'integer', 'expires_at' => 'datetime', 'consumed_at' => 'datetime', 'released_at' => 'datetime', 'metadata' => 'array'];
 
     public function order()

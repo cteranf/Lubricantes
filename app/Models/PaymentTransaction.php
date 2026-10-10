@@ -7,6 +7,8 @@ use LogicException;
 
 class PaymentTransaction extends Model
 {
+    private bool $allowResolutionApprovalTransition = false;
+
     public const PENDING = 'pending';
 
     public const APPROVED = 'approved';
@@ -40,8 +42,36 @@ class PaymentTransaction extends Model
 
     protected static function booted(): void
     {
-        static::updating(fn () => throw new LogicException('Una transaccion financiera confirmada es inmutable.'));
+        static::updating(function (self $transaction): void {
+            $allowed = $transaction->allowResolutionApprovalTransition
+                && $transaction->getOriginal('status') === self::RECEIVED
+                && $transaction->status === self::APPROVED
+                && $transaction->getOriginal('approved_scope_key') === null
+                && $transaction->approved_scope_key !== null
+                && empty(array_diff(array_keys($transaction->getDirty()), ['status', 'approved_scope_key', 'updated_at']));
+
+            if (! $allowed) {
+                throw new LogicException('Una transaccion financiera confirmada es inmutable.');
+            }
+        });
         static::deleting(fn () => throw new LogicException('Una transaccion financiera no se puede eliminar.'));
+    }
+
+    public function approveReceivedForResolution(string $approvedScopeKey): void
+    {
+        if (! $this->exists || $this->status !== self::RECEIVED || $this->approved_scope_key !== null || $approvedScopeKey === '') {
+            throw new LogicException('La transaccion recibida no permite esta aprobacion interna.');
+        }
+
+        $this->allowResolutionApprovalTransition = true;
+        try {
+            $this->forceFill([
+                'status' => self::APPROVED,
+                'approved_scope_key' => $approvedScopeKey,
+            ])->save();
+        } finally {
+            $this->allowResolutionApprovalTransition = false;
+        }
     }
 
     public function order()

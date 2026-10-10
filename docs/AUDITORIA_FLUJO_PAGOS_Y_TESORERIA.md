@@ -393,3 +393,98 @@ La infraestructura se certificó sin aplicarla en `lubricantes`. En SQLite y en 
 El versionado conserva `reservation_sequence=1` en filas históricas, preserva la unicidad de `idempotency_key` y reemplaza únicamente la unicidad simple de `order_item_id` por `(order_item_id, reservation_sequence)`. El rollback de 070610 restaura la unicidad legacy solo si no hay secuencias mayores a uno; ante versiones posteriores se detiene antes de cambiar esquema o datos. El rollback de 070620 también se niega si persiste cualquier pedido `refund_pending`. Se corrigió la migración 070610 para crear primero el índice compuesto: MySQL necesita conservar un índice cuyo prefijo sea `order_item_id` mientras exista la FK hacia `order_items`.
 
 Quedan explícitamente pendientes para 2B4-B las consultas legacy que asumen una sola reserva por ítem: `OrderItem::reservation()` es `hasOne` y `OrderTrackingController` consume esa relación singular. Los servicios existentes operan por `order_id` y estado, por lo que no se modificaron ni deben interpretar una versión histórica de forma arbitraria hasta que la reasignación tenga su transacción y criterios explícitos. Las comparaciones actuales de `payment_status` están orientadas a los estados operativos existentes (`pending`, `approved`, `rejected`); deberán revisarse antes de exponer `refund_pending` en filtros, Resources o automatizaciones. Ninguna de esas adaptaciones se implementó en 2B4-A.
+
+## Cierre certificado: Fase 2B4-B2-C backend interno
+
+Esta sección sustituye el pendiente funcional de reasignación descrito al cierre de 2B4-A. **2B4-B2-C backend interno queda certificado dentro del alcance probado.** La certificación cubre el servicio y sus primitivas transaccionales internas; no declara disponible todavía una operación HTTP ni una interfaz de usuario.
+
+### Orquestación financiera interna
+
+`TreasuryPaymentReassignmentService` coordina la reasignación y aprobación como una única operación transaccional. Parte de un `PaymentResolutionCase` abierto y de la `PaymentTransaction` recibida en 2B4-B1. La aprobación promueve esa misma transacción de `received` a `approved`: conserva su identidad y vínculo con la presentación, completa los datos de confirmación y no crea una segunda transacción financiera.
+
+La operación vuelve a cargar y bloquea las entidades por identificador dentro de cada intento. Valida la coherencia de presentación, transacción, caso, pedido e historiales antes de escribir. Las excepciones de inventario y reasignación continúan siendo excepciones puras de dominio; no construyen respuestas HTTP ni conocen controladores, Resources o códigos de transporte.
+
+### Reservas versionadas, consumo y reapertura
+
+Cada `OrderItem` conserva el historial de `InventoryReservation` por `reservation_sequence`, mientras la lectura singular selecciona determinísticamente la versión más reciente. La reasignación crea una nueva versión vinculada al caso, sin reactivar ni sobrescribir la reserva histórica vencida. Después consume exactamente la reserva nueva correspondiente a cada ítem, descuenta una sola vez el stock físico y reservado, crea un único movimiento `sale` coherente por ítem y sincroniza `Product.stock` con el inventario físico.
+
+La operación es idempotente tanto mientras las reservas nuevas permanecen `active` como después de quedar completamente `consumed`, siempre que exista evidencia íntegra y no duplicada de los movimientos. Conjuntos mixtos, parciales, ajenos o incompatibles producen conflicto de dominio sin reparación automática.
+
+Un pedido cancelado solo puede reabrirse cuando la cancelación procede de una expiración automática demostrable mediante el estado y la evidencia persistida de sus reservas. Una cancelación manual no se interpreta como expiración, no habilita una reasignación nueva y conserva la resolución financiera sin estados parciales si compite con una operación ya iniciada.
+
+### Concurrencia, último stock y atomicidad
+
+La transacción exterior completa de `TreasuryPaymentReassignmentService` usa el reintento nativo de Laravel para concurrencia, con un máximo de tres intentos. Cada intento vuelve a adquirir los bloqueos y reevaluar el estado desde la base. No se reintenta solo una parte del consumo, no hay espera manual y los errores de dominio o `QueryException` ajenas a deadlocks no se reclasifican.
+
+Cuando dos pedidos compiten por la última unidad disponible, exactamente uno completa la aprobación y el consumo. El perdedor obtiene `InsufficientVersionedInventoryStockException`, no un conflicto estructural genérico; no deja reservas, movimientos, historiales ni mutaciones financieras parciales. Los saldos de almacén y producto permanecen coherentes y no negativos.
+
+La matriz SQLite certificó rollback integral ante fallos inducidos en las etapas financieras, de historial, pedido, reservas, inventario, movimientos y sincronización de producto, incluido el rollback exterior después de completar bloques transaccionales anidados. También certificó reintentos coherentes y rechazo sin reparación de estados parciales o estructuralmente incompatibles.
+
+La certificación física se ejecutó exclusivamente en MySQL 8 sobre `lubristore_2b4_resolution_certification_test`, nunca sobre `lubricantes`. Completó **30 de 30 carreras** independientes:
+
+- 10 reasignación contra reasignación: una única aprobación, caso, conjunto de reservas y movimientos; ambos reintentos convergen en las mismas entidades sin doble descuento.
+- 10 pedidos compitiendo por el último stock: un ganador completo y un perdedor `insufficient_stock`, sin deadlocks agotados ni escrituras parciales.
+- 10 reasignación contra cancelación manual: únicamente ramas finales contractuales, sin pago, caso, historial, reserva consumida o inventario en estado parcial.
+
+Las regresiones consolidadas incluyeron `TreasuryPaymentReassignmentServiceTest`, `TreasuryPaymentReassignmentAtomicityTest`, `VersionedInventoryReservationPrimitiveTest`, `VersionedInventoryReservationReadTest` y las suites relacionadas de resolución, aprobación, expiración, fulfillment y picking/packing. Las verificaciones portables distinguieron las garantías propias de SQLite —incluidos `RAISE(ABORT)` y saldos negativos representables— de sus equivalentes físicos MySQL —`SIGNAL`, columnas `UNSIGNED`, FKs e índices UNIQUE— sin convertir defectos funcionales en omisiones.
+
+### Límites expresos y trabajo pendiente
+
+- No existen todavía rutas, Request, controller ni Resource de reasignación; el servicio certificado es exclusivamente interno.
+- No se ejecutaron ni se añadieron migraciones nuevas como parte de 2B4-B2-C.
+- No existe flujo de reembolso: no hay orquestación, endpoint ni integración financiera de devolución.
+- No se modificó ni consultó la base local operativa `lubricantes` durante la certificación física MySQL.
+- Continúan pendientes la capa HTTP con traducción explícita de excepciones de dominio, el frontend Treasury y el smoke manual end-to-end de reasignación.
+
+## Cierre final certificado: Fase 2B4-B1/B2
+
+Esta sección reemplaza los límites históricos anteriores que describían B1 y B2-C como exclusivamente internos. El bloque backend y sus interfaces quedan documentados según el comportamiento implementado y certificado, sin incluir reembolsos.
+
+### 2B4-B1: apertura manual de resolución
+
+La apertura registra de forma idempotente que Tesorería recibió el pago cuando la reserva ya no permite la aprobación ordinaria. Solo es elegible una presentación `pending_review` coherente, de un pedido por transferencia todavía no pagado, sin transacción o caso previo y con evidencia canónica de indisponibilidad. Un pedido cancelado solo es elegible cuando sus reservas demuestran expiración automática; una reserva liberada por cancelación manual no habilita la apertura.
+
+La operación crea en una única transacción una `PaymentTransaction` en estado `received`, un `PaymentResolutionCase` `open`, la transición de la presentación a `manual_resolution_required` y exactamente un historial `resolution_opened` y uno `opened`. Los reintentos devuelven el mismo caso únicamente si todo el conjunto persistido es coherente. Estados parciales, relaciones cruzadas, historiales ausentes o duplicados y claves ocupadas producen conflicto sin reparación. Los fallos inducidos certifican rollback completo.
+
+`POST /api/v1/treasury/payment-submissions/{submission}/resolution` exige autenticación, usuario activo y rol Treasury, body vacío y ninguna clave idempotente suministrada por el cliente. Sus respuestas son privadas y allowlisted. `TreasuryPayments.vue` muestra “Abrir resolución manual” únicamente cuando el backend devuelve `can_open_resolution`; no infiere elegibilidad a partir de fechas ni datos internos. Después de abrir, retira acciones incompatibles y refresca detalle, historial y listado.
+
+La certificación física MySQL incluye carreras apertura/apertura, apertura/expiración y apertura/cancelación manual con procesos independientes, barrera real y verificaciones de atomicidad. Nunca se acepta una transacción sin caso, un caso sin sus historiales o una resolución creada después de una cancelación manual ganadora.
+
+### 2B4-B2: reserva vigente, reasignación y aprobación
+
+`OrderItem::reservations()` conserva todas las versiones en orden estable y `currentReservation()` selecciona determinísticamente la mayor `reservation_sequence`, con `id` como desempate defensivo. El alias relacional `reservation()` conserva compatibilidad legacy sin devolver arbitrariamente la primera reserva histórica. Los Resources públicos y administrativos usan exclusivamente la reserva actual y no serializan secuencias, `resolution_case_id`, metadata, claves internas ni el historial completo.
+
+Las primitivas versionadas crean una nueva reserva por ítem y caso sin reactivar la original. Un reintento `active` o `consumed` solo es válido con cardinalidad, vínculos, cantidades, almacenes, timestamps y movimientos íntegramente coherentes. Conjuntos mixtos, incompletos, ajenos o incompatibles lanzan excepciones puras de dominio y no se reparan.
+
+`TreasuryPaymentReassignmentService` bloquea y revalida la estructura financiera completa, reserva y consume las versiones nuevas, descuenta inventario una sola vez, crea un movimiento `sale` por ítem, sincroniza `Product.stock`, promueve la misma transacción B1 de `received` a `approved`, aprueba la presentación y cierra el caso como `stock_reassignment/reassigned`. El pedido solo se reabre cuando existe evidencia de expiración automática. La transacción exterior completa usa los reintentos nativos de Laravel para deadlocks; último stock produce un único ganador y un perdedor `insufficient_stock` sin escrituras parciales.
+
+`POST /api/v1/treasury/payment-submissions/{submission}/resolution/reassign` está protegido por la misma matriz privada de Tesorería, acepta exactamente `{}` y traduce únicamente excepciones de dominio conocidas a conflictos seguros. Deadlocks agotados, `QueryException` y errores inesperados permanecen bajo el manejador 500 y no se disfrazan de conflicto comercial. El Resource de respuesta es allowlisted y no expone operación, fingerprint, claves, snapshots, metadata ni referencias cifradas.
+
+`TreasuryPayments.vue` presenta “Reasignar stock y aprobar” solo para un caso abierto elegible informado por el backend. El modal describe el efecto financiero e inventario, bloquea doble envío y diferencia `insufficient_stock` de `payment_reassignment_conflict`. En éxito refresca detalle, historial y página, y retira de inmediato las acciones incompatibles.
+
+El tracking del cliente conserva “Pago validado por Tesorería”, la operación enmascarada y la fecha de validación. El estado de reserva ya no se deduce de `orders.reserved_until`: se agrega desde las reservas `currentReservation` de los ítems. Todas `active` muestran vigencia; todas `consumed` muestran “Stock confirmado para tu pedido”; `expired` y `released` tienen mensajes propios; estados mixtos usan un mensaje neutro sin inventar una fecha global.
+
+La certificación física MySQL de reasignación completó 30 carreras independientes: 10 reasignación/reasignación, 10 competencia por último stock y 10 reasignación/cancelación. Las pruebas SQLite certifican atomicidad y rollback en cada punto inducible. Las excepciones de inventario y reasignación siguen siendo de dominio y no construyen respuestas HTTP.
+
+#### Orden global de inventario y transferencias
+
+`InventoryBalanceLockService` es el helper canónico para reunir, deduplicar, ordenar y bloquear balances físicos. Los flujos certificados respetan el orden global `OrderItem → InventoryReservation → Warehouse → WarehouseInventory → Product → OrderFulfillmentHistory`; queda prohibido adquirir `WarehouseInventory` después de bloquear `Product`. Las filas de balance se ordenan numéricamente por `warehouse_id`, `product_id` e `id`, y cualquier ausencia, duplicidad o saldo estructuralmente inválido produce excepción y rollback, sin reparación silenciosa.
+
+Las transferencias ejecutan la operación completa mediante `DB::transaction(..., 3)`: cada intento recarga modelos y reconstruye el conjunto íntegro de balances antes de mutar. Solo puede crearse el balance destino; comienza siempre con `quantity=0` y `reserved_quantity=0`, mientras un origen ausente se rechaza. `Product.stock` nunca inicializa inventario físico y se sincroniza únicamente desde todos los balances previamente bloqueados. Un deadlock reconocido puede reintentarse hasta tres veces; errores de dominio y SQL no concurrentes conservan su clasificación.
+
+La certificación física adicional en MySQL 8.4.3 aislado completó 10/10 carreras transferencia–reasignación, 10/10 transferencia–expiración multibalance y 10/10 transferencias opuestas. Cada transferencia produjo exactamente un movimiento `transfer_out` y uno `transfer_in`, con la misma correlación contractual, cantidades y snapshots de saldo coherentes. El resultado consolidado fue cero deadlocks agotados, cero timeouts, cero estados parciales y cero saldos negativos.
+
+### Smoke manual y auditoría persistida del pedido 12
+
+El smoke manual completó la apertura B1 y la reasignación/aprobación B2: el caso terminó `stock_reassignment/reassigned`, la presentación y la misma transacción recibida quedaron `approved`, y el cliente visualiza “Pago validado por Tesorería”, una operación enmascarada, “Stock confirmado para tu pedido” y continuidad hacia preparación.
+
+La auditoría persistida, ejecutada únicamente con consultas sanitizadas de lectura, verificó: pedido por transferencia aprobado, reabierto y no cancelado; una presentación aprobada; una transacción aprobada vinculada; un caso reasignado; historiales `submitted → resolution_opened → reassignment_approved` y `opened → reassigned` sin duplicados; reserva original `expired`; reserva actual `consumed`; cero reservas activas del pedido; un movimiento `sale` por cantidad 5; stock físico y `Product.stock` sincronizados; y cero reembolsos. El saldo reservado del pedido es cero; cualquier saldo global restante corresponde exactamente a reservas activas ajenas sobre el inventario compartido.
+
+La auditoría y este documento no incluyen claves idempotentes, fingerprints, metadata completa, operación completa, valores cifrados ni credenciales.
+
+### Límites vigentes
+
+- No se añadieron ni ejecutaron migraciones nuevas durante B1/B2; se reutiliza la infraestructura 070570–070620.
+- No existe flujo de reembolso implementado. `PaymentRefund` permanece como infraestructura sin orquestación, endpoint o interfaz funcional.
+- La certificación MySQL automatizada utiliza exclusivamente `lubristore_2b4_resolution_certification_test`; la base local `lubricantes` no forma parte de esas regresiones.
+- Permanecen fuera de alcance despliegue productivo, monitoreo financiero, devoluciones/reasignaciones adicionales y cualquier conciliación externa no implementada.

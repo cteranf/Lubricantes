@@ -12,6 +12,8 @@ class PaymentResolutionHistory extends Model
         'currency',
         'amount',
         'reservation_count',
+        'resolution_case_id',
+        'reopened_after_expiration',
     ];
 
     public const EVENTS = [

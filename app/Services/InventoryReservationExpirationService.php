@@ -5,12 +5,13 @@ namespace App\Services;
 use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
-use App\Models\WarehouseInventory;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class InventoryReservationExpirationService
 {
+    public function __construct(private InventoryBalanceLockService $balanceLocks) {}
+
     public function expireDueReservations(?int $orderId = null, ?int $warehouseId = null, array $productIds = [], int $limit = 100): array
     {
         $query = Order::query()
@@ -60,7 +61,7 @@ class InventoryReservationExpirationService
                 ->where('status', InventoryReservation::ACTIVE)
                 ->when($warehouseId, fn ($query) => $query->where('warehouse_id', $warehouseId))
                 ->when($productIds, fn ($query) => $query->whereIn('product_id', $productIds))
-                ->orderBy('warehouse_id')->orderBy('product_id')->orderBy('id')
+                ->orderBy('id')
                 ->lockForUpdate()->get();
 
             $base = ['order_id' => $order->id, 'processed' => false, 'reservations' => [], 'products' => []];
@@ -75,15 +76,20 @@ class InventoryReservationExpirationService
                 return array_merge($base, ['reason' => 'ambiguous_legacy_order']);
             }
 
-            $inventoryKeys = $reservations->map(fn (InventoryReservation $reservation) => $reservation->warehouse_id.':'.$reservation->product_id)->unique();
-            $inventories = $this->lockInventories($inventoryKeys);
+            $inventories = $this->balanceLocks->lock($reservations->map(fn (InventoryReservation $reservation) => [
+                'warehouse_id' => (int) $reservation->warehouse_id,
+                'product_id' => (int) $reservation->product_id,
+            ]));
             $released = [];
 
             foreach ($reservations as $reservation) {
-                $key = $reservation->warehouse_id.':'.$reservation->product_id;
+                $key = $this->balanceLocks->key((int) $reservation->warehouse_id, (int) $reservation->product_id);
                 $inventory = $inventories->get($key);
                 $before = (int) $inventory->reserved_quantity;
-                $inventory->update(['reserved_quantity' => max(0, $before - (int) $reservation->quantity)]);
+                if ($before < (int) $reservation->quantity) {
+                    throw new \App\Exceptions\InventoryException('El saldo reservado es inconsistente.');
+                }
+                $inventory->update(['reserved_quantity' => $before - (int) $reservation->quantity]);
                 $reservation->update([
                     'status' => InventoryReservation::EXPIRED,
                     'released_at' => now(),
@@ -162,18 +168,6 @@ class InventoryReservationExpirationService
         $legacyReservationDue = $reservations->every(fn (InventoryReservation $reservation) => $reservation->expires_at !== null && $reservation->expires_at->isPast());
 
         return ($orderDue || $legacyReservationDue) && in_array($order->status, ['pending', 'canceled', 'rejected'], true);
-    }
-
-    private function lockInventories(Collection $keys): Collection
-    {
-        $pairs = $keys->map(fn (string $key) => array_map('intval', explode(':', $key)))->sortBy(fn (array $pair) => $pair[0].':'.$pair[1]);
-        $locked = collect();
-        foreach ($pairs as [$warehouseId, $productId]) {
-            $inventory = WarehouseInventory::where('warehouse_id', $warehouseId)->where('product_id', $productId)->lockForUpdate()->firstOrFail();
-            $locked->put($warehouseId.':'.$productId, $inventory);
-        }
-
-        return $locked;
     }
 
     private function summarize(array $released): array

@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class OrderItem extends Model
 {
@@ -33,9 +35,40 @@ class OrderItem extends Model
         return $this->belongsTo(Warehouse::class);
     }
 
-    public function reservation()
+    /**
+     * All reservation versions for this item, from the original reservation
+     * through any future reassignment versions.
+     */
+    public function reservations(): HasMany
     {
-        return $this->hasOne(InventoryReservation::class);
+        return $this->hasMany(InventoryReservation::class)
+            ->orderBy('reservation_sequence')
+            ->orderBy('id');
+    }
+
+    /**
+     * The reservation that currently represents this item.
+     *
+     * The id tie-breaker is defensive: the database makes a sequence unique
+     * per item, but the relationship remains deterministic for legacy data.
+     */
+    public function currentReservation(): HasOne
+    {
+        return $this->hasOne(InventoryReservation::class)->ofMany([
+            'reservation_sequence' => 'max',
+            'id' => 'max',
+        ]);
+    }
+
+    /**
+     * Backwards-compatible relation name for existing read consumers.
+     *
+     * It deliberately aliases the current reservation rather than returning
+     * an arbitrary historical first row, and remains eager-loadable.
+     */
+    public function reservation(): HasOne
+    {
+        return $this->currentReservation();
     }
 
     public function handlingItem()

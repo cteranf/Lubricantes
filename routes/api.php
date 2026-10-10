@@ -99,6 +99,13 @@ Route::prefix('v1')->group(function () {
             Route::patch('/payment-submissions/{submission}/observe', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'observe'])->name('payment-submissions.observe');
             Route::patch('/payment-submissions/{submission}/reject', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'reject'])->name('payment-submissions.reject');
             Route::patch('/payment-submissions/{submission}/approve', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'approve'])->name('payment-submissions.approve');
+            Route::post('/payment-submissions/{submission}/resolution', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'openResolution'])->name('payment-submissions.resolution');
+            Route::post('/payment-submissions/{submission}/resolution/reassign', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'reassign'])
+                ->missing(fn () => response()->json([
+                    'message' => 'La presentación de pago no existe.',
+                    'code' => 'payment_submission_not_found',
+                ], 404)->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache'))
+                ->name('payment-submissions.resolution.reassign');
         });
 
         // Payment

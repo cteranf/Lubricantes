@@ -5,7 +5,7 @@
     <div v-if="recoveringSubmission" class="py-6 text-sm">Recuperando tu presentación de pago…</div>
     <div v-else-if="submission" class="mt-4 rounded border p-4 text-sm" :class="submissionTone">
       <b>{{ submission.message }}</b><p>{{ submission.channel }} · S/ {{ submission.expected_amount }} {{ submission.currency }}</p>
-      <p>Operación {{ submission.operation_number_masked }}</p><p v-if="submission.status === 'observed' && submission.reason" class="mt-2 font-medium">Motivo: {{ submission.reason }}</p><p v-if="submission.reservation_expires_at">Reserva vigente hasta {{ format(submission.reservation_expires_at) }}</p>
+      <p>Operación {{ submission.operation_number_masked }}</p><p v-if="submission.status === 'observed' && submission.reason" class="mt-2 font-medium">Motivo: {{ submission.reason }}</p><p v-if="submission.reservation_status === 'active' && submission.reservation_expires_at">Reserva vigente hasta {{ format(submission.reservation_expires_at) }}</p><p v-else-if="submission.reservation_status === 'consumed'">Stock confirmado para tu pedido</p><p v-else-if="submission.reservation_status === 'expired'">La reserva de stock venció</p><p v-else-if="submission.reservation_status === 'released'">La reserva de stock fue liberada</p><p v-else-if="submission.reservation_status === 'mixed'">El stock del pedido se encuentra en actualización</p>
       <template v-if="submission.status === 'approved'">
         <p v-if="submission.validated_at" class="mt-2">Validado el {{ format(submission.validated_at) }}</p>
         <p class="mt-3 font-medium">Tu pedido continuará con preparación y entrega.</p>

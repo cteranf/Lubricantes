@@ -2,16 +2,25 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\InsufficientVersionedInventoryStockException;
+use App\Exceptions\InventoryReservationConflictException;
+use App\Exceptions\PaymentReassignmentConflictException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ApproveTreasuryPaymentSubmissionRequest;
+use App\Http\Requests\OpenTreasuryPaymentResolutionRequest;
+use App\Http\Requests\ReassignTreasuryPaymentSubmissionRequest;
 use App\Http\Requests\TreasuryPaymentSubmissionDecisionRequest;
 use App\Http\Requests\TreasuryPaymentSubmissionIndexRequest;
 use App\Http\Resources\TreasuryPaymentApprovalResource;
+use App\Http\Resources\TreasuryPaymentReassignmentResource;
+use App\Http\Resources\TreasuryPaymentResolutionResource;
 use App\Http\Resources\TreasuryPaymentSubmissionDetailResource;
 use App\Http\Resources\TreasuryPaymentSubmissionHistoryResource;
 use App\Http\Resources\TreasuryPaymentSubmissionListResource;
 use App\Models\PaymentSubmission;
 use App\Services\TreasuryPaymentApprovalService;
+use App\Services\TreasuryPaymentReassignmentService;
+use App\Services\TreasuryPaymentResolutionService;
 use App\Services\TreasuryPaymentReviewService;
 use Carbon\Carbon;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -19,7 +28,12 @@ use Illuminate\Support\Facades\DB;
 
 class TreasuryPaymentSubmissionController extends Controller
 {
-    public function __construct(private TreasuryPaymentReviewService $reviews, private TreasuryPaymentApprovalService $approvals) {}
+    public function __construct(
+        private TreasuryPaymentReviewService $reviews,
+        private TreasuryPaymentApprovalService $approvals,
+        private TreasuryPaymentResolutionService $resolutions,
+        private TreasuryPaymentReassignmentService $reassignments,
+    ) {}
 
     public function index(TreasuryPaymentSubmissionIndexRequest $request)
     {
@@ -27,7 +41,8 @@ class TreasuryPaymentSubmissionController extends Controller
         $query = PaymentSubmission::query()->with([
             'order:id,user_id,reserved_until',
             'order.user:id,name,email',
-            'order.reservations:id,order_id,status,expires_at',
+            'order.items:id,order_id',
+            'order.items.currentReservation:inventory_reservations.id,inventory_reservations.order_item_id,inventory_reservations.status,inventory_reservations.expires_at',
         ]);
 
         if (! empty($data['search'])) {
@@ -83,9 +98,12 @@ class TreasuryPaymentSubmissionController extends Controller
 
     public function show(string $submission)
     {
-        $model = $this->submission($submission, ['order.user', 'order.reservations', 'reviewer', 'histories.actor', 'paymentTransaction.confirmer']);
+        $model = $this->submission($submission, ['order.user', 'order.items.currentReservation', 'reviewer', 'histories.actor', 'paymentTransaction.confirmer', 'resolutionCase']);
+        $canOpenResolution = $this->resolutions->canOpen($model);
+        $canReassignAndApprove = $this->reassignments->canReassignAndApprove($model);
 
         return (new TreasuryPaymentSubmissionDetailResource($model))
+            ->withAvailability($canOpenResolution, $canReassignAndApprove)
             ->response()
             ->header('Cache-Control', 'no-store, private')
             ->header('Pragma', 'no-cache');
@@ -129,6 +147,44 @@ class TreasuryPaymentSubmissionController extends Controller
         $approved = $this->approvals->approve($model->id, $request->user()->id);
 
         return (new TreasuryPaymentApprovalResource($approved))
+            ->response()
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Pragma', 'no-cache');
+    }
+
+    public function openResolution(OpenTreasuryPaymentResolutionRequest $request, string $submission)
+    {
+        $model = $this->submission($submission);
+        $case = $this->resolutions->open($model->id, $request->user()->id);
+
+        return (new TreasuryPaymentResolutionResource($case))
+            ->response()
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Pragma', 'no-cache');
+    }
+
+    public function reassign(ReassignTreasuryPaymentSubmissionRequest $request, PaymentSubmission $submission)
+    {
+        try {
+            $case = $this->reassignments->reassignAndApprove($submission, $request->user());
+        } catch (InsufficientVersionedInventoryStockException) {
+            return response()->json([
+                'message' => 'No hay stock suficiente para completar la reasignación.',
+                'code' => 'insufficient_stock',
+            ], 409)->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache');
+        } catch (PaymentReassignmentConflictException) {
+            return response()->json([
+                'message' => 'La reasignación no puede completarse en el estado actual.',
+                'code' => 'payment_reassignment_conflict',
+            ], 409)->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache');
+        } catch (InventoryReservationConflictException) {
+            return response()->json([
+                'message' => 'La reasignación no puede completarse por una inconsistencia de inventario.',
+                'code' => 'payment_reassignment_conflict',
+            ], 409)->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache');
+        }
+
+        return (new TreasuryPaymentReassignmentResource($case))
             ->response()
             ->header('Cache-Control', 'no-store, private')
             ->header('Pragma', 'no-cache');
