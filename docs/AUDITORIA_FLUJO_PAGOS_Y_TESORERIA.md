@@ -462,6 +462,8 @@ Las primitivas versionadas crean una nueva reserva por ítem y caso sin reactiva
 
 `TreasuryPayments.vue` presenta “Reasignar stock y aprobar” solo para un caso abierto elegible informado por el backend. El modal describe el efecto financiero e inventario, bloquea doble envío y diferencia `insufficient_stock` de `payment_reassignment_conflict`. En éxito refresca detalle, historial y página, y retira de inmediato las acciones incompatibles.
 
+El menú del usuario autenticado muestra el acceso directo “Panel de tesorería” únicamente cuando `authStore.isTreasury` es verdadero. El enlace utiliza la ruta nombrada `treasury-payments`, conserva intacto el acceso administrativo y el menú se cierra mediante el comportamiento común al cambiar de ruta.
+
 El tracking del cliente conserva “Pago validado por Tesorería”, la operación enmascarada y la fecha de validación. El estado de reserva ya no se deduce de `orders.reserved_until`: se agrega desde las reservas `currentReservation` de los ítems. Todas `active` muestran vigencia; todas `consumed` muestran “Stock confirmado para tu pedido”; `expired` y `released` tienen mensajes propios; estados mixtos usan un mensaje neutro sin inventar una fecha global.
 
 La certificación física MySQL de reasignación completó 30 carreras independientes: 10 reasignación/reasignación, 10 competencia por último stock y 10 reasignación/cancelación. Las pruebas SQLite certifican atomicidad y rollback en cada punto inducible. Las excepciones de inventario y reasignación siguen siendo de dominio y no construyen respuestas HTTP.

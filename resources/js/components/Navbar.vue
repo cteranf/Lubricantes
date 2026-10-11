@@ -28,6 +28,7 @@
                             <router-link to="/profile" class="dropdown-link">Mi perfil</router-link>
                             <router-link to="/orders" class="dropdown-link">Mis pedidos</router-link>
                             <router-link v-if="authStore.isAdmin" to="/admin/dashboard" class="dropdown-link font-bold text-blue-700">Panel administrativo</router-link>
+                            <router-link v-if="authStore.isTreasury" :to="{ name: 'treasury-payments' }" class="dropdown-link font-bold text-blue-700">Panel de tesorería</router-link>
                             <button type="button" class="dropdown-link w-full text-left text-red-700" @click="logout">Cerrar sesión</button>
                         </div>
                     </div>
