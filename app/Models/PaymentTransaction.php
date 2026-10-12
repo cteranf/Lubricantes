@@ -104,7 +104,12 @@ class PaymentTransaction extends Model
         return $this->hasOne(PaymentResolutionCase::class, 'received_payment_transaction_id');
     }
 
-    public function refund()
+    public function refundAsOriginalPayment()
+    {
+        return $this->hasOne(PaymentRefund::class, 'original_payment_transaction_id');
+    }
+
+    public function refundAsAccountingTransaction()
     {
         return $this->hasOne(PaymentRefund::class, 'refund_payment_transaction_id');
     }

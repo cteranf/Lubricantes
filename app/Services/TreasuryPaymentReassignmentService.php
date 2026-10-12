@@ -524,92 +524,35 @@ class TreasuryPaymentReassignmentService
         }
         $submissionHistories = PaymentSubmissionHistory::query()
             ->where('payment_submission_id', $submission->id)
-            ->where('event', PaymentSubmissionHistory::REASSIGNMENT_APPROVED)
+            ->orderBy('id')
             ->get();
         $resolutionHistories = PaymentResolutionHistory::query()
             ->where('payment_resolution_case_id', $case->id)
-            ->where('event', self::RESOLUTION_EVENT)
+            ->orderBy('id')
+            ->get();
+        $fulfillmentHistories = OrderFulfillmentHistory::query()
+            ->where('order_id', $order->id)
+            ->orderBy('id')
             ->get();
 
-        if ($reservations->isEmpty() || $submissionHistories->count() !== 1 || $resolutionHistories->count() !== 1) {
-            return false;
-        }
-
-        $reopened = (bool) ($submissionHistories->first()->safe_metadata['reopened_after_expiration'] ?? false);
-        $metadata = [
-            'resolution_case_id' => $case->id,
-            'reservation_count' => $reservations->count(),
-            'reopened_after_expiration' => $reopened,
-        ];
-        $submissionHistory = $submissionHistories->first();
-        $resolutionHistory = $resolutionHistories->first();
-        $finalActors = $this->actorsAreCoherent([
-            $submission->reviewed_by,
-            $case->resolved_by,
-            $submissionHistory->actor_id,
-            $resolutionHistory->actor_id,
-        ]);
-        $reopeningHistories = OrderFulfillmentHistory::query()
-            ->where('order_id', $order->id)
-            ->where('from_status', Order::FULFILLMENT_CANCELED)
-            ->where('to_status', Order::FULFILLMENT_RESERVED)
-            ->orderBy('id')
-            ->get()
-            ->filter(fn (OrderFulfillmentHistory $history) => (int) ($history->metadata['resolution_case_id'] ?? 0) === (int) $case->id);
-        $canonicalReopeningHistory = $reopeningHistories->firstWhere('idempotency_key', $this->reopeningKey($order->id, $case->id));
-        if ($submissionHistory->safe_metadata != $metadata
-            || $resolutionHistories->first()->safe_metadata != $metadata
-            || $submissionHistory->from_status !== PaymentSubmission::MANUAL_RESOLUTION_REQUIRED
-            || $submissionHistory->to_status !== PaymentSubmission::APPROVED
-            || $submissionHistory->reason !== self::DECISION_REASON
-            || $resolutionHistory->from_status !== PaymentResolutionCase::OPEN
-            || $resolutionHistory->to_status !== PaymentResolutionCase::REASSIGNED
-            || $resolutionHistory->reason !== self::DECISION_REASON
-            || ! $this->sameMoment($submission->reviewed_at, $submissionHistory->occurred_at)
-            || ! $this->sameMoment($submissionHistory->occurred_at, $resolutionHistory->occurred_at)
-            || ! $this->sameMoment($resolutionHistory->occurred_at, $case->resolved_at)
-            || ! $this->sameMoment($case->resolved_at, $order->paid_at)
-            || ! $finalActors
-            || $reservations->contains(fn (InventoryReservation $reservation) => ! $reservation->expires_at
-                || ! $order->reserved_until
-                || $reservation->expires_at->getTimestamp() !== $order->reserved_until->getTimestamp())
-            || ($reopened ? ($reopeningHistories->count() !== 1 || ! $canonicalReopeningHistory) : $reopeningHistories->isNotEmpty())
-            || ! $this->openingEvidenceIsCoherent($submission, $order, $transaction, $case, false)) {
-            return false;
-        }
-
-        return $submission->status === PaymentSubmission::APPROVED
-            && $submission->currency === 'PEN'
-            && $this->cents($submission->expected_amount) === $this->cents($order->total)
-            && $submission->reviewed_at !== null
-            && $submission->decision_reason === self::DECISION_REASON
-            && (int) $transaction->order_id === (int) $order->id
-            && (int) $transaction->payment_submission_id === (int) $submission->id
-            && $transaction->status === PaymentTransaction::APPROVED
-            && $transaction->payment_method === 'transferencia'
-            && $transaction->transaction_type === PaymentTransaction::PAYMENT
-            && $transaction->collection_method === $submission->channel
-            && $transaction->currency === 'PEN'
-            && $this->cents($transaction->amount) === $this->cents($order->total)
-            && $transaction->approved_scope_key === $scopeKey
-            && $transaction->idempotency_key === $this->transactionKey($submission->id)
-            && $transaction->confirmed_at !== null
-            && (int) $case->payment_submission_id === (int) $submission->id
-            && (int) $case->received_payment_transaction_id === (int) $transaction->id
-            && $case->status === PaymentResolutionCase::REASSIGNED
-            && $case->type === PaymentResolutionCase::STOCK_REASSIGNMENT
-            && $case->currency === 'PEN'
-            && $this->cents($case->amount) === $this->cents($order->total)
-            && $case->idempotency_key === $this->caseKey($submission->id)
-            && $case->resolved_at !== null
-            && $case->reason === self::DECISION_REASON
-            && $order->payment_method === 'transferencia'
+        return $transaction->approved_scope_key === $scopeKey
             && $order->payment_status === 'approved'
-            && $order->paid_at !== null
-            && $order->reserved_until !== null
             && $order->status === 'pending'
             && $order->tracking_status === 'pending'
             && $order->fulfillment_status === Order::FULFILLMENT_RESERVED
+            && $order->reserved_until !== null
+            && $reservations->every(fn (InventoryReservation $reservation) => $reservation->expires_at
+                && $reservation->expires_at->getTimestamp() === $order->reserved_until->getTimestamp())
+            && PaymentReassignmentFinalState::isCoherent(
+                $order,
+                $submission,
+                $transaction,
+                $case,
+                $submissionHistories,
+                $resolutionHistories,
+                $fulfillmentHistories,
+                $reservations->count(),
+            )
             && ! PaymentRefund::query()->where('payment_resolution_case_id', $case->id)->exists();
     }
 

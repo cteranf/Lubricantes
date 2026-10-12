@@ -9,7 +9,9 @@ class PaymentSubmissionHistory extends Model
 {
     public const REASSIGNMENT_APPROVED = 'reassignment_approved';
 
-    public const EVENTS = ['submitted', 'observed', 'corrected', 'approved', 'rejected', 'expired', 'canceled', 'resolution_opened', self::REASSIGNMENT_APPROVED];
+    public const REFUND_MARKED_PENDING = 'refund_marked_pending';
+
+    public const EVENTS = ['submitted', 'observed', 'corrected', 'approved', 'rejected', 'expired', 'canceled', 'resolution_opened', self::REASSIGNMENT_APPROVED, self::REFUND_MARKED_PENDING];
 
     public const UPDATED_AT = null;
 
