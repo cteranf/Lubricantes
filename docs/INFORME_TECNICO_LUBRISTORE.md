@@ -10,13 +10,14 @@ frontend: Vue
 database: MySQL
 timezone: America/Lima
 environment_reviewed: local
-source_branch: feature/mercadopago-hardening
-source_commit: e24f89c
+source_branch: main
+source_commit: dd2436b
+consolidated_at: 2026-10-18
 ---
 
-> Este documento describe el estado confirmado del repositorio en la fecha y commit indicados. El código y las migraciones tienen precedencia si posteriormente existe una diferencia.
+> Consolidación documental de dd2436b. La generación original del 2026-09-04 y sus evidencias locales se conservan como historial; no son verificaciones nuevas de producción. Las secciones de cierre posteriores sustituyen límites históricos incompatibles. El código y las migraciones tienen precedencia. Este lote no ejecutó pruebas, comandos de aplicación ni consultas a bases de datos.
 
-> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). Infraestructura, cuentas receptoras y Fase 2B1 están implementadas; la revisión y aprobación de Tesorería permanecen pendientes.
+> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). 2B1/2B2/2B3 y 2B4-B1/B2 están implementados y certificados en su alcance. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2, HTTP y frontend de devolución siguen pendientes.
 
 # 1. Resumen ejecutivo
 
@@ -30,13 +31,13 @@ La ruta protegida `/admin/reports/management` presenta seis pestañas: Ventas, I
 
 Movimientos admite periodo, fechas personalizadas, almacén, producto, categoría, marca, tipo y dirección. Operaciones admite modalidad, severidad, razón, etapa y vencido. Ciclos admite periodo, fechas, modalidad y las siete métricas certificadas. Catálogos admite las doce opciones (`products`, `categories`, `brands`, `warehouses`, `branches`, `drivers`, `vehicles`, `departments`, `provinces`, `districts`, `shipping_zones`, `shipping_rates`) y sus filtros específicos. No existen endpoints ligeros de opciones para departamentos, provincias, distritos o zonas; la interfaz no descarga esos catálogos masivos y deja esos selectores sin opciones hasta que se publique un contrato paginado.
 
-El Dashboard es una vista gerencial agregada distinta de Reportes: el primero conserva su respuesta completa y pestañas visuales locales; Reportes consulta bajo demanda una sección y muestra sus filas, totales, metadatos y truncamiento. Los CSV son UTF-8 con BOM, cabeceras explícitas y neutralización contra inyección de fórmulas. Las respuestas no exponen datos personales. La suite actual validada contiene 390 pruebas exitosas; la interacción visual con navegador (smoke manual) sigue pendiente.
+El Dashboard es una vista gerencial agregada distinta de Reportes: el primero conserva su respuesta completa y pestañas visuales locales; Reportes consulta bajo demanda una sección y muestra sus filas, totales, metadatos y truncamiento. Los CSV son UTF-8 con BOM, cabeceras explícitas y neutralización contra inyección de fórmulas. Las respuestas no exponen datos personales. El corte histórico de reportes registró 390 pruebas exitosas, sin nueva ejecución en esta consolidación; la interacción visual con navegador (smoke manual) sigue pendiente.
 
-LubriStore es un comercio electrónico de lubricantes. Resuelve la venta de productos con catálogo, carrito, checkout, reservas de inventario, pago, preparación, despacho, entrega y recojo en sede. Los actores reales son clientes y administradores; existen entidades operativas para repartidores y vehículos.
+LubriStore es un comercio electrónico de lubricantes. Resuelve la venta de productos con catálogo, carrito, checkout, reservas de inventario, pago, preparación, despacho, entrega y recojo en sede. Los actores son clientes, administradores y Tesorería; existen entidades operativas para repartidores y vehículos.
 
 El backend es Laravel 9.52.21 sobre PHP 8.3 y MySQL; el frontend es Vue 3 con Vite, Vue Router, Pinia, Axios y PrimeVue. Sanctum protege las sesiones API. Mercado Pago está integrado junto con un gateway mock para pruebas.
 
-**Estado:** catálogo, carrito, territorios, sedes, inventario, reservas, fulfillment, pickup/delivery, gestión de consultas y simulación de pagos tienen implementación y pruebas automatizadas. Mercado Pago persistente dispone de endurecimiento; `migrate:status` local confirma ejecutadas sus migraciones de preferencias, gateway, webhooks y referencia actual. La activación en staging/producción exige variables, HTTPS, webhook, correo, colas y pruebas MySQL de concurrencia.
+**Estado:** catálogo, carrito, territorios, sedes, inventario, reservas, fulfillment, pickup/delivery, consultas y pagos tienen implementación y pruebas existentes. Tesorería incluye B1/B2 certificados y B3-A0/A1 internos. dd2436b está desplegado y levantado en Hostinger con dependencias Composer de producción, `APP_ENV=production`, `APP_DEBUG=false`, todas las migraciones aplicadas —incluida 070630— y administrador seguro creado manualmente. Son hechos de despliegue confirmados, sin acceso al servidor en este lote. Cron/scheduler, workers, correo, monitoreo y aceptación operativa integral no quedan certificados por esa instalación.
 
 Funciones que requieren configuración: credenciales de Mercado Pago, destinatarios de correo, zonas/tarifas comerciales, sedes y almacenes productivos, repartidores/vehículos, colas y scheduler. La zona Carabayllo S/ 8.00 descrita más adelante es exclusivamente local de desarrollo.
 
@@ -66,7 +67,7 @@ flowchart LR
 | DB | MySQL configurado; pruebas usan SQLite en memoria cuando el test lo solicita |
 | Pago | `mercadopago/dx-php ^3.16`, gateway mock |
 | Colas | Laravel queue configurable por `QUEUE_CONNECTION`; jobs table migrada |
-| Scheduler | `inventory:expire-reservations` cada minuto, sin solapamiento |
+| Scheduler | tarea `inventory:expire-reservations` definida cada minuto y sin solapamiento; ejecución del cron en Hostinger no certificada |
 | Mail | Mailables/notificaciones de consultas y pedidos dependen de configuración; no se presume entrega si el mailer no está configurado |
 | Archivos | Disco Laravel configurable (`FILESYSTEM_DISK`); evidencias de entrega se almacenan según servicio |
 
@@ -87,17 +88,18 @@ No hay frontend Vitest/Vue Test Utils localizado. La prueba frontend existente e
 
 # 3. Seguridad, usuarios y permisos
 
-`AuthController` registra clientes con `role=customer`; los administradores son usuarios con `role=admin` y `User::isAdmin()`. `auth:sanctum` autentica endpoints privados y `is_admin` protege el prefijo `/admin`. No existe un sistema Spatie Permission localizado.
+`AuthController` registra clientes con `role=customer`; los roles disponibles son `admin`, `customer` y `treasury`. `auth:sanctum` autentica endpoints privados, `active_user` rechaza cuentas inactivas, `is_admin` protege administración e `is_treasury` protege la bandeja financiera. No existe un sistema Spatie Permission localizado.
 
 | Actor | Acceso real |
 |---|---|
 | Cliente | catálogo, carrito, direcciones propias, creación/consulta propia de pedidos, tracking y contacto |
 | Administrador | todas las rutas `/api/v1/admin/*`: catálogo, inventario, territorios, sedes, tarifas, pedidos, fulfillment, delivery, pagos configurables y consultas |
+| Tesorería | `/api/v1/treasury/*`: bandeja, historial, observación, rechazo, aprobación, apertura de resolución y reasignación/aprobación; acceso directo “Panel de tesorería” para Treasury |
 | Repartidor | existe entidad/atributos de repartidor; no se localizó un portal frontend separado. Las operaciones de entrega son administrativas |
 
 Controles confirmados: validación Laravel, propiedad del pedido en endpoints de cliente, `throttle:api`, rate limit de contacto, límites de importación territorial, errores JSON y ocultamiento de secretos/campos internos en Resources o `$hidden`. CSRF aplica al flujo web tradicional; la API usa Sanctum y tokens.
 
-Riesgos: `APP_DEBUG` debe ser falso fuera de local; nunca exponer `APP_KEY`, access tokens, webhook secret, contraseñas ni payloads de pago. La autorización de roles es binaria (`is_admin`), por lo que ver/aprobar/eliminar no está separado en permisos finos.
+Riesgos: `APP_DEBUG` debe ser falso fuera de local; nunca exponer secretos, contraseñas ni payloads de pago. Administración y Tesorería tienen accesos diferenciados por rol; no existe una matriz general de permisos finos para cada acción.
 
 # 4. Catálogo, productos y carrito
 
@@ -122,6 +124,8 @@ Entidades: `Branch`, `Warehouse`, `WarehouseInventory`, `InventoryMovement`, `In
 | Picking/packing | valida cantidades y registra trazabilidad; no debe duplicar consumo |
 
 Estados de reserva: `active`, `consumed`, `released`, `expired`. Fulfillment de `Order`: `reserved`, `preparing`, `ready`, `delivered`, `canceled`. Picking/packing usan procesos `pending`, `in_progress`, `completed` e incidentes `open`, `resolved`, `canceled`.
+
+Las reservas están versionadas por `(order_item_id, reservation_sequence)`. `OrderItem::reservations()` conserva el historial; `currentReservation()` selecciona la mayor secuencia y usa `id` como desempate. `reservation()` es su alias de compatibilidad. B2 crea y consume una versión nueva vinculada al caso, sin reactivar la histórica. Tracking y Resources leen la reserva actual y no deducen su vigencia únicamente de `orders.reserved_until`.
 
 La liberación de una reserva activa solo decrementa `reserved_quantity` y actualiza `InventoryReservation` (`released`/`expired`); no crea `InventoryMovement`. El consumo cambia el saldo físico, marca la reserva `consumed` y crea un movimiento `sale`. La cancelación antes del consumo libera la reserva. La cancelación después del consumo llama `returnCancellation()` por `OrderItem`, crea un movimiento `cancellation_return` idempotente y repone inventario. La expiración libera reservas y actualiza estados, sin `cancellation_return`.
 
@@ -197,7 +201,7 @@ Modelos persistentes:
 | Modelo | Propósito |
 |---|---|
 | `PaymentPreference` | preferencia remota, estados `creating`, `active`, `superseded`, `failed`, `orphaned` |
-| `PaymentTransaction` | transacción inmutable: `pending`, `approved`, `failed`, `canceled`; pago/refund |
+| `PaymentTransaction` | pago/refund; estados `pending`, `received`, `approved`, `failed`, `canceled`; escritura protegida, con promoción controlada `received → approved` en B2 |
 | `PaymentWebhookEvent` | deduplicación y procesamiento `received`, `processing`, `processed`, `ignored`, `failed` |
 | `PaymentSetting` | configuración editable administrativa |
 
@@ -223,11 +227,27 @@ sequenceDiagram
 
 # 10A. Tesorería y transferencias manuales
 
-La infraestructura de Tesorería está ejecutada localmente: `payment_submissions`, `payment_submission_histories` y `payment_receiving_accounts` fueron creadas por las migraciones `2026_09_08_070540`, `070550` y `070560`. Existe el rol `treasury` y el middleware `is_treasury`; la configuración de cuentas receptoras continúa protegida por `auth:sanctum`, `active_user` e `is_admin` hasta que exista una bandeja financiera específica. Las cuentas Yape, Plin y banco se cifran cuando corresponde, usan un default activo único por canal y sirven QR desde disco privado. Las pruebas validan restricciones y UNIQUE; falta certificación concurrente real en MySQL.
+La infraestructura de Tesorería está implementada y sus migraciones están aplicadas en Hostinger según el despliegue confirmado. Incluye presentaciones, historial y cuentas receptoras. La configuración de cuentas conserva `auth:sanctum`, `active_user` e `is_admin`; la bandeja financiera tiene `is_treasury`. Las cuentas Yape, Plin y banco se cifran cuando corresponde, usan un default activo único por canal y sirven QR privado. Las certificaciones SQLite/MySQL de los cierres financieros se detallan en la auditoría; no implican certificación nueva de toda la operación productiva.
 
 Fase 2B1-A expone opciones de transferencia y QR privado al propietario autenticado del pedido elegible. Fase 2B1-B registra `PaymentSubmission` con `Idempotency-Key`, importe desde `orders.total`, PEN, fingerprint, historial append-only, locks y extensión sincronizada de reserva; no altera `payment_status`, `paid_at`, inventario ni `PaymentTransaction`. Fase 2B1-C integra el panel cliente en tracking: recupera primero la presentación, sigue a opciones solo ante `404 payment_submission_not_found`, obtiene QR como blob y libera ObjectURL. Tracking expone `reserved_until` ISO o `null`.
 
-El smoke local del pedido #13 verificó Yape, creación y recuperación de una presentación `pending_review`, operación enmascarada, igualdad entre vencimientos de pedido/reserva y permanencia de pago `pending`. El QR de ese smoke es de prueba. Tesorería aún no puede observar, rechazar ni aprobar desde una bandeja; 2B2 atenderá esas acciones sin crear `PaymentTransaction` ni consumir inventario. El botón legacy de aprobación en Pedidos sigue existente hasta la futura 2B3.
+El smoke histórico de 2B1 verificó creación y recuperación de la presentación, operación enmascarada y extensión sincronizada de reserva, sin aprobar pago ni consumir inventario; utilizó un QR de prueba. Posteriormente 2B2 incorporó bandeja, observación/rechazo y corrección idempotente, y 2B3 añadió aprobación financiera atómica e interfaces. El botón legacy solo continúa para pedidos sin presentación; con presentación devuelve `treasury_approval_required`.
+
+## 10B. Resolución vigente 2B4-B1/B2
+
+B1 registra el pago recibido cuando no procede la aprobación ordinaria: crea una `PaymentTransaction received`, un caso `open`, la presentación `manual_resolution_required` e historiales coherentes, con reintento idempotente. B2 reasigna y consume nuevas reservas, sincroniza inventario, promueve esa misma transacción `received → approved` mediante `approveReceivedForResolution()`, aprueba la presentación y cierra el caso `stock_reassignment/reassigned`. No crea un segundo pago; solo reabre un pedido cancelado cuando existe evidencia de expiración automática.
+
+Las rutas `POST /api/v1/treasury/payment-submissions/{submission}/resolution` y `POST /api/v1/treasury/payment-submissions/{submission}/resolution/reassign` exigen autenticación, usuario activo y Treasury, body vacío y claves construidas por el servidor. Requests, controller, Resources privados y `TreasuryPayments.vue` están implementados. La UI usa elegibilidad backend, confirmación y refresco de detalle/historial/listado. El cliente ve el estado financiero enmascarado y la reserva actual. B1/B2 tienen certificación existente SQLite/MySQL y smoke manual documentados; este lote no los repite.
+
+## 10C. Reembolsos B3-A0/A1 y pendientes
+
+B3-A0 generaliza `PaymentRefund` mediante 070630: pago original nullable con FK `RESTRICT` y UNIQUE independiente, caso opcional y asiento de devolución separado. El backfill exige `payment/approved` y coherencia de pedido, presentación, importe y moneda entre pago, caso y refund, sin un pago aprobado competidor bajo esos criterios. La existencia del identificador recibido por sí sola no basta. El modelo protege la identidad original, cifra la referencia externa y oculta relaciones financieras.
+
+B3-A1 implementa únicamente `TreasuryPaymentRefundService::markPending()`: Treasury activo inicia manualmente un reembolso total de un pedido pagado y cancelado, no entregado ni recogido, con un único pago aprobado por el total en PEN e inventario compensado. Admite todos los medios cobrados, sin fabricar presentación ni caso. Crea refund `pending`, exige pago original al crear, marca pedido y eventual presentación `refund_pending` y añade historial allowlisted. El caso B2 queda intacto; el refund no lo utiliza como ciclo de devolución. La transacción exterior tiene tres intentos y no modifica inventario.
+
+Las tres brechas anteriores están corregidas en dd2436b: snapshots confidenciales canonicalizados con comparación segura; harness físico MySQL que exige SQLSTATE `40001`/driver `1213` y descarta `1205`; regresión aislada de FK homónima incorrecta conservando válida la UNIQUE. La auditoría identifica las suites y el worker. Se conserva la certificación existente y se distingue de la cobertura inspeccionada; esta consolidación no ejecuta pruebas.
+
+El contrato B3 es exclusivamente total, para todos los medios cobrados, con inicio y finalización manual por Treasury —puede ser el mismo usuario—, referencia externa obligatoria al completar y sin gateway automático. Pedidos entregados o recogidos quedan fuera. **B3-A2 no está implementado:** faltan finalización interna, asiento contable `refund`, cierre atómico e idempotente y su certificación. Después siguen HTTP y frontend, incluida adaptación de mensajes/filtros a los estados de devolución. No existe acción visible de reembolso ni integración automática con proveedores; cancelar no inicia un refund. Los históricos sin pago original deducible requieren revisión antes de habilitar el flujo completo.
 
 # 11. Preparación, despacho y entrega
 
@@ -303,7 +323,7 @@ Contratos críticos:
 | orders/order_items | `Order`/`OrderItem` | venta | snapshots y FKs protegidas |
 | shipping_zones/shipping_rates | `ShippingZone`/`ShippingRate` | cobertura | tarifas usadas por pedidos no se borran |
 | departments/provinces/districts | territorios | INEI/UBIGEO | FKs restrictivas |
-| payment_* | modelos de pago | preferencia/evento/transacción | transacciones inmutables |
+| payment_* | modelos de pago | preferencia/evento/transacción | transacciones protegidas; promoción B2 controlada |
 | order_delivery* | delivery/historial | despacho | historial append-only |
 | contact_inquiries* | consultas | atención | archivar/conservar, no borrado común |
 
@@ -334,9 +354,9 @@ La configuración revisada usa `America/Lima`. `now()`, expiración de reservas,
 | Entidad | Estados |
 |---|---|
 | Order | pending, confirmed, shipped, delivered, canceled, rejected |
-| Payment | pending, approved, rejected, in_process, refunded |
+| Payment | pending, approved, rejected, refund_pending, refunded; `in_process` se normaliza a pending |
 | PaymentPreference | creating, active, superseded, failed, orphaned |
-| PaymentTransaction | pending, approved, failed, canceled |
+| PaymentTransaction | pending, received, approved, failed, canceled; promoción received → approved controlada en B2 |
 | WebhookEvent | received, processing, processed, ignored, failed |
 | Reservation | active, consumed, released, expired |
 | Delivery | pending, scheduled, assigned, dispatched, out_for_delivery, in_transit, awaiting_pickup, delivered, failed_attempt, rescheduled, canceled |
@@ -351,7 +371,7 @@ Reglas estables: no doble consumo de inventario; no doble aprobación financiera
 | BR-INV-001 | saldo y movimiento son atómicos | `InventoryService` | `InventoryPhaseTwoTest` |
 | BR-INV-002 | reserva no se consume dos veces | `InventoryReservation*` | `InventoryReservationPhaseThreeTest` |
 | BR-PAY-001 | webhook verifica firma/importe | `PaymentWebhookSignatureService`, `PaymentProcessingService` | `PaymentWebhookAdversarialTest` |
-| BR-PAY-002 | transacción financiera inmutable | `PaymentTransaction` | `PaymentPersistenceModelTest` |
+| BR-PAY-002 | transacción protegida; promoción received → approved solo por operación B2 controlada | `PaymentTransaction` | `PaymentPersistenceModelTest`, suites de reasignación |
 | BR-ORD-001 | token idempotente por usuario | `OrderController`/migración | `CheckoutPickupBranchTest` |
 | BR-SHP-001 | una tarifa activa por distrito | `ShippingRateController` + índice | `ShippingRatesCheckoutTest` |
 | BR-TER-001 | jerarquía oficial y códigos estables | `TerritorySelectionService` | `TerritoryCatalogTest` |
@@ -381,7 +401,11 @@ Mutantes: `php artisan migrate`, `db:seed`, backfill, `reconcile --apply`, limpi
 
 **Producción:** respaldo probado y restaurable, credenciales reales en secreto gestionado, `APP_DEBUG=false`, dominio HTTPS, webhook firmado, workers supervisados, scheduler, observabilidad, límites, pruebas de rollback y aprobación comercial de tarifas.
 
+**Despliegue confirmado de dd2436b:** Hostinger ya está operativo, Composer se instaló con dependencias de producción, el entorno es `production` con debug desactivado, todas las migraciones están aplicadas —incluidas 070570–070630— y el administrador seguro se creó manualmente. No se documentan datos de acceso. Este estado no certifica cron/scheduler, workers/colas, correo, monitoreo, recuperación ni comportamiento productivo de reembolsos. Los requisitos anteriores permanecen como criterios de aceptación, no como pendientes de clonar o instalar nuevamente.
+
 # 21. Estado funcional
+
+> **Matriz histórica del corte local original.** Las columnas Staging/Producción y pendientes de despliegue no son una evaluación actual de Hostinger. Para el estado vigente prevalecen las secciones 10A–10C y 20; los “No” históricos no niegan el despliegue confirmado ni certifican su operación integral.
 
 | Módulo | Implementado | Probado | Configuración | Local | Staging | Producción | Observación |
 |---|---|---|---|---|---|---|---|
@@ -419,7 +443,7 @@ Orden recomendado: (1) administradores; (2) categorías, marcas y productos; (3)
 
 # 24. Entorno local de desarrollo
 
-Confirmado en la base local revisada: catálogo INEI cargado; sede principal ficticia en Carabayllo con pickup; zona `CARABAYLLO`; tarifa S/ 8.00; pedido histórico 10 preservado; dirección histórica 3 sin remapeo. Estos datos son de desarrollo y no deben presentarse como staging/producción.
+Confirmado en la base local revisada: catálogo INEI cargado; sede principal ficticia en Carabayllo con pickup; zona `CARABAYLLO`; tarifa S/ 8.00; pedidos históricos preservados y direcciones históricas sin remapeo; se omiten sus identificadores. Estos datos son de desarrollo y no deben presentarse como staging/producción.
 
 # 25. Trazabilidad de requisitos y archivos de cambio
 
@@ -437,7 +461,7 @@ Confirmado en la base local revisada: catálogo INEI cargado; sede principal fic
 
 | Nivel | Evidencia/impacto | Recomendación | Bloqueo |
 |---|---|---|---|
-| Crítico | conciliación y revisión manual de transferencias aún no implementadas | implementar Tesorería con respaldo y pruebas MySQL 8 | staging/producción |
+| Medio | conciliación externa y monitoreo financiero pendientes; revisión, aprobación y B1/B2 ya implementados | completar procedimientos y validar operación por entorno | aceptación operativa integral |
 | Alto | credenciales, webhook y correo dependen de entorno | secretos gestionados, HTTPS, worker y smoke tests | producción |
 | Alto | SQLite no prueba todos los locks/concurrencia | certificación MySQL 8 y pruebas paralelas | producción |
 | Medio | bundle Vite supera 500 KB; Browserslist desactualizado | code splitting y actualizar caniuse-lite | no bloquea local |
@@ -465,11 +489,13 @@ La plataforma está preparada para crecer, pero cada entorno debe configurar sus
 
 # 30. Evidencias de esta generación
 
+> Registro histórico de la generación original; no acredita ejecución en dd2436b ni en Hostinger. La consolidación del 2026-10-18 solo modifica documentación, conserva certificaciones existentes y no ejecuta pruebas ni accede a datos.
+
 - Fecha: 2026-09-04.
 - Rama: `feature/mercadopago-hardening`.
 - Commit revisado: `e24f89c`.
 - Comandos de lectura: `php artisan about --only=environment`, `php artisan route:list`, `php artisan migrate:status`, consultas no destructivas a la base local, `git status --short`, `git diff --check`.
-- Pruebas vigentes verificadas: suite completa **263/1.750, exit code 0**.
+- Pruebas verificadas en aquel corte histórico: suite completa **263/1.750, exit code 0**.
 - No se ejecutaron migraciones, seeders, backfills, reconciliaciones, pagos reales ni despliegues durante la generación del informe.
 - Limitación: la auditoría no sustituye smoke tests de navegador, certificación de correo/colas, pruebas concurrentes MySQL 8 ni validación externa de Mercado Pago.
 
@@ -558,14 +584,14 @@ Las etiquetas de este informe significan: **[CÓDIGO]** implementación vigente;
 | `Warehouse` / warehouses | branch, code/name, activo/default | branch/inventories; código por sede | almacén default único por sede; restrictivo |
 | `WarehouseInventory` / warehouse_inventories | quantity/reserved_quantity | warehouse/product; unique warehouse+product | saldo operativo; lockForUpdate |
 | `InventoryMovement` / inventory_movements | before/after, quantity, type, idempotency_key, metadata | product/warehouse/user | tipos inmutables; unique idempotency |
-| `InventoryReservation` / inventory_reservations | quantity, status, expires_at, idempotency_key | order/order_item/product/warehouse | active/consumed/released/expired; unique order item |
+| `InventoryReservation` / inventory_reservations | quantity, status, expires_at, reservation_sequence, resolution_case_id | order/order_item/product/warehouse/case | active/consumed/released/expired; UNIQUE por ítem y secuencia; currentReservation selecciona la versión actual |
 | `ShippingZone` / shipping_zones | code/name/plazo/activo | rates, orders; código único | activa/inactiva; no borrar usada |
 | `ShippingRate` / shipping_rates | amount decimal, district, UBIGEO, plazo | zone/district; unique active district keys | activa/inactiva; cobertura histórica snapshot |
 | `Department` / departments | code/name/normalized_name/activo | provinces; código/nombre únicos | restrict si tiene provincias/uso |
 | `Province` / provinces | department, code/name normalizado | department/districts; único por department | restrictivo |
 | `District` / districts | province, code, ubigeo, nombre normalizado | province/rates; UBIGEO único | restrictivo; no remap automático |
 | `PaymentPreference` / payment_preferences | provider IDs, state, init points, timestamps | order/transactions; provider/idempotency únicos | creating/active/superseded/failed/orphaned |
-| `PaymentTransaction` / payment_transactions | amount/currency/provider/status, JSON metadata | order/preference/users; idempotency/approved scope únicos | pending/approved/failed/canceled; update/delete bloqueados |
+| `PaymentTransaction` / payment_transactions | amount/currency/provider/status, JSON metadata | order/preference/users/submission; idempotency/approved scope únicos | pending/received/approved/failed/canceled; delete y actualización ordinaria bloqueados; promoción B2 controlada |
 | `PaymentWebhookEvent` / payment_webhook_events | provider IDs, hashes, status, timestamps | sin sesión de usuario; idempotency única | received/processing/processed/ignored/failed |
 | `OrderDelivery` / order_deliveries | method/status, fechas, driver/vehicle, snapshots | order, warehouse, driver, vehicle, attempts/history | flujo delivery/pickup; historial append-only |
 | `DeliveryDriver` / delivery_drivers | datos, licencia y vencimiento, disponibilidad | user/deliveries; código único | activo/disponible; licencia expirada según `today()` |
@@ -608,7 +634,7 @@ La respuesta agrupa `summary`, `sales`, `inventory`, `customers`, `operations` y
 
 La interfaz `resources/js/views/admin/Dashboard.vue` mantiene filtros en la URL, estados de carga/error/vacío, actualización manual y diseño adaptable. El gráfico usa el componente compartido `Chart.vue` y Chart.js ya instalado. La evidencia de esta modificación es código inspeccionado y la prueba `ManagementDashboardTest`; no se afirma una verificación visual automatizada de todos los anchos.
 
-La arquitectura actual realiza una sola petición completa al montar el dashboard. Las cuatro pestañas son una separación visual local y cambiar de pestaña no genera nuevas solicitudes; aplicar filtros o actualizar vuelve a solicitar el dashboard completo. `section` existe como contrato experimental, pero `Dashboard.vue` no lo utiliza y no hay aislamiento real de consultas ni caché segmentada activa. La optimización por sección queda pendiente. La suite actual ejecutada es de 390 pruebas pasadas; el smoke interactivo de navegador permanece pendiente.
+La arquitectura actual realiza una sola petición completa al montar el dashboard. Las cuatro pestañas son una separación visual local y cambiar de pestaña no genera nuevas solicitudes; aplicar filtros o actualizar vuelve a solicitar el dashboard completo. `section` existe como contrato experimental, pero `Dashboard.vue` no lo utiliza y no hay aislamiento real de consultas ni caché segmentada activa. La optimización por sección queda pendiente. El corte histórico de dashboard registró 390 pruebas pasadas, sin nueva ejecución en esta consolidación; el smoke interactivo de navegador permanece pendiente.
 
 ## 39. Dashboard de inventario
 
@@ -616,7 +642,7 @@ La sección `inventory` usa `warehouse_inventories` como fuente operativa. Expon
 
 ## 40. Usuarios y perfil
 
-El modelo actual conserva los tipos `admin` y `customer` en `users.role`; no usa Spatie Permission ni se introducen roles nuevos. `can_deliver` se mantiene únicamente como compatibilidad del flujo legacy de reparto y no crea ni altera registros del catálogo `DeliveryDriver`.
+El modelo admite `admin`, `customer` y `treasury` en `users.role`; no usa Spatie Permission. Treasury dispone de acceso financiero separado. `can_deliver` se mantiene únicamente como compatibilidad del flujo legacy de reparto y no crea ni altera registros del catálogo `DeliveryDriver`.
 
 La migración `2026_09_07_070500_add_is_active_to_users_table` añade el estado persistente `is_active` y un índice para la comprobación de administradores activos. La consulta actual `php artisan migrate:status` del 2026-09-08 la registra como ejecutada en la base local. En cualquier otro entorno debe aplicarse de manera controlada antes de desplegar endpoints que consulten esa columna.
 
@@ -626,7 +652,7 @@ Las rutas administrativas `GET/POST /api/v1/admin/users`, `GET/PUT /api/v1/admin
 
 El perfil usa exclusivamente `request()->user()` mediante `GET/PUT /api/v1/profile` y `PUT /api/v1/profile/password`. Solo permite nombre, correo normalizado y teléfono. La contraseña requiere la contraseña actual, confirmación y mínimo de ocho caracteres; se rechaza reutilizar la actual y se revocan todos los tokens, obligando a iniciar sesión nuevamente. Existe la columna `email_verified_at`, pero la verificación no está implementada por el modelo ni por rutas, así que el cambio de correo no intenta iniciar un flujo ficticio.
 
-La evidencia automatizada actual incluye `UserAdministrationTest`, `AdminUsersFrontendTest` y `ProfileFrontendTest`; la suite posterior registró 403 pruebas aprobadas en 82.25 segundos. Las pruebas de interfaz son estáticas y el smoke manual responsivo sigue pendiente.
+La evidencia automatizada existente incluye `UserAdministrationTest`, `AdminUsersFrontendTest` y `ProfileFrontendTest`; un corte histórico posterior registró 403 pruebas aprobadas en 82.25 segundos, sin repetirse en esta consolidación. Las pruebas de interfaz son estáticas y el smoke manual responsivo sigue pendiente.
 
 La interfaz administrativa de Usuarios usa un encabezado de seguridad, tarjeta de total global, filtros accesibles, tabla responsive con avatares derivados localmente, badges textuales de rol/estado, acciones iconográficas con tooltip y `aria-label`, confirmación PrimeVue para activar/desactivar, modales separados y paginación basada exclusivamente en la metadata del backend. La tabla limita el desplazamiento horizontal a su contenedor; la validación visual real de anchos sigue pendiente.
 
@@ -641,7 +667,7 @@ Sedes, Almacenes y Tarifas de envío usan la cabecera administrativa reutilizabl
 
 La Fase 2B2 queda certificada como capa de presentación y revisión de transferencias: bandeja exclusiva de Tesorería, decisiones observada/rechazada con historial append-only, corrección idempotente desde observada, extensión sincronizada de reservas activas y UI cliente/Tesorería. Una reserva vencida no reactiva stock ni invita a pagar nuevamente; se muestra revisión manual y soporte configurable solo mediante `VITE_WHATSAPP_PHONE`.
 
-Este apartado describe el estado previo al cierre vigente de 2B3 documentado a continuación. En ese corte, `payment_transactions` no poseía FK ni UNIQUE hacia `payment_submissions` y la aprobación financiera requería una migración y servicio atómico nuevos. La política para reservas vencidas, reasignación, devolución o aplicación a un nuevo pedido continúa pendiente.
+Este apartado describe el estado previo al cierre de 2B3 documentado a continuación. En ese corte, `payment_transactions` no poseía FK ni UNIQUE hacia `payment_submissions` y la aprobación financiera requería una migración y servicio atómico nuevos. Los pendientes históricos de apertura por reserva vencida y reasignación quedaron resueltos por B1/B2 (sección 10B); la finalización de reembolsos sigue pendiente (10C).
 
 ## Cierre vigente de Fase 2B3
 
@@ -651,8 +677,8 @@ La aprobación se realiza exclusivamente con `PATCH /api/v1/treasury/payment-sub
 
 La certificación cubrió rollback atómico SQLite, MySQL 8.4.3 aislado y treinta carreras físicas (10 aprobación/aprobación, 10 aprobación/expiración y 10 aprobación/cancelación), sin estados parciales ni deadlocks. La prueba con trigger `RAISE(ABORT)` se omite únicamente bajo MySQL por ser sintaxis SQLite; su rollback se conserva certificado en SQLite.
 
-La interfaz Treasury permite aprobar solo presentaciones `pending_review` elegibles y no ofrece acciones posteriores cuando quedan aprobadas. El Resource cliente devuelve “Pago validado por Tesorería.”, `validated_at` y operación enmascarada; no ofrece QR ni formulario después de recuperar una presentación. En el smoke local del pedido #15 / presentación #4 (Yape, PEN 131.86) se verificaron una transacción, una reserva consumida, un movimiento `sale`, historial `submitted → approved`, inventario sincronizado y picking/packing sin iniciar. La operación no se almacena en este informe; su máscara segura es `•••11`.
+La interfaz Treasury permite aprobar solo presentaciones `pending_review` elegibles y no ofrece acciones posteriores cuando quedan aprobadas. El Resource cliente devuelve “Pago validado por Tesorería.”, `validated_at` y operación enmascarada; no ofrece QR ni formulario después de recuperar una presentación. El smoke local histórico verificó una transacción, una reserva consumida, un movimiento `sale`, historial `submitted → approved`, inventario sincronizado y picking/packing sin iniciar. Se omiten identificadores del pedido, importe y referencia; no se repitió el smoke en este lote.
 
 El endpoint legacy de aprobación sigue disponible para pedidos históricos sin `PaymentSubmission`; para pedidos con presentación responde `409 treasury_approval_required`. El listado/detalle administrativo de pedidos usa `withExists` y carga eager limitada para exponer solo `has_payment_submission` y `payment_submission_status`; `Orders.vue` reemplaza visualmente el botón legacy por una etiqueta informativa y no enlaza al admin a la ruta restringida de Treasury.
 
-Quedan fuera de este cierre: resolución comercial de reservas vencidas, reasignaciones, devoluciones, notificaciones, saneamiento histórico eventual de `approved_scope_key`, despliegue/producción y monitoreo financiero.
+Quedaron fuera del cierre histórico 2B3 la resolución de reservas vencidas y las reasignaciones, posteriormente implementadas y certificadas en B1/B2. El despliegue Hostinger ya está realizado. Siguen pendientes B3-A2, HTTP/frontend de reembolsos, notificaciones, eventual saneamiento histórico y monitoreo financiero; la instalación no certifica cron, workers, correo ni operación productiva integral.

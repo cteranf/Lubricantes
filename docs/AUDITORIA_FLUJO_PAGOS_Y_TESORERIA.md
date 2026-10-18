@@ -9,17 +9,21 @@ reviewed_at: 2026-09-23
 
 # Auditoría del flujo de pagos y Tesorería
 
+> **Precedencia documental — dd2436b, consolidado el 2026-10-18:** las secciones de cierre más recientes sustituyen límites históricos incompatibles. Se conserva el historial útil, pero las ausencias y propuestas del diagnóstico inicial no describen el estado vigente. Esta consolidación no ejecutó pruebas ni consultó bases de datos.
+
 ## Resumen ejecutivo
 
-Yape, Plin y banco siguen siendo `orders.payment_method=transferencia` y se distinguen por canal (`yape`, `plin`, `bank_transfer`). La Fase 2B1 está cerrada: el cliente autenticado puede consultar opciones y QR privados, registrar una presentación idempotente y recuperarla tras recargar. El importe esperado proviene exclusivamente de `orders.total`; la operación se conserva como texto y no hay pagos parciales ni cuotas.
+Yape, Plin y banco siguen siendo `orders.payment_method=transferencia` y se distinguen por canal (`yape`, `plin`, `bank_transfer`). 2B1/2B2/2B3 están cerradas: presentación y recuperación del cliente, bandeja Treasury, observación, rechazo, corrección y aprobación financiera atómica. El importe esperado proviene exclusivamente de `orders.total`; no hay pagos parciales ni cuotas.
 
-LubriStore tiene cuatro valores comerciales de método de pago: `card`, `transferencia`, `contra_entrega` y `pago_en_sede`. Mercado Pago tiene una arquitectura persistente para preferencias, transacciones y webhooks; contraentrega/pago en sede generan una `PaymentTransaction` al confirmarse el cobro. La transferencia bancaria se aprueba desde el flujo operativo de pedidos, pero su aprobación **no crea una `PaymentTransaction`, no guarda evidencia, referencia, importe declarado, aprobador ni historial financiero específico**. Ese es el principal bloqueo para una conciliación confiable.
+LubriStore tiene cuatro valores comerciales de método de pago: `card`, `transferencia`, `contra_entrega` y `pago_en_sede`. Mercado Pago conserva preferencias, transacciones y webhooks; contraentrega/pago en sede generan una `PaymentTransaction` al confirmarse el cobro. La aprobación Treasury vincula presentación, transacción e historial y consume inventario una sola vez. El flujo operativo legacy permanece para pedidos sin presentación; ante una presentación responde `treasury_approval_required`.
 
-Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` existe, pero las cuentas receptoras siguen siendo una configuración exclusiva de `admin`. Aún no existe una bandeja operativa para que Treasury observe, rechace o apruebe presentaciones.
+Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` protege la bandeja financiera. Las cuentas receptoras siguen bajo administración. 2B4-B1/B2 están implementados y certificados, con apertura de resolución, reasignación/aprobación, HTTP, Vue y tracking de la reserva actual. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2, HTTP y frontend de reembolsos siguen pendientes.
 
 Esta auditoría es de lectura: se inspeccionaron rutas, código, migraciones, modelos y pruebas. No se invocaron endpoints mutantes, pagos, webhooks, migraciones, seeders ni base de datos comercial.
 
 ## Situación actual y métodos admitidos
+
+> **Corte histórico inicial:** los apartados comprendidos desde aquí hasta la conclusión histórica conservan el diagnóstico previo a los cierres de Tesorería. Sus afirmaciones de ausencia y propuestas quedan sustituidas cuando resultan incompatibles con los cierres posteriores.
 
 `app/Http/Controllers/Api/V1/OrderController.php::store` valida exactamente:
 
@@ -303,11 +307,13 @@ No se ejecutaron pruebas en esta auditoría. Las afirmaciones de comportamiento 
 - ¿Qué política financiera e inventario corresponde a reembolso, contracargo, devolución y pedido ya entregado?
 - ¿Cuál es la fuente de verdad de conciliación bancaria y cómo se integrará sin exponer credenciales?
 
-## Conclusión
+## Conclusión histórica previa a 2B2/2B3
 
-El sistema tiene una base sólida para tarjeta/Mercado Pago y para cobros COD/pago en sede gracias a transacciones idempotentes. Transferencias ya cuentan con presentación, operación declarada, cuenta receptora snapshot, fingerprint, historial y prevención de duplicados de 2B1; aún faltan revisión, decisión financiera y `PaymentTransaction` de 2B2/2B3. Hasta entonces, el botón “Aprobar transferencia” dentro de Operaciones sigue siendo un flujo legacy y un bloqueo de trazabilidad financiera completa, aunque su consumo de inventario sea transaccional e idempotente.
+El diagnóstico original identificó la falta de revisión y aprobación financiera de transferencias. Ese pendiente quedó resuelto por 2B2/2B3 y ampliado por 2B4-B1/B2: existen bandeja, decisión financiera trazable, apertura de resolución y reasignación/aprobación. El botón legacy queda limitado a pedidos sin presentación. El siguiente pendiente vigente es B3-A2, seguido por HTTP y frontend de reembolsos.
 
 ## Estado de Tesorería: Infraestructura, 2A y 2B1
+
+> Corte histórico de infraestructura y presentación. Sus pendientes se resuelven o delimitan en los cierres 2B2, 2B3, B1/B2 y A0/A1 posteriores.
 
 La infraestructura y la Fase 2A están implementadas: rol `treasury`; tablas `payment_submissions`, `payment_submission_histories` y `payment_receiving_accounts`; migraciones `070540`, `070550` y `070560` ejecutadas; cuentas administrativas cifradas para Yape, Plin y banco; un default activo por canal; y QR estático en almacenamiento privado. Los Resources administrativos enmascaran datos sensibles. La configuración limita extensión de reserva y tolerancia futura; las restricciones `UNIQUE` respaldan invariantes, pero la concurrencia real de MySQL continúa pendiente de certificación específica.
 
@@ -323,9 +329,9 @@ La infraestructura y la Fase 2A están implementadas: rol `treasury`; tablas `pa
 
 `GET /api/v1/orders/{order}/payment-submission` recupera una presentación propia histórica incluso si después venció la reserva o se desactivó la cuenta. Su ausencia devuelve `404` con `code=payment_submission_not_found`, también sin caché. `CustomerTransferPaymentPanel` en `OrderTracking.vue` recupera primero la presentación; solo ese 404 contractual permite consultar opciones. El QR se obtiene como blob y revoca su ObjectURL al cambiar canal/pedido o desmontar. La clave de idempotencia viaja únicamente en header, la operación se muestra enmascarada y el estado expuesto es “Pendiente de validación por Tesorería”. El backend conserva la autoridad final de elegibilidad. Tracking ahora incluye `reserved_until` ISO 8601 o `null`.
 
-Smoke manual certificado sobre pedido #13: S/ 113.74 PEN mediante Yape; presentación creada y recuperada como `pending_review`; operación mostrada solo como `•••••4567`; `submitted_at` 2026-09-23T19:02:54-05:00; vencimiento extendido a 2026-09-23T21:02:54-05:00 (equivalente tracking UTC `2026-09-24T02:02:54+00:00`). `order.reserved_until` e `inventory_reservations.expires_at` coincidieron, el pedido permaneció `pending/reserved`, el pago `pending`, la reserva `active` y el timeline mantuvo “Pago confirmado” pendiente. El QR usado fue una imagen de prueba y debe reemplazarse por uno comercial real antes de producción.
+Smoke manual histórico certificado: presentación Yape creada y recuperada como `pending_review`, operación enmascarada y vencimiento extendido. `order.reserved_until` e `inventory_reservations.expires_at` coincidieron; el pedido permaneció `pending/reserved`, el pago `pending` y la reserva `active`. El QR era de prueba y aquel smoke no certifica un QR comercial. Se omiten identificadores, importes y timestamps del pedido para conservar solo la evidencia funcional.
 
-### Siguiente fase: 2B2 — pendiente
+### Siguiente fase en el corte histórico: 2B2 — posteriormente cerrada
 
 2B2 debe limitarse a una bandeja exclusiva para `treasury`: listado, detalle seguro, filtros, historial, revisión si el esquema actual lo permite, observación y rechazo con motivo obligatorio, concurrencia/idempotencia y estado visible al cliente. No debe aprobar financieramente, crear `PaymentTransaction`, consumir/liberar inventario, modificar `payment_status`/`paid_at`, retirar el botón legacy ni implementar devoluciones.
 
@@ -338,7 +344,7 @@ Smoke manual certificado sobre pedido #13: S/ 113.74 PEN mediante Yape; presenta
 
 ### Reserva vencida
 
-`payment-options` responde `422` con `code=reservation_expired`. No reactiva stock ni induce otro pago: el cliente ve “Revisión manual requerida” y WhatsApp únicamente si `VITE_WHATSAPP_PHONE` está configurado. Tesorería identifica “Reserva vencida”; observar queda oculto y rechazar permanece si el backend lo permite. Smoke manual del pedido #14: observación, motivo y vencimiento extendido visibles; tras vencer, revisión manual, historial `submitted → observed` y modal corregido.
+`payment-options` responde `422` con `code=reservation_expired`. No reactiva stock ni induce otro pago: el cliente ve “Revisión manual requerida” y WhatsApp únicamente si `VITE_WHATSAPP_PHONE` está configurado. Tesorería identifica “Reserva vencida”; observar queda oculto y rechazar permanece si el backend lo permite. El smoke manual histórico confirmó observación, motivo y vencimiento extendido visibles; tras vencer, revisión manual, historial `submitted → observed` y modal corregido.
 
 ## Diseño auditado inicial: Fase 2B3 — histórico
 
@@ -370,15 +376,17 @@ La certificación cubrió rollbacks atómicos en SQLite y MySQL 8.4.3 aislado, i
 
 La bandeja Treasury muestra botón/modal de aprobación solo para `pending_review` con reserva activa y envía `{}`. Gestiona conflictos 409 y una presentación aprobada queda sin acciones posteriores. El Resource de cliente muestra “Pago validado por Tesorería.”, `validated_at` y operación enmascarada; tracking no presenta QR ni formularios una vez recuperada la presentación.
 
-Smoke local documentado: pedido #15, presentación #4, Yape por PEN 131.86, transición `pending_review → approved`, una transacción vinculada, una reserva `consumed`, un movimiento `sale`, stock físico/reservado actualizado una vez, historial `submitted → approved` y sin inicio de picking/packing. La operación no se documenta: su máscara segura de cinco caracteres es `•••11`. No se ejecutó manualmente un reintento; los invariantes persistidos fueron certificados como coherentes.
+Smoke local histórico documentado: transición Yape `pending_review → approved`, una transacción vinculada, una reserva `consumed`, un movimiento `sale`, stock físico/reservado actualizado una vez, historial `submitted → approved` y sin inicio de picking/packing. Se conservó la operación enmascarada. No se ejecutó manualmente un reintento; los invariantes persistidos fueron certificados como coherentes. Se omiten datos identificables del pedido.
 
 ### Administración de pedidos y estado restante
 
 El listado y detalle administrativo de pedidos exponen solo `has_payment_submission` y `payment_submission_status`, obtenidos mediante `withExists` y carga eager limitada (`id`, `order_id`, `status`), sin N+1 ni serializar la presentación. Para transferencias con presentación, `Orders.vue` retira visualmente “Aprobar transferencia” y muestra una etiqueta de Tesorería; no enlaza a una ruta Treasury porque el rol admin no puede acceder a ella. Los pedidos legacy sin presentación conservan su botón y flujo existente.
 
-Siguen pendientes: resolución comercial de pagos con reserva vencida, reasignaciones, devoluciones, notificaciones, eventual saneamiento histórico de `approved_scope_key`, despliegue/producción y monitoreo financiero. Ninguno de estos puntos se considera implementado.
+En aquel cierre 2B3 quedaron pendientes resolución de reservas vencidas y reasignación, posteriormente implementadas en B1/B2. Hostinger ya está desplegado. Continúan pendientes la finalización B3-A2, HTTP/frontend de reembolsos, notificaciones, eventual saneamiento histórico y monitoreo financiero; la instalación no certifica la operación integral.
 
-### 2B4-A: infraestructura persistente pendiente de aplicar
+### 2B4-A: infraestructura persistente — corte histórico previo a su aplicación
+
+> Las menciones a migraciones pendientes de este apartado son históricas. Todas las migraciones, incluidas 070570–070630, están aplicadas en Hostinger según el despliegue confirmado; esta consolidación no volvió a consultar su estado.
 
 La Fase 2B4-A incorpora únicamente migraciones y modelos pendientes, sin rutas, servicios, interfaz ni acciones que reasignen stock, reabran pedidos o registren devoluciones. Define `payment_resolution_cases`, su historial append-only y `payment_refunds`; las referencias externas de devolución se cifran y permanecen ocultas. El caso inicia con tipo nullable y estado `open`, porque Tesorería decidirá posteriormente entre reasignación o devolución mediante una operación futura explícita.
 
@@ -428,7 +436,7 @@ La certificación física se ejecutó exclusivamente en MySQL 8 sobre `lubristor
 
 Las regresiones consolidadas incluyeron `TreasuryPaymentReassignmentServiceTest`, `TreasuryPaymentReassignmentAtomicityTest`, `VersionedInventoryReservationPrimitiveTest`, `VersionedInventoryReservationReadTest` y las suites relacionadas de resolución, aprobación, expiración, fulfillment y picking/packing. Las verificaciones portables distinguieron las garantías propias de SQLite —incluidos `RAISE(ABORT)` y saldos negativos representables— de sus equivalentes físicos MySQL —`SIGNAL`, columnas `UNSIGNED`, FKs e índices UNIQUE— sin convertir defectos funcionales en omisiones.
 
-### Límites expresos y trabajo pendiente
+### Límites históricos del backend interno, sustituidos por el cierre B1/B2
 
 - No existen todavía rutas, Request, controller ni Resource de reasignación; el servicio certificado es exclusivamente interno.
 - No se ejecutaron ni se añadieron migraciones nuevas como parte de 2B4-B2-C.
@@ -476,20 +484,20 @@ Las transferencias ejecutan la operación completa mediante `DB::transaction(...
 
 La certificación física adicional en MySQL 8.4.3 aislado completó 10/10 carreras transferencia–reasignación, 10/10 transferencia–expiración multibalance y 10/10 transferencias opuestas. Cada transferencia produjo exactamente un movimiento `transfer_out` y uno `transfer_in`, con la misma correlación contractual, cantidades y snapshots de saldo coherentes. El resultado consolidado fue cero deadlocks agotados, cero timeouts, cero estados parciales y cero saldos negativos.
 
-### Smoke manual y auditoría persistida del pedido 12
+### Smoke manual histórico y auditoría persistida de B1/B2
 
 El smoke manual completó la apertura B1 y la reasignación/aprobación B2: el caso terminó `stock_reassignment/reassigned`, la presentación y la misma transacción recibida quedaron `approved`, y el cliente visualiza “Pago validado por Tesorería”, una operación enmascarada, “Stock confirmado para tu pedido” y continuidad hacia preparación.
 
-La auditoría persistida, ejecutada únicamente con consultas sanitizadas de lectura, verificó: pedido por transferencia aprobado, reabierto y no cancelado; una presentación aprobada; una transacción aprobada vinculada; un caso reasignado; historiales `submitted → resolution_opened → reassignment_approved` y `opened → reassigned` sin duplicados; reserva original `expired`; reserva actual `consumed`; cero reservas activas del pedido; un movimiento `sale` por cantidad 5; stock físico y `Product.stock` sincronizados; y cero reembolsos. El saldo reservado del pedido es cero; cualquier saldo global restante corresponde exactamente a reservas activas ajenas sobre el inventario compartido.
+La auditoría persistida histórica, ejecutada únicamente con consultas sanitizadas de lectura, verificó: pedido por transferencia aprobado, reabierto y no cancelado; una presentación aprobada; una transacción aprobada vinculada; un caso reasignado; historiales `submitted → resolution_opened → reassignment_approved` y `opened → reassigned` sin duplicados; reserva original `expired`; reserva actual `consumed`; cero reservas activas del pedido; un movimiento `sale` coherente; stock físico y `Product.stock` sincronizados; y cero reembolsos. El saldo reservado del pedido era cero y el saldo global restante correspondía a reservas activas ajenas. No se incluyen identificadores del pedido ni se repite esa consulta en esta consolidación.
 
 La auditoría y este documento no incluyen claves idempotentes, fingerprints, metadata completa, operación completa, valores cifrados ni credenciales.
 
-### Límites vigentes
+### Límites del cierre B1/B2 y actualizaciones posteriores
 
 - No se añadieron ni ejecutaron migraciones nuevas durante B1/B2; se reutiliza la infraestructura 070570–070620.
-- No existe flujo de reembolso implementado. `PaymentRefund` permanece como infraestructura sin orquestación, endpoint o interfaz funcional.
+- En el cierre B1/B2 aún no existía orquestación de reembolso. B3-A0/A1 incorporan después infraestructura general e inicio interno; siguen sin finalización, endpoint ni interfaz funcional de devolución.
 - La certificación MySQL automatizada utiliza exclusivamente `lubristore_2b4_resolution_certification_test`; la base local `lubricantes` no forma parte de esas regresiones.
-- Permanecen fuera de alcance despliegue productivo, monitoreo financiero, devoluciones/reasignaciones adicionales y cualquier conciliación externa no implementada.
+- El despliegue quedó fuera de la certificación B1/B2 y ya está realizado en Hostinger. Siguen fuera de esa certificación el monitoreo financiero, devoluciones/reasignaciones adicionales y conciliación externa no implementada.
 
 ## Infraestructura 2B4-B3-A0: reembolsos totales generales
 
@@ -497,11 +505,11 @@ Esta fase incorpora únicamente soporte persistente; **B3 todavía no es un fluj
 
 `payment_refunds.original_payment_transaction_id` identifica el pago original y tiene FK `RESTRICT` e índice UNIQUE propios. Esto permite representar pagos aprobados de cualquier método sin fabricar `PaymentSubmission` ni `PaymentResolutionCase`. `payment_resolution_case_id` pasa a ser opcional y conserva su FK `RESTRICT` y su UNIQUE; `refund_payment_transaction_id` continúa reservado para la transacción contable de devolución creada al completar y mantiene FK y UNIQUE independientes.
 
-La nueva FK original se añade nullable por compatibilidad de despliegue: una instalación puede contener filas históricas cuyo caso no tenga una transacción recibida deducible. La migración completa automáticamente el vínculo cuando `payment_resolution_cases.received_payment_transaction_id` existe. Antes de habilitar B3 funcional se requiere auditar y completar cualquier fila restante y endurecer el contrato de creación para exigir siempre `original_payment_transaction_id`; solo entonces podrá evaluarse convertir físicamente la columna a `NOT NULL`.
+La nueva FK original se añade nullable por compatibilidad de despliegue. El backfill de 070630 no depende solo de que exista `payment_resolution_cases.received_payment_transaction_id`: exige una transacción `payment/approved`, coherencia de pedido y presentación, importe y moneda coincidentes entre pago, caso y refund, y ausencia de otro pago aprobado competidor bajo esos criterios. Las filas no deducibles permanecen sin vínculo. A1 exige siempre `original_payment_transaction_id` al crear; antes de habilitar B3 funcional sigue siendo necesaria la auditoría y regularización de históricos restantes. Convertir físicamente la columna a `NOT NULL` requiere una decisión posterior.
 
 El modelo distingue explícitamente `originalPaymentTransaction`, `refundPaymentTransaction` y el `resolutionCase` opcional. La identidad del pago original queda fuera de asignación masiva y no puede cambiar después de crear la devolución. Las relaciones financieras completas, la clave de idempotencia y la referencia externa cifrada no se serializan automáticamente. La igualdad entre la transacción original y la transacción contable se rechaza en el dominio del modelo; los UNIQUE independientes no pueden expresar por sí solos una restricción cruzada entre ambas columnas.
 
-Las decisiones cerradas para las siguientes slices son: reembolso exclusivamente total; pago original `type=payment` y `status=approved`; inicio y confirmación manual por Treasury; referencia externa obligatoria al completar; sin automatización de proveedor; y sin pedidos entregados o recogidos. La orquestación, estados, historiales, concurrencia, HTTP y frontend permanecen pendientes.
+Las decisiones cerradas para las siguientes slices son: reembolso exclusivamente total; pago original `transaction_type=payment` y `status=approved`; todos los medios cobrados; inicio y confirmación manual por Treasury; referencia externa obligatoria al completar; sin automatización de proveedor; y sin pedidos entregados o recogidos. El inicio interno y su cobertura se implementan en A1; la finalización, HTTP y frontend siguen pendientes.
 
 ## Servicio interno 2B4-B3-A1: marcado de reembolso pendiente
 
@@ -512,3 +520,27 @@ La operación crea un único `PaymentRefund` `pending` con `original_payment_tra
 El servicio ejecuta la operación completa mediante `DB::transaction(..., 3)`. Bloquea primero el estado financiero en orden `Order → PaymentTransaction → PaymentSubmission/PaymentResolutionCase → PaymentRefund` y después valida inventario siguiendo `OrderItem → InventoryReservation → Warehouse → WarehouseInventory → Product → OrderFulfillmentHistory`. No modifica reservas, saldos, productos ni movimientos. Un reintento solo devuelve el refund existente si pedido, presentación, historial, actor, motivo, importes, moneda, timestamps y vínculos forman un estado completo y coherente; una colisión UNIQUE se reconsulta únicamente después del rollback. Estados parciales o incompatibles producen `PaymentRefundConflictException`, que permanece como excepción pura de dominio, mientras errores SQL no concurrentes se propagan.
 
 La certificación A1 cubre SQLite `:memory:` y MySQL 8 aislado en `lubristore_2b4_resolution_certification_test`, sin consultar ni modificar `lubricantes`. **B3 todavía no está completado:** no existen endpoint, Request, Resource ni interfaz para esta acción; tampoco se completa el reembolso, se crea una `PaymentTransaction type=refund`, se exige o guarda la referencia externa final, ni se llama a Mercado Pago u otro gateway. La cancelación de un pedido pagado continúa sin crear automáticamente el refund.
+
+## Cierre consolidado vigente: B3-A0/A1 y despliegue dd2436b
+
+**A0 queda implementado como infraestructura general y A1 como inicio manual interno.** El cierre se limita a ese alcance y a las certificaciones existentes: no convierte B3 en un flujo operativo completo ni acredita comportamiento productivo de reembolsos. La infraestructura admite pagos originales aprobados de todos los medios cobrados, sin fabricar presentación ni caso; A1 exige además cancelación, exclusión de entrega/recojo y evidencia de inventario compensado.
+
+Las tres brechas de revisión anteriores están corregidas en dd2436b:
+
+| Brecha anterior | Cobertura vigente inspeccionada |
+|---|---|
+| Snapshots que podían imprimir campos financieros confidenciales | `TreasuryPaymentRefundServiceTest` separa esos campos, canonicaliza el contenido, compara su digest mediante `hash_equals` y usa un mensaje de fallo seguro; incluye regresión de orden y tipos. |
+| Retry físico sin identificar explícitamente el deadlock | `mysql_treasury_refund_worker.php` captura solo SQLSTATE y código de driver de la excepción absorbida. `MySqlTreasuryPaymentRefundConcurrencyTest` exige `40001`/`1213`, descarta `1205` y verifica un único retry y nueva hidratación. |
+| Falta de regresión aislada de FK homónima incorrecta | `PaymentRefundInfrastructureTest::test_mysql_migration_down_rejects_a_homonymous_incorrect_foreign_key_before_ddl` sustituye solo la FK, conserva válida la UNIQUE y comprueba rechazo antes del DDL y esquema intacto. |
+
+Esta consolidación inspecciona cobertura y conserva las certificaciones existentes; **no representa una nueva ejecución** de SQLite, MySQL, harnesses ni smoke. Los conteos históricos de pruebas y los ejemplos de smoke anteriores corresponden a sus cortes documentales, no a una validación productiva actual.
+
+Según el contexto confirmado, dd2436b está desplegado y levantado en Hostinger, Composer se instaló con dependencias de producción, `APP_ENV=production`, `APP_DEBUG=false`, todas las migraciones están aplicadas —incluida 070630 y el tramo 070570–070630— y se creó manualmente un administrador seguro. No se incluyen sus datos de acceso. Este lote no accedió al servidor ni verificó configuración o datos por conexión.
+
+El despliegue no certifica cron/scheduler, workers/colas, correo, monitoreo ni aceptación operativa integral. Tampoco acredita devoluciones reales. Las menciones históricas a despliegue pendiente quedan sustituidas únicamente en cuanto a la instalación ya confirmada.
+
+### Siguiente pendiente real: B3-A2 y exposición posterior
+
+B3-A2 debe implementar la finalización interna del reembolso total: Treasury confirma manualmente con referencia externa obligatoria, crea un único asiento contable de devolución y cierra los estados e historiales de forma atómica e idempotente, sin volver a compensar inventario. Debe cubrir conflictos, concurrencia y rollback dentro de su futura certificación. El mismo Treasury puede iniciar y completar. No habrá devolución parcial ni gateway automático; pedidos entregados o recogidos quedan fuera del flujo.
+
+Después corresponden HTTP y frontend, incluida la adaptación de mensajes, filtros y consumidores de `refund_pending`/`refunded`. Esas capas y B3-A2 aún no están implementadas. Antes de habilitarlas deben revisarse los históricos sin pago original deducible y conservarse las garantías de privacidad y las regresiones existentes. Cancelar un pedido pagado sigue sin iniciar automáticamente un refund.

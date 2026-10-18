@@ -4,9 +4,13 @@ document_type: functional-overview
 version: 1.0
 generated_at: 2026-09-04
 project: LubriStore
+consolidated_at: 2026-10-18
+source_commit: dd2436b
 ---
 
 # LubriStore
+
+Este resumen refleja dd2436b. Las certificaciones y smoke mencionados son evidencia existente; esta consolidación documental no ejecutó pruebas ni consultó datos. Los resultados históricos no equivalen a una certificación operativa integral de producción.
 
 ## Reportes gerenciales
 
@@ -14,7 +18,7 @@ El panel administrativo incluye una sección de Reportes gerenciales con seis pe
 
 Los filtros varían según la pestaña: fechas, modalidad, categorías, marcas, almacenes, productos, tipos de movimiento, severidad, razones, etapas, vencimiento y métricas de ciclo. Catálogos permite consultar productos, categorías, marcas, almacenes, sedes, repartidores, vehículos y el catálogo territorial y de tarifas. Los resultados muestran totales, fecha de generación, límite y aviso cuando existe truncamiento.
 
-El Dashboard y Reportes son módulos diferentes: Dashboard ofrece indicadores agregados para supervisión; Reportes permite revisar filas y exportarlas bajo demanda. La exportación protege el contenido frente a fórmulas de hojas de cálculo y no incluye datos personales. La solución cuenta actualmente con 390 pruebas automatizadas exitosas. Falta completar el smoke manual en navegador para validar navegación, filtros, descargas y tamaños de pantalla.
+El Dashboard y Reportes son módulos diferentes: Dashboard ofrece indicadores agregados para supervisión; Reportes permite revisar filas y exportarlas bajo demanda. La exportación protege el contenido frente a fórmulas de hojas de cálculo y no incluye datos personales. El registro de 390 pruebas exitosas corresponde al corte histórico de reportes, no a una nueva ejecución. Sigue pendiente su smoke manual en navegador para validar navegación, filtros, descargas y tamaños de pantalla.
 
 ## Propósito
 
@@ -29,6 +33,7 @@ LubriStore es una tienda digital especializada en lubricantes. Permite mostrar p
 - Reservas temporales de stock.
 - Pago con tarjeta, transferencia, contraentrega y pago en sede según configuración.
 - Registro seguro de transferencias mediante Yape, Plin o banco, con recuperación de la presentación del cliente.
+- Bandeja de Tesorería con revisión, observación, rechazo, aprobación y resolución manual con reasignación de stock.
 - Preparación de pedidos, picking y packing.
 - Despacho propio o mediante courier.
 - Seguimiento y confirmación de entrega o recojo.
@@ -49,6 +54,8 @@ El panel permite gestionar el catálogo, inventario, sedes, almacenes, territori
 
 Las existencias se controlan por almacén. Las reservas evitan vender simultáneamente las mismas unidades; pueden consumirse, liberarse o vencer. Los movimientos y el historial operativo registran quién realizó cada operación, cuándo ocurrió y qué saldo resultó.
 
+Las reservas conservan versiones históricas. La reasignación crea una nueva reserva, sin reactivar la vencida; el cliente ve el estado financiero y la reserva actual, con mensajes de vigencia, stock confirmado, vencimiento o liberación según corresponda.
+
 ## Pagos
 
 La plataforma puede trabajar con Mercado Pago y con métodos manuales. Las confirmaciones de tarjeta se verifican con el proveedor y los eventos se procesan de forma idempotente. Para transferencia, el cliente puede elegir Yape, Plin o banco, consultar un QR seguro cuando corresponde y registrar su operación; queda pendiente de validación por Tesorería. La operación se protege contra duplicados y no confirma el pago ni descuenta inventario por sí sola.
@@ -59,7 +66,7 @@ Delivery utiliza zonas y tarifas configurables. Pickup muestra únicamente sedes
 
 ## Seguridad
 
-Las cuentas utilizan autenticación basada en tokens. El acceso administrativo está separado del acceso de clientes y existe una capacidad de Tesorería diferenciada para la siguiente fase. El servidor vuelve a validar precios, disponibilidad, propiedad de pedidos, cobertura y pagos; el navegador no puede confirmar por sí solo una transacción financiera. Los QR de transferencia se obtienen desde almacenamiento privado y los datos bancarios completos solo se muestran al propietario autorizado de un pedido elegible.
+Las cuentas utilizan autenticación basada en tokens. Los roles Cliente, Administrador y Tesorería tienen accesos diferenciados. Treasury dispone del acceso directo “Panel de tesorería” y de su bandeja financiera. El servidor vuelve a validar precios, disponibilidad, propiedad de pedidos, cobertura y pagos; el navegador no puede confirmar por sí solo una transacción financiera. Los QR de transferencia se obtienen desde almacenamiento privado y los datos bancarios completos solo se muestran al propietario autorizado de un pedido elegible.
 
 ## Beneficios
 
@@ -73,7 +80,7 @@ Las cuentas utilizan autenticación basada en tokens. El acceso administrativo e
 
 ## Alcance actual
 
-El sistema está operativo para desarrollo local y cuenta con pruebas automatizadas de los flujos principales. La puesta en marcha de cada entorno requiere configurar sus productos, ubicaciones, tarifas, inventario, correo, colas, credenciales de pago, dominio seguro y procedimientos de operación.
+El proyecto ya está desplegado y levantado en Hostinger en dd2436b. Se instalaron dependencias Composer de producción, el entorno es de producción con debug desactivado, todas las migraciones están aplicadas —incluida 070630— y se creó manualmente un administrador seguro. Estos hechos provienen del despliegue confirmado; esta consolidación no accedió al servidor. Cron/scheduler, workers/colas, correo, monitoreo y aceptación operativa integral aún no quedan certificados.
 
 ## Requisitos para implantación
 
@@ -81,7 +88,7 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 
 ## Posibles ampliaciones
 
-La siguiente ampliación prevista es una bandeja de Tesorería para revisar, observar o rechazar presentaciones con historial y motivos obligatorios. No aprobará pagos ni consumirá inventario todavía. Entre las demás ampliaciones naturales están nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, automatización de notificaciones, aplicaciones para repartidores, reportes comerciales y pruebas de interfaz automatizadas.
+La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. El siguiente pendiente es finalizar internamente los reembolsos totales (B3-A2); después se incorporarán sus endpoints y la interfaz. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
 
@@ -102,9 +109,9 @@ La validación automática actual cubre estas reglas de acceso y privacidad; ant
 La pestaña Inventario distingue existencias físicas, reservas y disponibilidad actuales, además de mostrar concentración por almacén, movimientos y reservas por estado. La salida de productos se compara únicamente con el periodo elegido.
 ## Estado de transferencias
 
-Los clientes pueden registrar una transferencia y Tesorería puede revisarla, observarla o rechazarla con trazabilidad. Si una reserva vence después de un pago informado, la tienda no reactiva productos ni solicita un segundo pago: el caso queda en revisión manual y puede orientarse por el canal de soporte configurado.
+Los clientes pueden registrar una transferencia y Tesorería puede revisarla, observarla, rechazarla o aprobarla con trazabilidad. Si la reserva ya no permite la aprobación ordinaria, el backend determina si puede abrirse una resolución manual. La tienda no solicita un segundo pago ni reactiva automáticamente la reserva histórica.
 
-La siguiente afirmación pertenece al estado histórico previo a la aprobación certificada descrita en la sección siguiente. La política para pagos informados después de un vencimiento sigue pendiente de definición comercial.
+2B4-B1/B2 ya resuelven los casos elegibles: Tesorería abre la resolución y puede “Reasignar stock y aprobar”. El sistema registra el pago recibido, intenta una nueva reserva y, si el estado y el stock son coherentes, consume esa reserva y aprueba el mismo pago una sola vez. Una cancelación manual no se interpreta como vencimiento automático.
 
 ## Aprobación de transferencias por Tesorería
 
@@ -112,6 +119,12 @@ La fase técnica de aprobación de transferencias está disponible para el equip
 
 El cliente ve una confirmación clara de pago validado y una referencia de operación enmascarada. Los administradores operativos no reciben un segundo botón competidor: los pedidos con presentación de Tesorería indican su estado (“Pendiente”, “Observado”, “Aprobado”, “Rechazado”, “Vencido” o “Cancelado”) y mantienen separados los permisos de cada equipo. Los pedidos históricos sin presentación conservan su flujo operativo anterior.
 
-El smoke local del pedido #15 confirmó una aprobación Yape de PEN 131.86: una transacción vinculada, una reserva consumida, una sola salida de inventario y preparación aún sin iniciar. Para proteger la privacidad, la referencia se muestra solo mediante una máscara segura (`•••11`).
+Los smoke históricos documentados confirmaron aprobación ordinaria y resolución con reasignación, una transacción vinculada, consumo único de stock y continuidad hacia preparación. Se conserva la evidencia funcional sin reproducir identificadores de pedidos, operaciones o referencias financieras.
 
-Siguen pendientes las decisiones comerciales sobre pagos con reservas vencidas, devoluciones, reasignaciones, notificaciones, monitoreo financiero y la puesta en producción.
+## Reembolsos: alcance interno y pendiente visible
+
+B3-A0 aporta la infraestructura y B3-A1 permite iniciar el reembolso únicamente mediante un servicio interno. No existe un botón de inicio ni se puede completar una devolución desde la interfaz. El inicio requiere un pedido pagado y cancelado, no entregado ni recogido, con inventario ya compensado; cancelar por sí solo no crea el reembolso.
+
+El contrato previsto admite exclusivamente reembolsos totales, para todos los medios cobrados. Tesorería inicia y finalizará manualmente; el mismo usuario puede realizar ambas acciones. Al completar será obligatoria una referencia externa. No hay devolución parcial ni integración automática de devolución con Mercado Pago u otros proveedores. Los pedidos entregados o recogidos quedan fuera del flujo.
+
+B3-A2 debe implementar la finalización interna antes de añadir HTTP y frontend. B1/B2 están implementados y certificados en su alcance; A0/A1 tienen implementación interna y certificaciones existentes, sin acreditar devoluciones reales en producción. Siguen pendientes notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado.
