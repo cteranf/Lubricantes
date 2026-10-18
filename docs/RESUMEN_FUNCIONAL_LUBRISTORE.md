@@ -12,7 +12,7 @@ source_commit: dd2436b
 
 Este resumen refleja dd2436b. Las certificaciones y smoke mencionados son evidencia existente; esta consolidación documental no ejecutó pruebas ni consultó datos. Los resultados históricos no equivalen a una certificación operativa integral de producción.
 
-Actualización posterior del 2026-10-18: el cierre de reembolsos al final incorpora B3-A2 y su nueva certificación local. Sustituye las menciones históricas a finalización interna pendiente; no corresponde a un commit o despliegue nuevo en Hostinger.
+Actualización posterior del 2026-10-18: el backend interno A0/A1/A2 quedó versionado localmente en `d0a73e2`. El cierre de reembolsos incorpora además B3-B HTTP privado certificado localmente y sustituye los pendientes históricos de finalización interna y endpoints. B3-B sigue sin commit ni despliegue nuevo en Hostinger.
 
 ## Reportes gerenciales
 
@@ -90,7 +90,7 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 
 ## Posibles ampliaciones
 
-La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. B3-A2 ya finaliza internamente los reembolsos totales y está certificado localmente; el siguiente pendiente es incorporar sus endpoints y la interfaz. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
+La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. Los reembolsos totales cuentan con servicios internos A0/A1/A2 y HTTP privado B3-B certificados localmente; siguen pendientes su interfaz Treasury, integración de devolución con gateways y validación operativa productiva. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
 
@@ -123,14 +123,22 @@ El cliente ve una confirmación clara de pago validado y una referencia de opera
 
 Los smoke históricos documentados confirmaron aprobación ordinaria y resolución con reasignación, una transacción vinculada, consumo único de stock y continuidad hacia preparación. Se conserva la evidencia funcional sin reproducir identificadores de pedidos, operaciones o referencias financieras.
 
-## Reembolsos: alcance interno y pendiente visible
+## Reembolsos: backend y HTTP privado certificados; interfaz pendiente
 
-B3-A0 aporta la infraestructura y B3-A1 permite iniciar el reembolso únicamente mediante un servicio interno. No existe un botón de inicio ni se puede completar una devolución desde la interfaz. El inicio requiere un pedido pagado y cancelado, no entregado ni recogido, con inventario ya compensado; cancelar por sí solo no crea el reembolso.
+B3-A0 aporta la infraestructura y B3-A1 permite iniciar el reembolso mediante un servicio interno, ahora expuesto por HTTP privado B3-B. No existe un botón de inicio ni se puede completar una devolución desde la interfaz. El inicio requiere un pedido pagado y cancelado, no entregado ni recogido, con inventario ya compensado; cancelar por sí solo no crea el reembolso.
 
 El contrato admite exclusivamente reembolsos totales, para todos los medios cobrados. Tesorería inicia y finaliza manualmente mediante servicios internos; el mismo usuario puede realizar ambas acciones. Al completar es obligatoria una referencia externa, que se guarda cifrada. No hay devolución parcial ni integración automática de devolución con Mercado Pago u otros proveedores. Los pedidos entregados o recogidos quedan fuera del flujo.
 
-B3-A2 está implementado y certificado como finalización interna: registra un único asiento de devolución, completa el reembolso y actualiza el pedido y la presentación cuando existe, con historial coherente. Una repetición con la misma referencia por cualquier Treasury activo conserva el usuario que completó originalmente y no duplica registros. No modifica inventario ni logística. Siguen pendientes HTTP y frontend; B3 completo todavía no está disponible desde la interfaz.
+B3-A2 está implementado y certificado como finalización interna: registra un único asiento de devolución, completa el reembolso y actualiza el pedido y la presentación cuando existe, con historial coherente. Una repetición con la misma referencia por cualquier Treasury activo conserva el usuario que completó originalmente y no duplica registros. No modifica inventario ni logística. A0/A1/A2 están versionados en `d0a73e2`. B3-B incorpora sus endpoints privados; B3 completo todavía no está disponible desde la interfaz.
 
 La certificación local del 2026-10-18 cubrió seis escenarios MySQL con diez carreras cada uno, la regresión del retorno actualizado y A1 físico. Después aprobaron la clase MySQL completa (8 tests, 4071 assertions), SQLite A2 (112 tests, 635 assertions) y regresiones SQLite A1/B2 e inventario versionado (339 tests, 3803 assertions), con cobertura solapada. Solo se utilizó una instancia temporal de certificación, posteriormente eliminada. Los documentos técnicos detallan el alcance y la evidencia.
 
-Este cierre no acredita devoluciones reales en producción ni se ha publicado o desplegado. Hostinger conserva el despliegue confirmado de dd2436b. Siguen pendientes revisión de históricos antes de exponer reembolsos, notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado.
+B3-B permite iniciar con `POST /api/v1/treasury/orders/{orderId}/refunds` y completar con `POST /api/v1/treasury/payment-refunds/{refundId}/complete`. Ambos exigen `auth:sanctum`, `active_user` e `is_treasury`. La autorización precede a buscar el recurso: anónimo recibe 401; otros roles o Treasury inactivo, 403; Treasury activo con identificador inválido o inexistente, 404 seguro.
+
+Requests separados rechazan campos adicionales, estructuras anidadas, arrays, archivos y claves idempotentes del cliente. El Resource usa una lista explícita de IDs, estado, importe, moneda, medio de pago original, fechas, mensaje y un indicador visual de finalización; no revela motivos, referencias ni datos financieros privados. Solo el conflicto de dominio `PaymentRefundConflictException` se traduce a 409 seguro; `QueryException` y errores inesperados conservan 500 seguro con debug desactivado. Las respuestas exitosas y los conflictos impiden caché mediante `Cache-Control: no-store, private` y `Pragma: no-cache`.
+
+Antes del ajuste posterior del matcher, la suite local B3-B aprobó en SQLite con **116 tests y 693 assertions** y en MySQL 8.4.3 temporal aislado con **116 tests seleccionados y 682 assertions** (114 ejecutados y dos skips preexistentes heredados A1; ningún caso HTTP omitido). Esa versión de la suite incluye 51 casos HTTP y 65 heredados. También aprobaron las regresiones SQLite directamente afectadas. El cierre de higiene anterior solo repitió focalizados de controles y trim; los documentos técnicos detallan la evidencia y sus límites. El temporal propio se verificó ausente.
+
+Después se limitó la excepción de trim a la forma exacta de los dos POST, evitando que alcance rutas parecidas con segmentos extra o vacíos. Su nueva regresión aislada aprobó con **1 test/336 assertions** y los focalizados de payloads/controles con **24/96**. La suite SQLite actual aprobó con **117 tests/1029 assertions**. No se repitió MySQL, cuya evidencia anterior sigue siendo de 116 tests; el ajuste no cambia servicios financieros ni persistencia.
+
+Este cierre HTTP B3-B no acredita devoluciones reales en producción ni se ha publicado o desplegado. Hostinger conserva el despliegue confirmado de dd2436b. Siguen pendientes frontend Treasury, integración de gateways, revisión de históricos antes de habilitar el flujo completo, notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado. No se declara certificación productiva integral.

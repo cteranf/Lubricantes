@@ -93,6 +93,10 @@ Route::prefix('v1')->group(function () {
 
         // Treasury review queue: deliberately separate from administrative configuration.
         Route::middleware('is_treasury')->prefix('treasury')->as('treasury.')->group(function () {
+            Route::post('/orders/{orderId}/refunds', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'store'])
+                ->name('orders.refunds.store');
+            Route::post('/payment-refunds/{refundId}/complete', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'complete'])
+                ->name('payment-refunds.complete');
             Route::get('/payment-submissions', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'index'])->name('payment-submissions.index');
             Route::get('/payment-submissions/{submission}', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'show'])->name('payment-submissions.show');
             Route::get('/payment-submissions/{submission}/history', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'history'])->name('payment-submissions.history');
