@@ -17,7 +17,9 @@ consolidated_at: 2026-10-18
 
 > Consolidación documental de dd2436b. La generación original del 2026-09-04 y sus evidencias locales se conservan como historial; no son verificaciones nuevas de producción. Las secciones de cierre posteriores sustituyen límites históricos incompatibles. El código y las migraciones tienen precedencia. Este lote no ejecutó pruebas, comandos de aplicación ni consultas a bases de datos.
 
-> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). 2B1/2B2/2B3 y 2B4-B1/B2 están implementados y certificados en su alcance. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2, HTTP y frontend de devolución siguen pendientes.
+> Actualización posterior del 2026-10-18: la sección 10C registra la certificación local B3-A2 y sustituye sus pendientes históricos. Es trabajo local sin commit ni despliegue nuevo; las afirmaciones anteriores de ausencia de ejecuciones corresponden a la consolidación documental de dd2436b.
+
+> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). 2B1/2B2/2B3 y 2B4-B1/B2 están implementados y certificados en su alcance. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2 finaliza internamente y está certificado localmente. HTTP y frontend de devolución siguen pendientes.
 
 # 1. Resumen ejecutivo
 
@@ -239,7 +241,7 @@ B1 registra el pago recibido cuando no procede la aprobación ordinaria: crea un
 
 Las rutas `POST /api/v1/treasury/payment-submissions/{submission}/resolution` y `POST /api/v1/treasury/payment-submissions/{submission}/resolution/reassign` exigen autenticación, usuario activo y Treasury, body vacío y claves construidas por el servidor. Requests, controller, Resources privados y `TreasuryPayments.vue` están implementados. La UI usa elegibilidad backend, confirmación y refresco de detalle/historial/listado. El cliente ve el estado financiero enmascarado y la reserva actual. B1/B2 tienen certificación existente SQLite/MySQL y smoke manual documentados; este lote no los repite.
 
-## 10C. Reembolsos B3-A0/A1 y pendientes
+## 10C. Reembolsos B3-A0/A1/A2 internos y exposición pendiente
 
 B3-A0 generaliza `PaymentRefund` mediante 070630: pago original nullable con FK `RESTRICT` y UNIQUE independiente, caso opcional y asiento de devolución separado. El backfill exige `payment/approved` y coherencia de pedido, presentación, importe y moneda entre pago, caso y refund, sin un pago aprobado competidor bajo esos criterios. La existencia del identificador recibido por sí sola no basta. El modelo protege la identidad original, cifra la referencia externa y oculta relaciones financieras.
 
@@ -247,7 +249,15 @@ B3-A1 implementa únicamente `TreasuryPaymentRefundService::markPending()`: Trea
 
 Las tres brechas anteriores están corregidas en dd2436b: snapshots confidenciales canonicalizados con comparación segura; harness físico MySQL que exige SQLSTATE `40001`/driver `1213` y descarta `1205`; regresión aislada de FK homónima incorrecta conservando válida la UNIQUE. La auditoría identifica las suites y el worker. Se conserva la certificación existente y se distingue de la cobertura inspeccionada; esta consolidación no ejecuta pruebas.
 
-El contrato B3 es exclusivamente total, para todos los medios cobrados, con inicio y finalización manual por Treasury —puede ser el mismo usuario—, referencia externa obligatoria al completar y sin gateway automático. Pedidos entregados o recogidos quedan fuera. **B3-A2 no está implementado:** faltan finalización interna, asiento contable `refund`, cierre atómico e idempotente y su certificación. Después siguen HTTP y frontend, incluida adaptación de mensajes/filtros a los estados de devolución. No existe acción visible de reembolso ni integración automática con proveedores; cancelar no inicia un refund. Los históricos sin pago original deducible requieren revisión antes de habilitar el flujo completo.
+El contrato B3 es exclusivamente total, para todos los medios cobrados, con inicio y finalización manual por Treasury —puede ser el mismo usuario—, referencia externa obligatoria al completar y sin gateway automático. Pedidos entregados o recogidos quedan fuera. **B3-A2 está implementado y certificado como servicio interno local**, sin HTTP ni frontend: `complete(int $refundId, int $actorId, string $externalReference)` crea un único asiento `refund/approved` manual por el total, completa el refund y marca pedido y presentación opcional `refunded`, con exactamente un historial `refund_completed` cuando corresponde. El pago original y el caso B2 permanecen intactos; no modifica inventario ni logística.
+
+La referencia se valida como UTF-8 sin controles ni saltos, con espacios exteriores normalizados y máximo de 255 bytes; solo se persiste cifrada en el refund. Un reintento coherente por cualquier Treasury activo con la misma referencia normalizada no escribe ni cambia `completed_by`; otra referencia o cierre parcial produce conflicto. El retorno conserva la instancia bloqueada/escrita con `unsetRelations()`, sin relectura susceptible al snapshot MySQL anterior. El orden financiero actual empieza por presentación opcional y pedido, seguido por transacciones, casos, refunds, historiales y actor/entrega/handling; luego se valida inventario. Se mantienen tres intentos transaccionales.
+
+El seam protegido vacío `afterCompletionOrderLocked(Order $order)` se ejecuta dentro del callback, tras bloquear y validar el pedido y antes de las consultas financieras amplias. El worker A2 forma allí el ciclo físico entre pedidos, registra y relanza la misma excepción; el segundo intento no repite la barrera. No introduce consultas, estado ni efectos en producción.
+
+La certificación nueva del 2026-10-18 aprobó individualmente los seis datasets MySQL (diez carreras cada uno), la regresión determinista stale y A1 físico; después aprobó la clase MySQL completa: **8 tests, 4071 assertions**. Cada deadlock exige exactamente un retry con `40001/1213`, descarta `1205` y verifica nuevas instancias. SQLite aprobó A2 con **112 tests, 635 assertions** y regresiones A1/B2 e inventario versionado con **339 tests, 3803 assertions**; existe cobertura heredada/solapada. La auditoría detalla los conteos individuales. Pint, `php -l` y diff-check aprobaron. Solo se utilizó MySQL temporal aislado `_test`, ya eliminado, sin acceso comercial ni a Hostinger.
+
+Siguen pendientes HTTP y frontend, incluida adaptación de mensajes/filtros a los estados de devolución. No existe acción visible de reembolso ni integración automática con proveedores; cancelar no inicia un refund. Los históricos sin pago original deducible requieren revisión antes de habilitar el flujo completo. Esta certificación corresponde al árbol local sin commit ni despliegue nuevo y no acredita devoluciones reales ni operación integral en producción.
 
 # 11. Preparación, despacho y entrega
 

@@ -11,13 +11,15 @@ reviewed_at: 2026-09-23
 
 > **Precedencia documental — dd2436b, consolidado el 2026-10-18:** las secciones de cierre más recientes sustituyen límites históricos incompatibles. Se conserva el historial útil, pero las ausencias y propuestas del diagnóstico inicial no describen el estado vigente. Esta consolidación no ejecutó pruebas ni consultó bases de datos.
 
+> **Actualización posterior del 2026-10-18:** el cierre B3-A2 al final de este documento registra nuevas ejecuciones locales de certificación. Sustituye las menciones históricas a finalización interna pendiente. A2 corresponde al árbol de trabajo local, sin commit ni despliegue nuevo; dd2436b sigue siendo la referencia de Hostinger confirmada.
+
 ## Resumen ejecutivo
 
 Yape, Plin y banco siguen siendo `orders.payment_method=transferencia` y se distinguen por canal (`yape`, `plin`, `bank_transfer`). 2B1/2B2/2B3 están cerradas: presentación y recuperación del cliente, bandeja Treasury, observación, rechazo, corrección y aprobación financiera atómica. El importe esperado proviene exclusivamente de `orders.total`; no hay pagos parciales ni cuotas.
 
 LubriStore tiene cuatro valores comerciales de método de pago: `card`, `transferencia`, `contra_entrega` y `pago_en_sede`. Mercado Pago conserva preferencias, transacciones y webhooks; contraentrega/pago en sede generan una `PaymentTransaction` al confirmarse el cobro. La aprobación Treasury vincula presentación, transacción e historial y consume inventario una sola vez. El flujo operativo legacy permanece para pedidos sin presentación; ante una presentación responde `treasury_approval_required`.
 
-Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` protege la bandeja financiera. Las cuentas receptoras siguen bajo administración. 2B4-B1/B2 están implementados y certificados, con apertura de resolución, reasignación/aprobación, HTTP, Vue y tracking de la reserva actual. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2, HTTP y frontend de reembolsos siguen pendientes.
+Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` protege la bandeja financiera. Las cuentas receptoras siguen bajo administración. 2B4-B1/B2 están implementados y certificados, con apertura de resolución, reasignación/aprobación, HTTP, Vue y tracking de la reserva actual. B3-A0/A1 aportan infraestructura e inicio interno del reembolso; B3-A2 completa el servicio interno y está certificado localmente en el alcance indicado al final. HTTP y frontend de reembolsos siguen pendientes.
 
 Esta auditoría es de lectura: se inspeccionaron rutas, código, migraciones, modelos y pruebas. No se invocaron endpoints mutantes, pagos, webhooks, migraciones, seeders ni base de datos comercial.
 
@@ -539,8 +541,39 @@ Según el contexto confirmado, dd2436b está desplegado y levantado en Hostinger
 
 El despliegue no certifica cron/scheduler, workers/colas, correo, monitoreo ni aceptación operativa integral. Tampoco acredita devoluciones reales. Las menciones históricas a despliegue pendiente quedan sustituidas únicamente en cuanto a la instalación ya confirmada.
 
-### Siguiente pendiente real: B3-A2 y exposición posterior
+### Plan histórico de B3-A2, sustituido por el cierre siguiente
 
 B3-A2 debe implementar la finalización interna del reembolso total: Treasury confirma manualmente con referencia externa obligatoria, crea un único asiento contable de devolución y cierra los estados e historiales de forma atómica e idempotente, sin volver a compensar inventario. Debe cubrir conflictos, concurrencia y rollback dentro de su futura certificación. El mismo Treasury puede iniciar y completar. No habrá devolución parcial ni gateway automático; pedidos entregados o recogidos quedan fuera del flujo.
 
 Después corresponden HTTP y frontend, incluida la adaptación de mensajes, filtros y consumidores de `refund_pending`/`refunded`. Esas capas y B3-A2 aún no están implementadas. Antes de habilitarlas deben revisarse los históricos sin pago original deducible y conservarse las garantías de privacidad y las regresiones existentes. Cancelar un pedido pagado sigue sin iniciar automáticamente un refund.
+
+## Cierre vigente 2B4-B3-A2: finalización manual interna certificada
+
+Este cierre sustituye las ausencias históricas de finalización interna en A0/A1 y en los planes anteriores. `TreasuryPaymentRefundService::complete(int $refundId, int $actorId, string $externalReference)` completa un reembolso total pendiente y coherente. Exige Treasury activo, pedido cancelado sin entrega ni recojo, pago original aprobado por el total en PEN e inventario previamente compensado. Admite los medios cobrados y no fabrica presentación ni caso.
+
+La referencia obligatoria se valida como UTF-8, sin controles ni saltos de línea, con espacios exteriores normalizados y máximo de 255 bytes; conserva mayúsculas, ceros y puntuación. Solo se guarda cifrada en el refund y no se copia a referencias contables, metadata o claves. La transacción crea un único asiento `refund/approved`, gateway manual, por el importe y moneda originales, sin ámbito aprobado ni vínculo directo a presentación. Completa el refund, marca el pedido `refunded` y, si existe presentación, la marca `refunded` y añade exactamente un historial `refund_completed`. El caso B2 y el pago original permanecen intactos. No modifica inventario ni logística.
+
+Un reintento con la misma referencia normalizada por cualquier Treasury activo devuelve el mismo cierre sin escrituras ni cambio de `completed_by`. Otra referencia o un estado parcial produce conflicto. Ambas ramas retornan la instancia bloqueada o escrita mediante `unsetRelations()`, sin relectura `fresh()` susceptible al snapshot anterior de MySQL.
+
+Se conserva `DB::transaction(..., 3)`. El orden financiero vigente para A1/A2 es presentación opcional, pedido, transacciones, casos, refunds, historiales y actor/entrega/handling; después se valida la jerarquía de inventario. El seam protegido `afterCompletionOrderLocked(Order $order)` es vacío y sin estado: se invoca tras validar el pedido propio, dentro del callback reintentable y antes de las consultas financieras amplias. Solo el worker coordina allí el deadlock A2; A1 conserva su coordinación anterior. La víctima relanza la misma excepción física; el retry omite la barrera y reconstruye los modelos.
+
+### Certificación ejecutada el 2026-10-18
+
+MySQL 8.4.3 temporal aislado utilizó exclusivamente la base de certificación `_test`. Cada ejecución individual seleccionó exactamente un test y dataset; cada escenario A2 repitió diez carreras. No hubo acceso a la base comercial ni a Hostinger.
+
+| Ejecución individual | Tests | Assertions | Resultado |
+|---|---:|---:|---|
+| Deadlock con presentación | 1 | 765 | Aprobado |
+| Deadlock sin presentación | 1 | 625 | Aprobado |
+| Misma referencia con presentación | 1 | 585 | Aprobado |
+| Referencia distinta con presentación | 1 | 495 | Aprobado: un éxito y un conflicto |
+| Misma referencia sin presentación | 1 | 505 | Aprobado |
+| Referencia distinta sin presentación | 1 | 415 | Aprobado: un éxito y un conflicto |
+| Snapshot inicial pending y retorno bloqueado completed | 1 | 615 | Aprobado |
+| Deadlock físico A1 | 1 | 66 | Aprobado |
+
+Después aprobaron la clase MySQL completa (**8 tests, 4071 assertions**), `TreasuryPaymentRefundCompletionServiceTest` en SQLite `:memory:` (**112 tests, 635 assertions**, incluyendo casos heredados A1) y las regresiones SQLite A1/B2 e inventario versionado afectadas (**339 tests, 3803 assertions**). Son ejecuciones con cobertura solapada, no conteos de casos distintos sumables.
+
+Las carreras verifican retornos contractuales, identidad del modelo, persistencia final, un asiento por pago, historial condicional exacto, actor final estable, referencia coherente sin imprimirla y ausencia de cambios de inventario/logística. Cada deadlock A2 exige exactamente una víctima con intentos `[1,2]`, ganador con `[1]`, SQLSTATE `40001`, driver `1213` y rechazo expreso de `1205`. La regresión stale fuerza el snapshot pending antes del commit contrario y exige ambos retornos completed. Pint focalizado, sintaxis PHP y `git diff --check` aprobaron. Se retiraron los observadores temporales de consultas; quedan checkpoints seguros de coordinación. La instancia, procesos y directorios propios se limpiaron.
+
+**B3-A2 queda certificado como backend interno local.** B3 completo no está disponible como flujo de usuario: siguen pendientes HTTP, Requests/Resources, Vue y adaptación de consumidores de estados. Antes de exponerlo corresponde revisar los históricos sin pago original deducible. No se certifican devoluciones reales, cron, workers, correo, monitoreo ni operación integral de Hostinger. No hay gateway automático, devolución parcial ni nueva migración; cancelar no inicia un refund. Este lote no se publicó ni se desplegó.

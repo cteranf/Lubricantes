@@ -172,8 +172,76 @@ class TreasuryPaymentRefundServiceTest extends TestCase
 
         $refund = $this->service()->markPending($fixture['order'], $fixture['treasury'], '  Razón segura  ');
 
-        $this->assertSame('Razón segura', $refund->reason);
+        $this->assertTrue($refund->reason === 'Razón segura', 'The normalized private reason must match.');
         $this->assertFalse(hash_equals($refund->reason, $refund->idempotency_key), 'Refund reason must not be used as its idempotency key.');
+    }
+
+    public function test_free_text_snapshot_fields_remain_private_canonical_and_strict(): void
+    {
+        $sentinel = 'synthetic-private-reason-sentinel';
+        $first = $this->financialEntitySnapshot(['reason' => $sentinel, 'decision_reason' => $sentinel, 'failure_reason' => $sentinel, 'observation' => $sentinel]);
+        $reordered = $this->financialEntitySnapshot(['observation' => $sentinel, 'failure_reason' => $sentinel, 'decision_reason' => $sentinel, 'reason' => $sentinel]);
+        $changed = $this->financialEntitySnapshot(['reason' => $sentinel.'-changed', 'decision_reason' => $sentinel, 'failure_reason' => $sentinel, 'observation' => $sentinel]);
+        $integer = $this->financialEntitySnapshot(['reason' => 17]);
+        $string = $this->financialEntitySnapshot(['reason' => '17']);
+        $this->assertTrue($first['public'] === [], 'Free text must never enter a printable snapshot.');
+        $this->assertFalse(str_contains(json_encode($first['public'], JSON_THROW_ON_ERROR), $sentinel), 'The public snapshot must exclude private text.');
+        $this->assertTrue(hash_equals($first['confidential_digest'], $reordered['confidential_digest']), 'Private objects must be canonical.');
+        $this->assertFalse(hash_equals($first['confidential_digest'], $changed['confidential_digest']), 'Private changes must remain detectable.');
+        $this->assertFalse(hash_equals($integer['confidential_digest'], $string['confidential_digest']), 'Private scalar types must remain strict.');
+    }
+
+    /** @dataProvider globalReservationStates */
+    public function test_global_reservations_reconcile_all_product_balances_without_writes(string $state): void
+    {
+        $fixture = $this->fixture();
+        $foreign = $this->addForeignActiveReservation($fixture);
+        if ($state === 'mismatch') {
+            $foreign['balance']->update(['reserved_quantity' => 1]);
+        } elseif ($state === 'crossed') {
+            DB::table('inventory_reservations')->where('id', $foreign['reservation']->id)->update(['order_id' => $fixture['order']->id]);
+        } elseif ($state === 'physical') {
+            DB::table('inventory_reservations')->where('id', $foreign['reservation']->id)->update(['consumed_at' => now()]);
+        }
+        $before = $this->inventorySnapshot($fixture);
+        $foreignBefore = $this->foreignReservationDigest($foreign);
+        if ($state === 'valid') {
+            $refund = app(TreasuryPaymentRefundService::class)->markPending($fixture['order'], $fixture['treasury'], 'Global reservation fixture');
+            $this->assertSame(PaymentRefund::PENDING, $refund->status);
+        } else {
+            $snapshot = $this->snapshot($fixture);
+            try {
+                app(TreasuryPaymentRefundService::class)->markPending($fixture['order'], $fixture['treasury'], 'Global reservation fixture');
+                $this->fail('Incoherent global reservations must fail.');
+            } catch (PaymentRefundConflictException) {
+                $this->assertSnapshotUnchanged($snapshot, $this->snapshot($fixture));
+            }
+        }
+        $this->assertSnapshotUnchanged($before, $this->inventorySnapshot($fixture));
+        $this->assertTrue(hash_equals($foreignBefore, $this->foreignReservationDigest($foreign)), 'Foreign inventory and reservation must remain unchanged.');
+    }
+
+    public static function globalReservationStates(): array
+    {
+        return ['coherent' => ['valid'], 'balance mismatch' => ['mismatch'], 'crossed reservation' => ['crossed'], 'consumed active reservation' => ['physical']];
+    }
+
+    protected function addForeignActiveReservation(array $fixture): array
+    {
+        $suffix = Str::lower(Str::random(12));
+        $warehouse = Warehouse::create(['branch_id' => $fixture['branch']->id, 'code' => 'GLOBAL-'.$suffix, 'name' => 'Global fixture', 'is_active' => true]);
+        $balance = WarehouseInventory::create(['warehouse_id' => $warehouse->id, 'product_id' => $fixture['product']->id, 'quantity' => 5, 'reserved_quantity' => 2]);
+        $fixture['product']->forceFill(['stock' => 17])->save();
+        $order = Order::create(['user_id' => $fixture['customer']->id, 'status' => 'pending', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'transferencia', 'payment_status' => 'pending', 'fulfillment_status' => Order::FULFILLMENT_RESERVED]);
+        $item = OrderItem::forceCreate(['order_id' => $order->id, 'product_id' => $fixture['product']->id, 'warehouse_id' => $warehouse->id, 'quantity' => 2, 'price' => '25.00', 'subtotal' => '50.00']);
+        $reservation = InventoryReservation::forceCreate(['order_id' => $order->id, 'order_item_id' => $item->id, 'product_id' => $fixture['product']->id, 'warehouse_id' => $warehouse->id, 'quantity' => 2, 'reservation_sequence' => 1, 'status' => InventoryReservation::ACTIVE, 'expires_at' => now()->addHour(), 'idempotency_key' => 'global-reservation-'.$suffix]);
+
+        return compact('warehouse', 'balance', 'order', 'item', 'reservation');
+    }
+
+    protected function foreignReservationDigest(array $foreign): string
+    {
+        return $this->confidentialDigest(array_map(fn ($model) => $model->fresh()->getAttributes(), $foreign));
     }
 
     /** @dataProvider invalidActorStates */
@@ -499,7 +567,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
             $this->service()->markPending($fixture['order']->fresh(), $fixture['treasury']->fresh(), 'Razón diferente');
         } finally {
             $this->assertSnapshotUnchanged($before, $this->snapshot($fixture));
-            $this->assertSame('Razón original', $refund->fresh()->reason);
+            $this->assertTrue($refund->fresh()->reason === 'Razón original', 'The original private reason must remain unchanged.');
         }
     }
 
@@ -696,7 +764,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function fixture(string $paymentMethod = 'transferencia', bool $withSubmission = false, bool $withResolutionCase = false): array
+    protected function fixture(string $paymentMethod = 'transferencia', bool $withSubmission = false, bool $withResolutionCase = false): array
     {
         $suffix = Str::lower(Str::random(12));
         $openedAt = now()->subHours(3);
@@ -864,13 +932,13 @@ class TreasuryPaymentRefundServiceTest extends TestCase
     }
 
     /** @param array<string, mixed> $fixture */
-    private function inventorySnapshot(array $fixture): array
+    protected function inventorySnapshot(array $fixture): array
     {
         return $this->buildSnapshot($fixture, true);
     }
 
     /** @param array<string, mixed> $fixture */
-    private function snapshot(array $fixture): array
+    protected function snapshot(array $fixture): array
     {
         return $this->buildSnapshot($fixture, false);
     }
@@ -1008,7 +1076,16 @@ class TreasuryPaymentRefundServiceTest extends TestCase
             'metadata',
             'safe_metadata',
             'receiving_account_snapshot',
+            'reason',
+            'decision_reason',
+            'failure_reason',
+            'observation',
+            'notes',
+            'comment',
+            'description',
+            'shipping_info',
         ], true)
+            || str_contains($normalized, 'reason')
             || str_contains($normalized, 'reference')
             || str_contains($normalized, 'operation')
             || str_contains($normalized, 'fingerprint')
@@ -1019,7 +1096,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
             || str_ends_with($normalized, '_secret');
     }
 
-    private function canonicalize(mixed $value): mixed
+    protected function canonicalize(mixed $value): mixed
     {
         if (! is_array($value)) {
             return $value;
@@ -1033,7 +1110,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         return array_map(fn ($item) => $this->canonicalize($item), $value);
     }
 
-    private function assertSnapshotUnchanged(array $expected, array $actual): void
+    protected function assertSnapshotUnchanged(array $expected, array $actual): void
     {
         $this->assertSame($expected['public'], $actual['public'], 'The fixture public snapshot changed unexpectedly.');
         $this->assertTrue(

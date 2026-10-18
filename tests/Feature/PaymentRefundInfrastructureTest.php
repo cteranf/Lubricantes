@@ -330,6 +330,82 @@ class PaymentRefundInfrastructureTest extends TestCase
         }
     }
 
+    /** @dataProvider unreconstructibleOriginalStates */
+    public function test_down_rejects_each_unreconstructible_original_before_any_ddl(string $state): void
+    {
+        $original = $this->approvedPayment('down-predicate-'.$state);
+        $case = $this->resolutionCase($original, 'down-predicate-'.$state);
+        $refund = $this->refund($original, 'down-predicate-'.$state, $case);
+        $otherOrder = null;
+        $competitor = null;
+        $uniqueDropped = false;
+        $driver = DB::connection()->getDriverName();
+        try {
+            if ($state === 'competitor') {
+                if ($driver === 'mysql') {
+                    DB::statement('ALTER TABLE payment_transactions ADD INDEX b3_predicate_submission_support (payment_submission_id), DROP INDEX pt_submission_unique');
+                } else {
+                    DB::statement('DROP INDEX pt_submission_unique');
+                }
+                $uniqueDropped = true;
+                $attributes = $original->getAttributes();
+                unset($attributes['id'], $attributes['created_at'], $attributes['updated_at']);
+                $attributes['approved_scope_key'] = null;
+                $attributes['idempotency_key'] = 'predicate-competitor-'.bin2hex(random_bytes(8));
+                $competitor = PaymentTransaction::forceCreate($attributes);
+            } elseif ($state === 'order') {
+                $otherOrder = $original->order->replicate();
+                $otherOrder->save();
+                DB::table('payment_transactions')->where('id', $original->id)->update(['order_id' => $otherOrder->id]);
+            } elseif ($state === 'received null') {
+                DB::table('payment_resolution_cases')->where('id', $case->id)->update(['received_payment_transaction_id' => null]);
+            } elseif ($state === 'case amount') {
+                DB::table('payment_resolution_cases')->where('id', $case->id)->update(['amount' => '24.99']);
+            } else {
+                [$field, $value] = match ($state) {
+                    'type' => ['transaction_type', PaymentTransaction::REFUND],
+                    'status' => ['status', PaymentTransaction::RECEIVED],
+                    'submission' => ['payment_submission_id', null],
+                    'amount' => ['amount', '24.99'],
+                    'currency' => ['currency', 'USD'],
+                };
+                DB::table('payment_transactions')->where('id', $original->id)->update([$field => $value]);
+            }
+            $before = $this->originalPaymentConstraintSnapshot();
+            try {
+                $this->migration()->down();
+                $this->fail('An unreconstructible original must block rollback before DDL.');
+            } catch (\RuntimeException) {
+                $this->assertSame($before, $this->originalPaymentConstraintSnapshot());
+                $this->assertTrue(Schema::hasColumn('payment_refunds', 'original_payment_transaction_id'));
+                $this->assertTrue((int) DB::table('payment_refunds')->where('id', $refund->id)->value('original_payment_transaction_id') === (int) $original->id, 'Rollback must retain the explicit original identity.');
+            }
+        } finally {
+            if ($competitor) {
+                DB::table('payment_transactions')->where('id', $competitor->id)->delete();
+            }
+            if ($uniqueDropped) {
+                if ($driver === 'mysql') {
+                    DB::statement('ALTER TABLE payment_transactions ADD UNIQUE INDEX pt_submission_unique (payment_submission_id), DROP INDEX b3_predicate_submission_support');
+                } else {
+                    DB::statement('CREATE UNIQUE INDEX pt_submission_unique ON payment_transactions (payment_submission_id)');
+                }
+            }
+            if ($driver === 'mysql') {
+                if ($otherOrder) {
+                    DB::table('payment_transactions')->where('id', $original->id)->update(['order_id' => $original->order_id]);
+                    DB::table('orders')->where('id', $otherOrder->id)->delete();
+                }
+                $this->cleanupMigrationFixture((int) $refund->id, $case, $original);
+            }
+        }
+    }
+
+    public static function unreconstructibleOriginalStates(): array
+    {
+        return array_map(fn ($state) => [$state], ['type', 'status', 'submission', 'order', 'amount', 'currency', 'case amount', 'competitor', 'received null']);
+    }
+
     public function test_migration_down_rejects_a_case_without_received_transaction_before_schema_changes(): void
     {
         $original = $this->approvedPayment('down-case-without-transaction');
@@ -385,18 +461,72 @@ class PaymentRefundInfrastructureTest extends TestCase
             $this->markTestSkipped('La sustitución nominal de una FK se certifica físicamente en MySQL.');
         }
 
-        DB::statement('ALTER TABLE payment_refunds DROP FOREIGN KEY pr_original_tx_fk, ADD CONSTRAINT pr_original_tx_fk FOREIGN KEY (refund_payment_transaction_id) REFERENCES payment_transactions (id) ON DELETE RESTRICT');
-        $corruptedSchema = $this->originalPaymentConstraintSnapshot();
-
+        $foreignKey = static fn (): array => DB::table('information_schema.key_column_usage as kcu')
+            ->join('information_schema.referential_constraints as rc', function ($join) {
+                $join->on('rc.constraint_schema', '=', 'kcu.constraint_schema')
+                    ->on('rc.constraint_name', '=', 'kcu.constraint_name')
+                    ->on('rc.table_name', '=', 'kcu.table_name');
+            })
+            ->where('kcu.table_schema', DB::connection()->getDatabaseName())
+            ->where('kcu.table_name', 'payment_refunds')->where('kcu.constraint_name', 'pr_original_tx_fk')
+            ->orderBy('kcu.ordinal_position')
+            ->get(['kcu.column_name as local_column', 'kcu.referenced_table_name as referenced_table', 'kcu.referenced_column_name as referenced_column', 'rc.delete_rule as delete_rule'])
+            ->map(fn ($row) => (array) $row)->all();
+        $unique = static fn (): array => DB::table('information_schema.statistics')
+            ->where('table_schema', DB::connection()->getDatabaseName())
+            ->where('table_name', 'payment_refunds')->where('index_name', 'pr_original_tx_unique')
+            ->selectRaw('COLUMN_NAME AS column_name, NON_UNIQUE AS non_unique, SEQ_IN_INDEX AS seq_in_index')
+            ->orderBy('seq_in_index')->get()
+            ->map(fn ($row) => ['column' => $row->column_name, 'non_unique' => (int) $row->non_unique, 'sequence' => (int) $row->seq_in_index])->all();
+        $correctForeignKey = [['local_column' => 'original_payment_transaction_id', 'referenced_table' => 'payment_transactions', 'referenced_column' => 'id', 'delete_rule' => 'RESTRICT']];
+        $incorrectForeignKey = [['local_column' => 'refund_payment_transaction_id', 'referenced_table' => 'payment_transactions', 'referenced_column' => 'id', 'delete_rule' => 'RESTRICT']];
+        $correctUnique = [['column' => 'original_payment_transaction_id', 'non_unique' => 0, 'sequence' => 1]];
+        $this->assertSame($correctForeignKey, $foreignKey());
+        $this->assertSame($correctUnique, $unique());
+        $originalSchema = $this->originalPaymentConstraintSnapshot();
+        $checkingDown = false;
+        $ddlObserved = false;
+        DB::listen(static function ($event) use (&$checkingDown, &$ddlObserved): void {
+            if ($checkingDown && preg_match('/^\s*(ALTER|CREATE|DROP|RENAME|TRUNCATE)\b/i', $event->sql)) {
+                $ddlObserved = true;
+            }
+        });
         try {
-            $this->migration()->down();
-            $this->fail('El rollback aceptó una FK homónima con contrato incorrecto.');
-        } catch (\RuntimeException) {
-            $this->assertTrue(Schema::hasColumn('payment_refunds', 'original_payment_transaction_id'));
-            $this->assertTrue(Schema::hasColumn('payment_refunds', 'payment_resolution_case_id'));
+            DB::statement('ALTER TABLE payment_refunds DROP FOREIGN KEY pr_original_tx_fk');
+            $this->assertSame([], $foreignKey());
+            DB::statement('ALTER TABLE payment_refunds ADD CONSTRAINT pr_original_tx_fk FOREIGN KEY (refund_payment_transaction_id) REFERENCES payment_transactions (id) ON DELETE RESTRICT');
+            $this->assertSame($incorrectForeignKey, $foreignKey());
+            $this->assertSame($correctUnique, $unique());
+            $corruptedSchema = $this->originalPaymentConstraintSnapshot();
+            $checkingDown = true;
+            try {
+                $this->migration()->down();
+                $this->fail('El rollback aceptó una FK homónima con contrato incorrecto.');
+            } catch (\RuntimeException $exception) {
+                $this->assertTrue($exception::class === \RuntimeException::class, 'Rollback must reject the foreign-key contract before executing DDL.');
+                $this->assertTrue($exception->getMessage() === 'Las claves foráneas generalizadas no coinciden con el contrato esperado.', 'Rollback must specifically reject the incorrect foreign key.');
+            } finally {
+                $checkingDown = false;
+            }
+            $this->assertFalse($ddlObserved, 'Rollback must not execute DDL when its foreign-key precondition fails.');
             $this->assertSame($corruptedSchema, $this->originalPaymentConstraintSnapshot());
+            $this->assertSame($incorrectForeignKey, $foreignKey());
+            $this->assertSame($correctUnique, $unique());
         } finally {
-            DB::statement('ALTER TABLE payment_refunds DROP FOREIGN KEY pr_original_tx_fk, ADD CONSTRAINT pr_original_tx_fk FOREIGN KEY (original_payment_transaction_id) REFERENCES payment_transactions (id) ON DELETE RESTRICT');
+            $checkingDown = false;
+            try {
+                if ($foreignKey() !== []) {
+                    DB::statement('ALTER TABLE payment_refunds DROP FOREIGN KEY pr_original_tx_fk');
+                }
+                $this->assertSame([], $foreignKey());
+                DB::statement('ALTER TABLE payment_refunds ADD CONSTRAINT pr_original_tx_fk FOREIGN KEY (original_payment_transaction_id) REFERENCES payment_transactions (id) ON DELETE RESTRICT');
+                $this->assertSame($correctForeignKey, $foreignKey());
+                $this->assertSame($correctUnique, $unique());
+                $this->assertSame($originalSchema, $this->originalPaymentConstraintSnapshot());
+                $this->assertSame(1, (int) DB::selectOne('SELECT 1 AS usable')->usable);
+            } catch (\Throwable) {
+                $this->fail('MySQL foreign-key fixture restoration failed; stop certification and inspect the isolated schema.');
+            }
         }
     }
 
@@ -404,9 +534,9 @@ class PaymentRefundInfrastructureTest extends TestCase
     {
         if (DB::connection()->getDriverName() === 'mysql') {
             return [
-                'columns' => collect(DB::select("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_refunds' AND COLUMN_NAME IN ('payment_resolution_case_id', 'original_payment_transaction_id', 'refund_payment_transaction_id') ORDER BY ORDINAL_POSITION"))->map(fn ($row) => (array) $row)->all(),
-                'indexes' => collect(DB::select("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_refunds' AND INDEX_NAME IN ('pr_original_tx_unique', 'pr_case_unique', 'pr_refund_tx_unique') ORDER BY INDEX_NAME, SEQ_IN_INDEX"))->map(fn ($row) => (array) $row)->all(),
-                'foreign_keys' => collect(DB::select("SELECT kcu.CONSTRAINT_NAME, kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME, rc.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE kcu JOIN information_schema.REFERENTIAL_CONSTRAINTS rc ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND rc.TABLE_NAME = kcu.TABLE_NAME WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'payment_refunds' AND kcu.CONSTRAINT_NAME IN ('pr_original_tx_fk', 'pr_case_fk', 'pr_refund_tx_fk') ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION"))->map(fn ($row) => (array) $row)->all(),
+                'columns' => collect(DB::select("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_refunds' ORDER BY ORDINAL_POSITION"))->map(fn ($row) => (array) $row)->all(),
+                'indexes' => collect(DB::select("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payment_refunds' ORDER BY INDEX_NAME, SEQ_IN_INDEX"))->map(fn ($row) => (array) $row)->all(),
+                'foreign_keys' => collect(DB::select("SELECT kcu.CONSTRAINT_NAME, kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME, rc.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE kcu JOIN information_schema.REFERENTIAL_CONSTRAINTS rc ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND rc.TABLE_NAME = kcu.TABLE_NAME WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'payment_refunds' ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION"))->map(fn ($row) => (array) $row)->all(),
             ];
         }
 

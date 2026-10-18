@@ -22,6 +22,7 @@ final class PaymentReassignmentFinalState
         Collection $resolutionHistories,
         Collection $fulfillmentHistories,
         int $reservationCount,
+        bool $forRefundCompletion = false,
     ): bool {
         $openedSubmission = $submissionHistories->where('event', 'resolution_opened')->values();
         $approvedSubmission = $submissionHistories->where('event', PaymentSubmissionHistory::REASSIGNMENT_APPROVED)->values();
@@ -81,7 +82,12 @@ final class PaymentReassignmentFinalState
             $reassignedResolution->actor_id,
         ], fn ($actor) => $actor !== null)));
 
-        return in_array($submission->status, [PaymentSubmission::APPROVED, PaymentSubmission::REFUND_PENDING], true)
+        $allowedStatuses = [PaymentSubmission::APPROVED, PaymentSubmission::REFUND_PENDING];
+        if ($forRefundCompletion) {
+            $allowedStatuses[] = PaymentSubmission::REFUNDED;
+        }
+
+        return in_array($submission->status, $allowedStatuses, true)
             && $submission->currency === 'PEN'
             && self::minor($submission->expected_amount) === self::minor($order->total)
             && $submission->reviewed_at !== null

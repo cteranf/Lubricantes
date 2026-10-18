@@ -16,6 +16,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
+use App\Services\TreasuryPaymentRefundService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -125,8 +126,202 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
         $this->assertDirectoryDoesNotExist($directory);
     }
 
+    public function test_snapshot_pending_returns_the_locked_completed_instance(): void
+    {
+        $this->test_physical_completion_races_preserve_atomicity_and_privacy('complete_snapshot', true);
+    }
+
+    /** @dataProvider completionRaces */
+    public function test_physical_completion_races_preserve_atomicity_and_privacy(string $action, bool $withSubmission): void
+    {
+        $this->requireIsolatedMysql();
+        for ($iteration = 0; $iteration < 10; $iteration++) {
+            $fixtures = [];
+            $workers = [];
+            $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'lubristore-refund-completion-'.bin2hex(random_bytes(8));
+            $readyFirst = $directory.DIRECTORY_SEPARATOR.'ready-first';
+            $readySecond = $directory.DIRECTORY_SEPARATOR.'ready-second';
+            $release = $directory.DIRECTORY_SEPARATOR.'release';
+            try {
+                $this->assertTrue(mkdir($directory));
+                $fixtures['first'] = $this->fixture('completion-first', true);
+                $fixtures['second'] = $this->fixture('completion-second', true);
+                foreach ($fixtures as &$fixture) {
+                    if (! $withSubmission) {
+                        DB::table('payment_transactions')->where('id', $fixture['transaction']->id)->update(['payment_submission_id' => null]);
+                        DB::table('payment_submissions')->where('id', $fixture['submission']->id)->delete();
+                        $fixture['submission'] = null;
+                    }
+                    $fixture['refund'] = app(TreasuryPaymentRefundService::class)->markPending($fixture['order'], $fixture['treasury'], 'Solicitud de certificación física');
+                    $fixture['protected_digest'] = $this->protectedFixtureDigest($fixture);
+                }
+                unset($fixture);
+                $deadlock = $action === 'complete_deadlock';
+                $workerPath = base_path('tests/Support/mysql_treasury_refund_worker.php');
+                $workers['first'] = $this->startWorker($workerPath, [
+                    $fixtures['first']['order']->id, $fixtures['first']['treasury']->id,
+                    $fixtures['second']['order']->id, $readyFirst, $release, 'first', $directory, $action,
+                ]);
+                $workers['second'] = $this->startWorker($workerPath, [
+                    $fixtures[$deadlock ? 'second' : 'first']['order']->id, $fixtures['second']['treasury']->id,
+                    $fixtures['first']['order']->id, $readySecond, $release, 'second', $directory, $action,
+                ]);
+                $this->waitForReady($workers, $readyFirst, $readySecond);
+                $this->assertSame(7, file_put_contents($release, 'release', LOCK_EX));
+                $results = $this->waitForResults($workers);
+                $summary = $this->safeSummary($results);
+                if ($action === 'complete_snapshot') {
+                    $this->assertTrue($results['first']['json']['snapshot_pending'] ?? false, $summary);
+                    $this->assertTrue($results['first']['json']['locked_completed'] ?? false, $summary);
+                    $this->assertSame($fixtures['second']['treasury']->id, $results['first']['json']['completed_by'] ?? null, $summary);
+                }
+                foreach ($results as $result) {
+                    $this->assertSame(0, $result['exit_code'], $summary);
+                    $this->assertFalse($result['stderr_present'], 'Workers must not emit private diagnostics.');
+                }
+                $successes = collect($results)->filter(fn ($result) => ($result['json']['result'] ?? null) === 'success');
+                $conflicts = collect($results)->filter(fn ($result) => ($result['json']['result'] ?? null) === 'conflict');
+                $this->assertCount($action === 'complete_different' ? 1 : 2, $successes, $summary);
+                $this->assertCount($action === 'complete_different' ? 1 : 0, $conflicts, $summary);
+                foreach ($successes as $result) {
+                    $this->assertTrue($result['json']['same_locked_instance'] ?? false, $summary);
+                    $this->assertSame(PaymentRefund::COMPLETED, $result['json']['status'] ?? null, $summary);
+                    $this->assertTrue($result['json']['fresh_hydration'] ?? false, $summary);
+                    $this->assertTrue($result['json']['release_observed'] ?? false, $summary);
+                }
+                if (in_array($action, ['complete_same', 'complete_snapshot'], true)) {
+                    $this->assertSame(1, $successes->pluck('json.refund_id')->unique()->count());
+                    $this->assertSame(1, $successes->pluck('json.accounting_id')->unique()->count());
+                    $this->assertSame(1, $successes->pluck('json.completed_by')->unique()->count());
+                }
+                if ($deadlock) {
+                    $this->assertSame([1, 2], collect($results)->pluck('json.attempts')->sort()->values()->all(), $summary);
+                    $victim = collect($results)->sole(fn ($result) => ($result['json']['retry_observed'] ?? false) === true);
+                    $winner = collect($results)->sole(fn ($result) => ($result['json']['retry_observed'] ?? false) === false);
+                    $this->assertSame([1, 2], $victim['json']['attempt_numbers']);
+                    $this->assertSame([1], $winner['json']['attempt_numbers']);
+                    $this->assertCount(0, $winner['json']['concurrency_failures']);
+                    $this->assertCount(1, $victim['json']['concurrency_failures']);
+                    $failure = $victim['json']['concurrency_failures'][0];
+                    $this->assertSame('40001', $failure['sqlstate']);
+                    $this->assertSame(1213, $failure['driver_code']);
+                    $this->assertNotSame(1205, $failure['driver_code']);
+                }
+                foreach ($fixtures as $name => $fixture) {
+                    $completed = $deadlock || $name === 'first';
+                    $refund = $fixture['refund']->fresh();
+                    $this->assertSame($completed ? PaymentRefund::COMPLETED : PaymentRefund::PENDING, $refund->status);
+                    $this->assertSame($completed ? 'refunded' : 'refund_pending', $fixture['order']->fresh()->payment_status);
+                    $this->assertSame($completed ? 1 : 0, PaymentTransaction::where('order_id', $fixture['order']->id)->where('transaction_type', PaymentTransaction::REFUND)->count());
+                    $this->assertSame($withSubmission ? 1 : 0, PaymentSubmission::where('order_id', $fixture['order']->id)->count());
+                    $submissionId = $fixture['submission']?->id;
+                    $this->assertSame($withSubmission && $completed ? 1 : 0, PaymentSubmissionHistory::where('payment_submission_id', $submissionId)->where('event', PaymentSubmissionHistory::REFUND_COMPLETED)->count());
+                    if ($withSubmission) {
+                        $this->assertSame($completed ? PaymentSubmission::REFUNDED : PaymentSubmission::REFUND_PENDING, $fixture['submission']->fresh()->status);
+                    }
+                    $this->assertTrue(hash_equals($fixture['protected_digest'], $this->protectedFixtureDigest($fixture)), 'Inventory, logistics and original payment must remain unchanged.');
+                    if ($completed) {
+                        $returned = $successes->filter(fn ($result) => (int) $result['json']['refund_id'] === (int) $refund->id);
+                        $this->assertNotEmpty($returned, $summary);
+                        foreach ($returned as $result) {
+                            $this->assertSame((int) $refund->completed_by, $result['json']['completed_by'], $summary);
+                            $this->assertSame((int) $refund->refund_payment_transaction_id, $result['json']['accounting_id'], $summary);
+                        }
+                        $expectedReference = 'certification-fixture';
+                        if ($action === 'complete_different') {
+                            $expectedReference .= (int) $refund->completed_by === (int) $fixtures['first']['treasury']->id ? '-first' : '-second';
+                        }
+                        $this->assertTrue(hash_equals($expectedReference, $refund->external_reference), 'The persisted reference must match the winning completion.');
+                        if ($withSubmission) {
+                            $history = PaymentSubmissionHistory::where('payment_submission_id', $submissionId)->where('event', PaymentSubmissionHistory::REFUND_COMPLETED)->sole();
+                            $this->assertSame(PaymentSubmission::REFUND_PENDING, $history->from_status);
+                            $this->assertSame(PaymentSubmission::REFUNDED, $history->to_status);
+                            $this->assertSame((int) $refund->completed_by, (int) $history->actor_id);
+                            $this->assertSame('total_refund_completed', $history->reason);
+                            $this->assertSame(['amount' => '50.00', 'currency' => 'PEN'], $history->safe_metadata);
+                            $this->assertTrue($refund->completed_at->equalTo($history->occurred_at));
+                        }
+                        $this->assertSame((int) $refund->refund_payment_transaction_id, (int) $refund->refundPaymentTransaction->id);
+                        $this->assertSame($refund->completed_by, (int) $refund->refundPaymentTransaction->confirmed_by);
+                        $this->assertTrue($refund->completed_at->equalTo($refund->refundPaymentTransaction->confirmed_at));
+                        $this->assertArrayNotHasKey('external_reference', $refund->toArray());
+                        $cipher = DB::table('payment_refunds')->where('id', $refund->id)->value('external_reference');
+                        $this->assertFalse(str_contains($cipher, 'certification-fixture'), 'References must remain encrypted.');
+                    }
+                }
+                if ($iteration === 9) {
+                    fwrite(STDOUT, PHP_EOL.'Safe worker summary: '.$summary.PHP_EOL);
+                }
+            } finally {
+                $this->terminateWorkers($workers);
+                foreach ([$readyFirst, $readySecond, $release, $directory.DIRECTORY_SEPARATOR.'deadlock-first', $directory.DIRECTORY_SEPARATOR.'deadlock-second', $directory.DIRECTORY_SEPARATOR.'snapshot-pending', $directory.DIRECTORY_SEPARATOR.'completion-committed'] as $path) {
+                    if (is_file($path)) {
+                        @unlink($path);
+                    }
+                }
+                if (is_dir($directory)) {
+                    @rmdir($directory);
+                }
+                foreach (array_reverse($fixtures) as $fixture) {
+                    $this->cleanupFixture($fixture);
+                }
+            }
+            $this->assertDirectoryDoesNotExist($directory);
+        }
+    }
+
+    public static function completionRaces(): array
+    {
+        return [
+            'same with submission' => ['complete_same', true],
+            'different with submission' => ['complete_different', true],
+            'deadlock with submission' => ['complete_deadlock', true],
+            'same without submission' => ['complete_same', false],
+            'different without submission' => ['complete_different', false],
+            'deadlock without submission' => ['complete_deadlock', false],
+        ];
+    }
+
+    private function protectedFixtureDigest(array $fixture): string
+    {
+        $orderId = $fixture['order']->id;
+        $parts = [];
+        foreach (['order_items', 'inventory_reservations', 'order_fulfillment_histories', 'order_handling_processes', 'order_handling_incidents', 'order_handling_histories', 'order_deliveries', 'order_delivery_histories'] as $table) {
+            $parts[$table] = DB::table($table)->where('order_id', $orderId)->orderBy('id')->get()->map(fn ($row) => (array) $row)->all();
+        }
+        $parts['movements'] = DB::table('inventory_movements')->where('reference_type', 'order')->where('reference_id', (string) $orderId)->orderBy('id')->get()->map(fn ($row) => (array) $row)->all();
+        $parts['handling_items'] = DB::table('order_handling_items')->where('order_item_id', $fixture['item']->id)->orderBy('id')->get()->map(fn ($row) => (array) $row)->all();
+        $parts['delivery_attempts'] = DB::table('order_delivery_attempts')->whereIn('order_delivery_id', array_column($parts['order_deliveries'], 'id'))->orderBy('id')->get()->map(fn ($row) => (array) $row)->all();
+        $parts['inventory'] = $fixture['inventory']->fresh()->getAttributes();
+        $parts['product'] = $fixture['product']->fresh()->getAttributes();
+        $parts['payment'] = $fixture['transaction']->fresh()->getAttributes();
+        $parts['order'] = $fixture['order']->fresh()->getAttributes();
+        unset($parts['order']['payment_status'], $parts['order']['updated_at']);
+        $parts['foreign'] = array_map(fn ($model) => $model->fresh()->getAttributes(), $fixture['foreign'] ?? []);
+
+        return hash('sha256', json_encode($this->canonicalSnapshot($parts), JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION));
+    }
+
+    private function canonicalSnapshot(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+        if (! array_is_list($value)) {
+            ksort($value);
+        }
+
+        return array_map(fn ($item) => $this->canonicalSnapshot($item), $value);
+    }
+
     private function requireIsolatedMysql(): void
     {
+        // Check the configured destination before the first connection.
+        $this->assertSame('testing', app()->environment());
+        $this->assertFalse((bool) config('app.debug'));
+        $this->assertSame('mysql', config('database.default'));
+        $this->assertSame(self::DATABASE, config('database.connections.mysql.database'));
+        $this->assertEmpty(config('database.connections.mysql.url'));
         $database = DB::selectOne('SELECT DATABASE() AS name')->name ?? null;
         $version = DB::selectOne('SELECT VERSION() AS version')->version ?? '';
         $this->assertSame('testing', app()->environment());
@@ -136,7 +331,9 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
         $this->assertTrue(str_ends_with((string) $database, '_test'));
         $this->assertNotSame('lubricantes', $database);
         $this->assertTrue(str_starts_with((string) $version, '8.'));
-        $this->assertSame(1, DB::table('migrations')->where('migration', 'like', '%070630%')->count());
+        foreach (['2026_09_26_070600_create_payment_refunds_table', '2026_09_26_070620_add_refund_pending_to_order_payment_status', '2026_10_11_070630_generalize_payment_refunds_for_total_refunds'] as $migration) {
+            $this->assertSame(1, DB::table('migrations')->where('migration', $migration)->count());
+        }
     }
 
     private function startWorker(string $workerPath, array $arguments): array
@@ -273,17 +470,23 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
         return json_encode(collect($results)->map(fn ($result) => [
             'exit_code' => $result['exit_code'],
             'result' => $result['json']['result'] ?? null,
+            'status' => $result['json']['status'] ?? null,
+            'same_locked_instance' => $result['json']['same_locked_instance'] ?? null,
+            'snapshot_pending' => $result['json']['snapshot_pending'] ?? null,
+            'locked_completed' => $result['json']['locked_completed'] ?? null,
             'ok' => $result['json']['ok'] ?? null,
             'attempts' => $result['json']['attempts'] ?? null,
             'retry_observed' => $result['json']['retry_observed'] ?? null,
             'exception_class' => $result['json']['exception_class'] ?? null,
+            'previous_exception_class' => $result['json']['previous_exception_class'] ?? null,
             'stage' => $result['json']['stage'] ?? null,
             'sqlstate' => $result['json']['sqlstate'] ?? null,
             'driver_code' => $result['json']['driver_code'] ?? null,
+            'diagnostic' => $result['json']['diagnostic'] ?? null,
         ])->all(), JSON_THROW_ON_ERROR);
     }
 
-    private function fixture(string $label): array
+    private function fixture(string $label, bool $withGlobalReservation = false): array
     {
         $suffix = $label.'-'.Str::lower(Str::random(12));
         $treasury = User::factory()->create(['role' => 'treasury', 'is_active' => true, 'email' => "refund-treasury-{$suffix}@example.test"]);
@@ -374,20 +577,41 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
             'created_at' => now()->subHour(),
         ]);
 
-        return compact('treasury', 'customer', 'branch', 'warehouse', 'product', 'inventory', 'order', 'item', 'reservation', 'submission', 'transaction', 'sale', 'return', 'fulfillmentHistory');
+        $foreign = [];
+        if ($withGlobalReservation) {
+            $foreign['warehouse'] = Warehouse::create(['branch_id' => $branch->id, 'code' => 'RFG-'.$suffix, 'name' => 'Foreign reservation fixture', 'is_active' => true]);
+            $foreign['balance'] = WarehouseInventory::create(['warehouse_id' => $foreign['warehouse']->id, 'product_id' => $product->id, 'quantity' => 5, 'reserved_quantity' => 2]);
+            $product->forceFill(['stock' => 17])->save();
+            $foreign['order'] = Order::create(['user_id' => $customer->id, 'status' => 'pending', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'transferencia', 'payment_status' => 'pending', 'fulfillment_status' => Order::FULFILLMENT_RESERVED]);
+            $foreign['item'] = OrderItem::forceCreate(['order_id' => $foreign['order']->id, 'product_id' => $product->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 2, 'price' => '25.00', 'subtotal' => '50.00']);
+            $foreign['reservation'] = InventoryReservation::forceCreate(['order_id' => $foreign['order']->id, 'order_item_id' => $foreign['item']->id, 'product_id' => $product->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 2, 'reservation_sequence' => 1, 'status' => InventoryReservation::ACTIVE, 'expires_at' => now()->addHour(), 'idempotency_key' => 'refund-global-'.$suffix]);
+        }
+
+        return compact('treasury', 'customer', 'branch', 'warehouse', 'product', 'inventory', 'order', 'item', 'reservation', 'submission', 'transaction', 'sale', 'return', 'fulfillmentHistory', 'foreign');
     }
 
     private function cleanupFixture(array $fixture): void
     {
+        if ($foreign = $fixture['foreign'] ?? []) {
+            DB::table('inventory_reservations')->where('id', $foreign['reservation']->id)->delete();
+            DB::table('order_items')->where('id', $foreign['item']->id)->delete();
+            DB::table('orders')->where('id', $foreign['order']->id)->delete();
+            DB::table('warehouse_inventories')->where('id', $foreign['balance']->id)->delete();
+            DB::table('warehouses')->where('id', $foreign['warehouse']->id)->delete();
+        }
         $orderId = (int) $fixture['order']->id;
-        $submissionId = (int) $fixture['submission']->id;
-        DB::table('payment_submission_histories')->where('payment_submission_id', $submissionId)->delete();
+        $submissionId = $fixture['submission']?->id;
+        if ($submissionId !== null) {
+            DB::table('payment_submission_histories')->where('payment_submission_id', $submissionId)->delete();
+        }
         DB::table('payment_refunds')->where('original_payment_transaction_id', $fixture['transaction']->id)->delete();
         DB::table('inventory_movements')->where('reference_type', 'order')->where('reference_id', (string) $orderId)->delete();
         DB::table('order_fulfillment_histories')->where('order_id', $orderId)->delete();
         DB::table('inventory_reservations')->where('order_id', $orderId)->delete();
         DB::table('payment_transactions')->where('order_id', $orderId)->delete();
-        DB::table('payment_submissions')->where('id', $submissionId)->delete();
+        if ($submissionId !== null) {
+            DB::table('payment_submissions')->where('id', $submissionId)->delete();
+        }
         DB::table('order_items')->where('order_id', $orderId)->delete();
         DB::table('orders')->where('id', $orderId)->delete();
         DB::table('warehouse_inventories')->where('id', $fixture['inventory']->id)->delete();

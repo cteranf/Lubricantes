@@ -12,6 +12,8 @@ source_commit: dd2436b
 
 Este resumen refleja dd2436b. Las certificaciones y smoke mencionados son evidencia existente; esta consolidación documental no ejecutó pruebas ni consultó datos. Los resultados históricos no equivalen a una certificación operativa integral de producción.
 
+Actualización posterior del 2026-10-18: el cierre de reembolsos al final incorpora B3-A2 y su nueva certificación local. Sustituye las menciones históricas a finalización interna pendiente; no corresponde a un commit o despliegue nuevo en Hostinger.
+
 ## Reportes gerenciales
 
 El panel administrativo incluye una sección de Reportes gerenciales con seis pestañas: Ventas, Inventario, Movimientos, Operaciones, Tiempos de ciclo y Catálogos. Cada pestaña se carga cuando se selecciona, conserva sus filtros en la dirección del navegador y permite actualizar o exportar los mismos resultados a CSV UTF-8.
@@ -88,7 +90,7 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 
 ## Posibles ampliaciones
 
-La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. El siguiente pendiente es finalizar internamente los reembolsos totales (B3-A2); después se incorporarán sus endpoints y la interfaz. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
+La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. B3-A2 ya finaliza internamente los reembolsos totales y está certificado localmente; el siguiente pendiente es incorporar sus endpoints y la interfaz. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
 
@@ -125,6 +127,10 @@ Los smoke históricos documentados confirmaron aprobación ordinaria y resoluci�
 
 B3-A0 aporta la infraestructura y B3-A1 permite iniciar el reembolso únicamente mediante un servicio interno. No existe un botón de inicio ni se puede completar una devolución desde la interfaz. El inicio requiere un pedido pagado y cancelado, no entregado ni recogido, con inventario ya compensado; cancelar por sí solo no crea el reembolso.
 
-El contrato previsto admite exclusivamente reembolsos totales, para todos los medios cobrados. Tesorería inicia y finalizará manualmente; el mismo usuario puede realizar ambas acciones. Al completar será obligatoria una referencia externa. No hay devolución parcial ni integración automática de devolución con Mercado Pago u otros proveedores. Los pedidos entregados o recogidos quedan fuera del flujo.
+El contrato admite exclusivamente reembolsos totales, para todos los medios cobrados. Tesorería inicia y finaliza manualmente mediante servicios internos; el mismo usuario puede realizar ambas acciones. Al completar es obligatoria una referencia externa, que se guarda cifrada. No hay devolución parcial ni integración automática de devolución con Mercado Pago u otros proveedores. Los pedidos entregados o recogidos quedan fuera del flujo.
 
-B3-A2 debe implementar la finalización interna antes de añadir HTTP y frontend. B1/B2 están implementados y certificados en su alcance; A0/A1 tienen implementación interna y certificaciones existentes, sin acreditar devoluciones reales en producción. Siguen pendientes notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado.
+B3-A2 está implementado y certificado como finalización interna: registra un único asiento de devolución, completa el reembolso y actualiza el pedido y la presentación cuando existe, con historial coherente. Una repetición con la misma referencia por cualquier Treasury activo conserva el usuario que completó originalmente y no duplica registros. No modifica inventario ni logística. Siguen pendientes HTTP y frontend; B3 completo todavía no está disponible desde la interfaz.
+
+La certificación local del 2026-10-18 cubrió seis escenarios MySQL con diez carreras cada uno, la regresión del retorno actualizado y A1 físico. Después aprobaron la clase MySQL completa (8 tests, 4071 assertions), SQLite A2 (112 tests, 635 assertions) y regresiones SQLite A1/B2 e inventario versionado (339 tests, 3803 assertions), con cobertura solapada. Solo se utilizó una instancia temporal de certificación, posteriormente eliminada. Los documentos técnicos detallan el alcance y la evidencia.
+
+Este cierre no acredita devoluciones reales en producción ni se ha publicado o desplegado. Hostinger conserva el despliegue confirmado de dd2436b. Siguen pendientes revisión de históricos antes de exponer reembolsos, notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado.

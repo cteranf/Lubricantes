@@ -59,22 +59,27 @@ return new class extends Migration
 
     private function backfillOriginalPaymentTransaction(): void
     {
-        DB::statement(<<<'SQL'
-            UPDATE payment_refunds
-            SET original_payment_transaction_id = (
+        $candidate = $this->originalPaymentCandidateSql('payment_refunds');
+        DB::statement("UPDATE payment_refunds SET original_payment_transaction_id = ({$candidate}) WHERE original_payment_transaction_id IS NULL AND payment_resolution_case_id IS NOT NULL");
+    }
+
+    private function originalPaymentCandidateSql(string $refundTable): string
+    {
+        // Both callers supply a fixed internal alias, never user input.
+        return <<<SQL
                 SELECT pt.id
                 FROM payment_resolution_cases AS prc
                 INNER JOIN payment_submissions AS ps ON ps.id = prc.payment_submission_id
                 INNER JOIN payment_transactions AS pt ON pt.id = prc.received_payment_transaction_id
-                WHERE prc.id = payment_refunds.payment_resolution_case_id
+                WHERE prc.id = {$refundTable}.payment_resolution_case_id
                   AND pt.transaction_type = 'payment'
                   AND pt.status = 'approved'
                   AND pt.payment_submission_id = prc.payment_submission_id
                   AND pt.order_id = ps.order_id
-                  AND pt.amount = payment_refunds.amount
-                  AND pt.currency = payment_refunds.currency
-                  AND prc.amount = payment_refunds.amount
-                  AND prc.currency = payment_refunds.currency
+                  AND pt.amount = {$refundTable}.amount
+                  AND pt.currency = {$refundTable}.currency
+                  AND prc.amount = {$refundTable}.amount
+                  AND prc.currency = {$refundTable}.currency
                   AND NOT EXISTS (
                       SELECT 1
                       FROM payment_transactions AS competing
@@ -83,13 +88,10 @@ return new class extends Migration
                         AND competing.order_id = ps.order_id
                         AND competing.transaction_type = 'payment'
                         AND competing.status = 'approved'
-                        AND competing.amount = payment_refunds.amount
-                        AND competing.currency = payment_refunds.currency
+                        AND competing.amount = {$refundTable}.amount
+                        AND competing.currency = {$refundTable}.currency
                   )
-            )
-            WHERE original_payment_transaction_id IS NULL
-              AND payment_resolution_case_id IS NOT NULL
-        SQL);
+        SQL;
     }
 
     private function rebuildSqlite(bool $generalized): void
@@ -156,31 +158,7 @@ return new class extends Migration
 
             if ($generalized) {
                 array_splice($targetColumns, 2, 0, ['original_payment_transaction_id']);
-                array_splice($selectColumns, 2, 0, [DB::raw(<<<'SQL'
-                    (SELECT pt.id
-                     FROM payment_resolution_cases AS prc
-                     INNER JOIN payment_submissions AS ps ON ps.id = prc.payment_submission_id
-                     INNER JOIN payment_transactions AS pt ON pt.id = prc.received_payment_transaction_id
-                     WHERE prc.id = payment_refunds.payment_resolution_case_id
-                       AND pt.transaction_type = 'payment'
-                       AND pt.status = 'approved'
-                       AND pt.payment_submission_id = prc.payment_submission_id
-                       AND pt.order_id = ps.order_id
-                       AND pt.amount = payment_refunds.amount
-                       AND pt.currency = payment_refunds.currency
-                       AND prc.amount = payment_refunds.amount
-                       AND prc.currency = payment_refunds.currency
-                       AND NOT EXISTS (
-                           SELECT 1 FROM payment_transactions AS competing
-                           WHERE competing.id <> pt.id
-                             AND competing.payment_submission_id = prc.payment_submission_id
-                             AND competing.order_id = ps.order_id
-                             AND competing.transaction_type = 'payment'
-                             AND competing.status = 'approved'
-                             AND competing.amount = payment_refunds.amount
-                             AND competing.currency = payment_refunds.currency
-                       ))
-                SQL)]);
+                array_splice($selectColumns, 2, 0, [DB::raw('('.$this->originalPaymentCandidateSql('payment_refunds').')')]);
             }
 
             DB::table('payment_refunds_b3a0_new')->insertUsing(
@@ -237,6 +215,13 @@ return new class extends Migration
 
         if ($invalidRefunds) {
             throw new RuntimeException('Los datos existentes no permiten restaurar de forma segura el esquema legacy.');
+        }
+
+        $candidate = $this->originalPaymentCandidateSql('refunds');
+        $equality = DB::connection()->getDriverName() === 'mysql' ? '<=>' : 'IS';
+        if (DB::table('payment_refunds as refunds')
+            ->whereRaw("NOT (refunds.original_payment_transaction_id {$equality} ({$candidate}))")->exists()) {
+            throw new RuntimeException('El pago original no puede reconstruirse de forma inequívoca en el esquema legacy.');
         }
 
         if (DB::connection()->getDriverName() === 'sqlite') {
