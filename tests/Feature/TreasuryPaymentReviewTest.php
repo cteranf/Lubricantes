@@ -351,6 +351,106 @@ class TreasuryPaymentReviewTest extends TestCase
         }
     }
 
+    public function test_refund_history_omits_private_text_and_metadata_without_changing_other_reasons(): void
+    {
+        $submission = $this->submission();
+        $sentinel = 'synthetic-private-refund-history';
+        foreach ([PaymentSubmissionHistory::REFUND_MARKED_PENDING, PaymentSubmissionHistory::REFUND_COMPLETED] as $event) {
+            $history = PaymentSubmissionHistory::create([
+                'payment_submission_id' => $submission->id,
+                'event' => $event,
+                'to_status' => $event === PaymentSubmissionHistory::REFUND_COMPLETED ? PaymentSubmission::REFUNDED : PaymentSubmission::REFUND_PENDING,
+                'reason' => $sentinel,
+                'safe_metadata' => ['external_reference' => $sentinel, 'previous_expires_at' => $sentinel, 'new_expires_at' => $sentinel, 'idempotency_key' => $sentinel],
+                'occurred_at' => now(),
+            ]);
+            $data = (new TreasuryPaymentSubmissionHistoryResource($history))->resolve(Request::create('/'));
+            $this->assertArrayNotHasKey('reason', $data);
+            $this->assertArrayNotHasKey('previous_expires_at', $data);
+            $this->assertArrayNotHasKey('new_expires_at', $data);
+            $this->assertFalse(str_contains(json_encode($data, JSON_THROW_ON_ERROR), $sentinel), 'Private history values must remain absent recursively.');
+            $this->assertTrue($history->fresh()->reason === $sentinel, 'Serialization must preserve the persisted private reason.');
+        }
+        $other = PaymentSubmissionHistory::create(['payment_submission_id' => $submission->id, 'event' => 'observed', 'to_status' => PaymentSubmission::OBSERVED, 'reason' => 'Synthetic authorized review', 'occurred_at' => now()]);
+        $data = (new TreasuryPaymentSubmissionHistoryResource($other))->resolve(Request::create('/'));
+        $this->assertTrue(($data['reason'] ?? null) === 'Synthetic authorized review', 'Other Treasury reasons must remain unchanged.');
+        $actor = $this->treasury();
+        foreach (['/api/v1/treasury/payment-submissions/'.$submission->id, '/api/v1/treasury/payment-submissions/'.$submission->id.'/history'] as $url) {
+            $response = $this->actingAs($actor, 'sanctum')->getJson($url)->assertOk();
+            $this->assertFalse(str_contains($response->getContent(), $sentinel), 'Both history endpoints must omit private refund values.');
+        }
+    }
+
+    /** @dataProvider historyPrivacyEvents */
+    public function test_history_details_are_private_by_default(string $event, bool $authorized): void
+    {
+        $submission = $this->submission();
+        $sentinel = 'synthetic-private-history-value';
+        $metadata = ['external_reference' => $sentinel, 'previous_expires_at' => $sentinel, 'new_expires_at' => $sentinel];
+        $history = PaymentSubmissionHistory::create([
+            'payment_submission_id' => $submission->id, 'event' => $event,
+            'to_status' => PaymentSubmission::OBSERVED, 'reason' => $sentinel,
+            'safe_metadata' => $metadata, 'occurred_at' => now(),
+        ]);
+        $data = (new TreasuryPaymentSubmissionHistoryResource($history))->resolve(Request::create('/'));
+        $this->assertTrue(array_key_exists('reason', $data) === $authorized, 'Only authorized canonical events may expose details.');
+        $this->assertTrue(array_key_exists('previous_expires_at', $data) === $authorized, 'Only authorized canonical events may expose expiry metadata.');
+        $this->assertTrue(array_key_exists('new_expires_at', $data) === $authorized, 'Only authorized canonical events may expose expiry metadata.');
+        $this->assertTrue(str_contains(json_encode($data, JSON_THROW_ON_ERROR), $sentinel) === $authorized, 'Private values must remain absent recursively.');
+        $this->assertFalse(array_key_exists('external_reference', $data), 'References must never be serialized.');
+        $persisted = $history->fresh();
+        $this->assertTrue($persisted->reason === $sentinel && $this->canonicalizeHistoryMetadata($persisted->safe_metadata) === $this->canonicalizeHistoryMetadata($metadata) && $persisted->event === $event, 'Serialization must preserve all persisted values.');
+    }
+
+    /** @dataProvider historyMetadataComparisons */
+    public function test_history_metadata_canonicalization_preserves_types_and_list_order(mixed $actual, mixed $expected, bool $equivalent): void
+    {
+        $this->assertTrue(
+            ($this->canonicalizeHistoryMetadata($actual) === $this->canonicalizeHistoryMetadata($expected)) === $equivalent,
+            'Canonical metadata comparison must preserve values, scalar types and list order.'
+        );
+    }
+
+    public static function historyMetadataComparisons(): array
+    {
+        return [
+            'object key order' => [['b' => 2, 'a' => 1], ['a' => 1, 'b' => 2], true],
+            'nested object key order' => [['b' => ['y' => false, 'x' => null], 'a' => [['d' => 4, 'c' => 3]]], ['a' => [['c' => 3, 'd' => 4]], 'b' => ['x' => null, 'y' => false]], true],
+            'different value' => [['a' => 1], ['a' => 2], false],
+            'integer versus string' => [['a' => 1], ['a' => '1'], false],
+            'integer versus float' => [['a' => 1], ['a' => 1.0], false],
+            'boolean versus integer' => [['a' => false], ['a' => 0], false],
+            'null versus boolean' => [null, false, false],
+            'different list order' => [['a' => [1, 2]], ['a' => [2, 1]], false],
+            'same list order' => [[null, false, 1, '1', 1.0], [null, false, 1, '1', 1.0], true],
+        ];
+    }
+
+    private function canonicalizeHistoryMetadata(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+        if (! array_is_list($value)) {
+            ksort($value);
+        }
+
+        return array_map(fn ($item) => $this->canonicalizeHistoryMetadata($item), $value);
+    }
+
+    public static function historyPrivacyEvents(): array
+    {
+        $datasets = [];
+        foreach ([PaymentSubmissionHistory::REFUND_MARKED_PENDING, PaymentSubmissionHistory::REFUND_COMPLETED, 'Refund_Marked_Pending', 'REFUND_COMPLETED', 'refund_unknown', 'unknown_event'] as $event) {
+            $datasets[$event] = [$event, false];
+        }
+        foreach (['submitted', 'observed', 'corrected', 'approved', 'rejected', 'expired', 'canceled', 'resolution_opened', PaymentSubmissionHistory::REASSIGNMENT_APPROVED] as $event) {
+            $datasets[$event] = [$event, true];
+        }
+
+        return $datasets;
+    }
+
     private function treasury(): User
     {
         return User::factory()->create(['role' => 'treasury', 'is_active' => true]);
