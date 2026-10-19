@@ -93,6 +93,8 @@ Route::prefix('v1')->group(function () {
 
         // Treasury review queue: deliberately separate from administrative configuration.
         Route::middleware('is_treasury')->prefix('treasury')->as('treasury.')->group(function () {
+            Route::get('/refund-worklist', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundReadController::class, 'index'])->name('refund-worklist.index');
+            Route::get('/orders/{orderId}/refund-state', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundReadController::class, 'show'])->name('orders.refund-state');
             Route::post('/orders/{orderId}/refunds', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'store'])
                 ->name('orders.refunds.store');
             Route::post('/payment-refunds/{refundId}/complete', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'complete'])

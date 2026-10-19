@@ -59,14 +59,7 @@ class TreasuryPaymentRefundAvailabilityService
             };
             $this->assertSubmissionStructure($state, $submissionStatus);
             // A: financial integrity is independent of cancellation and compensation.
-            $normalEvidence = ['consumedReservations' => 0, 'fulfillmentHistories' => collect()];
-            if ($state['cases']->isNotEmpty()) {
-                $normalEvidence = [
-                    'consumedReservations' => InventoryReservation::query()->where('order_id', $orderId)
-                        ->where('status', InventoryReservation::CONSUMED)->orderBy('id')->get()->count(),
-                    'fulfillmentHistories' => OrderFulfillmentHistory::query()->where('order_id', $orderId)->orderBy('id')->get(),
-                ];
-            }
+            $normalEvidence = $this->readNormalEvidence($state);
             $this->assertRefundFinancialIntegrity($state, $normalEvidence, $submissionStatus);
 
             // B: normal business exclusions never require compensated inventory.
@@ -161,7 +154,54 @@ class TreasuryPaymentRefundAvailabilityService
         return compact('order', 'submissions', 'submission', 'transactions', 'cases', 'refunds', 'histories', 'resolutionHistories', 'delivery', 'handling');
     }
 
-    private function readCompensatedInventory(Order $order): array
+    /** @return array<int, TreasuryPaymentRefundAvailability> */
+    public function forOrders(array $orderIds, ?TreasuryPaymentRefundReadEvidence $evidence = null): array
+    {
+        $evidence ??= new TreasuryPaymentRefundReadEvidence($orderIds, $this->balanceLocks);
+        $reader = new class($this->balanceLocks, $evidence) extends TreasuryPaymentRefundAvailabilityService
+        {
+            public function __construct(InventoryBalanceLockService $locks, private TreasuryPaymentRefundReadEvidence $evidence)
+            {
+                parent::__construct($locks);
+            }
+
+            protected function readFinancialState(int $orderId): ?array
+            {
+                return $this->evidence->state($orderId);
+            }
+
+            protected function readNormalEvidence(array $state): array
+            {
+                return $this->evidence->normalEvidence((int) $state['order']->id);
+            }
+
+            protected function readCompensatedInventory(Order $order): array
+            {
+                return $this->evidence->compensatedInventory($order);
+            }
+        };
+        $results = [];
+        foreach ($orderIds as $id) {
+            $results[(int) $id] = $reader->forOrder((int) $id);
+        }
+
+        return $results;
+    }
+
+    protected function readNormalEvidence(array $state): array
+    {
+        if ($state['cases']->isEmpty()) {
+            return ['consumedReservations' => 0, 'fulfillmentHistories' => collect()];
+        }
+
+        return [
+            'consumedReservations' => InventoryReservation::query()->where('order_id', $state['order']->id)
+                ->where('status', InventoryReservation::CONSUMED)->orderBy('id')->get()->count(),
+            'fulfillmentHistories' => OrderFulfillmentHistory::query()->where('order_id', $state['order']->id)->orderBy('id')->get(),
+        ];
+    }
+
+    protected function readCompensatedInventory(Order $order): array
     {
         // Locate products, then reload evidence in deterministic order without locks.
         $locatedProducts = OrderItem::query()->where('order_id', $order->id)->pluck('product_id');
