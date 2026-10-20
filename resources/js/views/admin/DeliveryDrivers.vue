@@ -55,7 +55,7 @@
               <div class="grid gap-4 sm:grid-cols-2">
                 <label for="driver-license-number">Licencia<input id="driver-license-number" v-model="form.license_number" class="field"><small v-if="fieldError('license_number')" class="field-error">{{ fieldError('license_number') }}</small></label>
                 <label for="driver-license-category">Categoría de licencia<input id="driver-license-category" v-model="form.license_category" class="field"><small v-if="fieldError('license_category')" class="field-error">{{ fieldError('license_category') }}</small></label>
-                <label for="driver-license-expires-at">Vencimiento de licencia<input id="driver-license-expires-at" v-model="form.license_expires_at" type="date" class="field"><small v-if="fieldError('license_expires_at')" class="field-error">{{ fieldError('license_expires_at') }}</small></label>
+                <label for="driver-license-expires-at">Vencimiento de licencia<input id="driver-license-expires-at" v-model="form.license_expires_at" type="date" class="field" :aria-invalid="dateStates.license_expires_at === 'invalid' ? 'true' : undefined" :aria-describedby="dateStates.license_expires_at === 'invalid' ? 'license_expires_at-integrity' : undefined" @input="correctDate('license_expires_at', $event.target.value)"><small v-if="fieldError('license_expires_at')" class="field-error">{{ fieldError('license_expires_at') }}</small></label><div v-if="dateStates.license_expires_at === 'invalid'" class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"><p id="license_expires_at-integrity" role="status">La fecha registrada no se reconoce. Se conservará sin cambios hasta que la corrijas o elijas eliminarla.</p><button type="button" class="secondary mt-2" :disabled="saving" @click="clearRecordedDate('license_expires_at')">Eliminar fecha registrada</button></div>
               </div>
             </section>
             <section class="modal-section">
@@ -78,6 +78,7 @@
 </template>
 
 <script setup>
+import { parseCivilDate, hydrateCivilDates, civilDatePayload } from '@/utils/civilDate.mjs';
 import { computed, onMounted, ref } from 'vue';
 import AdminLayout from '@/layouts/AdminLayout.vue';
 import AdminPageHeader from '@/components/admin/AdminPageHeader.vue';
@@ -107,13 +108,25 @@ const summary = computed(() => meta.value.total ? `Mostrando ${meta.value.from}�
 
 async function load(page = meta.value.current_page || 1) { if (loading.value) return; loading.value = true; error.value = ''; try { const { data } = await api.get('/admin/delivery-drivers', { params: { page, search: search.value || undefined, status: status.value || undefined } }); items.value = data.data || []; meta.value = data; } catch (e) { error.value = msg(e); } finally { loading.value = false; } }
 function clear() { search.value = ''; status.value = ''; load(1); }
-function open(item = null) { formErrors.value = {}; form.value = item ? { ...item } : empty(); modal.value = true; }
+function open(item = null) { formErrors.value = {}; const hydrated = hydrateCivilDates(item || empty(), dateFields); form.value = hydrated.values; dateStates.value = hydrated.states; modal.value = true; }
 function close() { if (!saving.value) { formErrors.value = {}; modal.value = false; } }
-async function save() { saving.value = true; formErrors.value = {}; try { form.value.id ? await api.put(`/admin/delivery-drivers/${form.value.id}`, form.value) : await api.post('/admin/delivery-drivers', form.value); modal.value = false; await load(); } catch (e) { formErrors.value = e.response?.data?.errors || {}; toast.add({ severity: 'error', summary: 'No se pudo guardar', detail: msg(e), life: 5000 }); } finally { saving.value = false; } }
+async function save() { saving.value = true; formErrors.value = {}; try { const payload = civilDatePayload(form.value, dateStates.value); form.value.id ? await api.put(`/admin/delivery-drivers/${form.value.id}`, payload) : await api.post('/admin/delivery-drivers', payload); modal.value = false; await load(); } catch (e) { formErrors.value = e.response?.data?.errors || {}; toast.add({ severity: 'error', summary: 'No se pudo guardar', detail: msg(e), life: 5000 }); } finally { saving.value = false; } }
 async function toggleActive(i) { try { await api.patch(`/admin/delivery-drivers/${i.id}/status`, { is_active: !i.is_active }); load(); } catch (e) { toast.add({ severity: 'warn', summary: 'Operación rechazada', detail: msg(e), life: 4000 }); } }
 async function toggleAvailability(i) { try { await api.patch(`/admin/delivery-drivers/${i.id}/availability`, { is_available: !i.is_available }); load(); } catch (e) { toast.add({ severity: 'warn', summary: 'Operación rechazada', detail: msg(e), life: 4000 }); } }
 
 onMounted(load);
+
+const dateFields = ['license_expires_at'];
+const dateStates = ref({});
+function correctDate(field, value) {
+  form.value[field] = value;
+  const parsed = parseCivilDate(value);
+  if (parsed.state === 'valid' || dateStates.value[field] !== 'invalid') dateStates.value[field] = parsed.state;
+}
+function clearRecordedDate(field) {
+  form.value[field] = '';
+  dateStates.value[field] = 'empty';
+}
 </script>
 
 <style scoped>
