@@ -60,7 +60,7 @@
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Pasarela Activa</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Pasarela seleccionada (requiere guardar)</label>
                             <select v-model="form.card_gateway" class="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-medium">
                                 <option value="mock">Simulador Visa / Mastercard (Entorno de pruebas y desarrollo)</option>
                                 <option value="mercadopago">Mercado Pago (Producción / Sandbox)</option>
@@ -68,10 +68,13 @@
                         </div>
 
                         <!-- Mock notice -->
-                        <div v-if="form.card_gateway === 'mock'" class="rounded-xl bg-amber-50 border border-amber-200 p-4 text-amber-900 text-xs space-y-1">
-                            <strong class="font-bold flex items-center gap-1.5"><i class="pi pi-info-circle text-amber-600"></i> Modo Simulación Visa Activo</strong>
-                            <p>Permite procesar compras de prueba interactivas con tarjetas virtuales simuladas en entornos locales o de test sin credenciales bancarias reales.</p>
+                        <p class="text-xs text-slate-700" role="status">Gateway efectivo confirmado: {{ effectiveGatewayLabel }}</p>
+                        <p v-if="form.card_gateway !== confirmedGateway.configured" class="text-xs text-slate-600">La selección tiene cambios sin guardar; el gateway efectivo no ha cambiado.</p>
+                        <div v-if="mockIsActive" class="rounded-xl bg-amber-50 border border-amber-200 p-4 text-amber-900 text-xs space-y-1">
+                            <strong class="font-bold">Modo Simulación Visa activo</strong>
+                            <p>Simulación disponible exclusivamente en local o testing.</p>
                         </div>
+                        <p v-else-if="confirmedGateway.configured === 'mock' && !confirmedGateway.allowed" class="text-xs text-slate-600">La simulación está configurada, pero no está disponible en este entorno.</p>
 
                         <!-- MercadoPago Fields -->
                         <div v-if="form.card_gateway === 'mercadopago'" class="rounded-xl bg-slate-50 border border-slate-200 p-4.5 space-y-4">
@@ -245,7 +248,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import api from '@/api';
 import AdminLayout from '@/layouts/AdminLayout.vue';
@@ -255,6 +258,17 @@ const toast = useToast();
 const loading = ref(true);
 const saving = ref(false);
 const loadError = ref('');
+let loadGeneration = 0;
+let saveGeneration = 0;
+let disposed = false;
+onBeforeUnmount(() => { disposed = true; loadGeneration++; saveGeneration++; });
+
+const confirmedGateway = ref({ configured: null, active: null, allowed: false });
+const mockIsActive = computed(() => confirmedGateway.value.configured === 'mock' && confirmedGateway.value.allowed === true && confirmedGateway.value.active === 'mock');
+const effectiveGatewayLabel = computed(() => ({ mock: 'Simulador Visa', mercadopago: 'Mercado Pago' })[confirmedGateway.value.active] || 'Sin confirmar');
+function confirmGateway(settings) {
+    confirmedGateway.value = { configured: settings.card_gateway, active: settings.active_gateway, allowed: settings.mock_environment_allowed === true };
+}
 
 const form = ref({
     card_enabled: true,
@@ -289,13 +303,18 @@ const form = ref({
 });
 
 async function loadSettings() {
+    const loadId = ++loadGeneration;
+    if (disposed || saving.value) return;
     loading.value = true;
     loadError.value = '';
     try {
         const response = await api.get('/admin/payment-settings');
+        if (disposed || loadId !== loadGeneration) return;
         Object.assign(form.value, response.data);
+        confirmGateway(response.data);
         form.value.mercadopago_access_token = '';
     } catch (e) {
+        if (disposed || loadId !== loadGeneration || e.code === 'ERR_CANCELED') return;
         loadError.value = e.response?.data?.message || 'No se pudo cargar la configuración de pagos.';
         toast.add({
             severity: 'error',
@@ -304,15 +323,22 @@ async function loadSettings() {
             life: 4000,
         });
     } finally {
-        loading.value = false;
+        if (!disposed && loadId === loadGeneration) loading.value = false;
     }
 }
 
 async function saveSettings() {
+    if (disposed) return;
+    const saveId = ++saveGeneration;
+    ++loadGeneration;
+    loading.value = false;
     saving.value = true;
     try {
-        const response = await api.put('/admin/payment-settings', form.value);
+        const response = await api.put('/admin/payment-settings', { ...form.value });
+        if (disposed || saveId !== saveGeneration) return;
+        ++loadGeneration;
         Object.assign(form.value, response.data.settings);
+        confirmGateway(response.data.settings);
         form.value.mercadopago_access_token = '';
         toast.add({
             severity: 'success',
@@ -321,6 +347,7 @@ async function saveSettings() {
             life: 3500,
         });
     } catch (e) {
+        if (disposed || saveId !== saveGeneration || e.code === 'ERR_CANCELED') return;
         toast.add({
             severity: 'error',
             summary: 'No se pudo guardar',
@@ -328,7 +355,7 @@ async function saveSettings() {
             life: 5000,
         });
     } finally {
-        saving.value = false;
+        if (!disposed && saveId === saveGeneration) saving.value = false;
     }
 }
 

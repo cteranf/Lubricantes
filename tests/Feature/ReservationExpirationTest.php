@@ -240,13 +240,13 @@ class ReservationExpirationTest extends TestCase
 
         $id = $this->postJson('/api/v1/orders', $payload)->assertCreated()->json('id');
         $order = Order::findOrFail($id);
-        $order->update(['payment_id' => 'MOCK-EXP-SIM']);
+        $preference = app(\App\Services\PaymentPreferenceService::class)->createFor($order, ['order_id' => $order->id], 'mock');
         Order::whereKey($id)->update(['reserved_until' => now()->subMinutes(2)]);
         InventoryReservation::where('order_id', $id)->update(['expires_at' => now()->subMinutes(2)]);
         $order->refresh();
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
-            'paymentId' => 'MOCK-EXP-SIM',
+            'paymentId' => $preference->provider_preference_id,
             'order_id' => $id,
         ]);
 
@@ -295,8 +295,8 @@ class ReservationExpirationTest extends TestCase
 
         $id = $this->postJson('/api/v1/orders', $payload)->assertCreated()->json('id');
         $order = Order::findOrFail($id);
-        $paymentId = 'MOCK-REJECT-'.$id;
-        $order->update(['payment_id' => $paymentId]);
+        $preference = app(\App\Services\PaymentPreferenceService::class)->createFor($order, ['order_id' => $order->id], 'mock');
+        $paymentId = $preference->provider_preference_id;
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
             'paymentId' => $paymentId,

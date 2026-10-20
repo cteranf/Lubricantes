@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
+use App\Models\PaymentPreference;
 use App\Models\PaymentSetting;
 use App\Models\PaymentTransaction;
 use App\Models\Product;
@@ -11,6 +12,7 @@ use App\Services\InventoryService;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
 use App\Services\PaymentSettingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -20,6 +22,336 @@ use Tests\TestCase;
 class PaymentConfigurationAndSimulationTest extends TestCase
 {
     use CreatesShippingCoverage, RefreshDatabase;
+
+    public function test_mock_worker_get_preserves_the_exact_signed_query(): void
+    {
+        $url = URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), ['paymentId' => 'SYNTHETIC-SIGNATURE', 'order_id' => 1]);
+        $internalRole = 'second';
+        $internalAction = 'get';
+        $request = \Illuminate\Http\Request::create($url, 'GET');
+        $this->assertTrue(URL::hasValidSignature($request), 'An intact signed GET must remain valid.');
+        $this->assertTrue($internalRole === 'second' && $internalAction === 'get' && URL::hasValidSignature($request), 'Internal worker arguments must not alter the signed request.');
+        foreach (['action' => 'approve', 'scenario' => 'approved'] as $key => $value) {
+            $modified = \Illuminate\Http\Request::create($url, 'GET', [$key => $value]);
+            $this->assertFalse(URL::hasValidSignature($modified), 'Adding unsigned GET parameters must invalidate the signature.');
+        }
+    }
+
+    public function test_atomic_mock_get_preserves_approval_committed_before_lock(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $id = $order->currentPaymentPreference->provider_preference_id;
+        $this->post(URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), ['paymentId' => $id, 'order_id' => $order->id]), ['action' => 'approve'])->assertRedirect();
+        $this->travel(31)->minutes();
+        try {
+            $before = $this->mockFinancialSnapshot($order);
+            $this->get(URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), ['paymentId' => $id, 'order_id' => $order->id]))->assertRedirect();
+            $this->assertTrue($before === $this->mockFinancialSnapshot($order), 'Paid mock checkout must not change financial or inventory evidence.');
+            $this->assertSame('approved', $order->refresh()->payment_status);
+            $this->assertNotSame('canceled', $order->status);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
+    public function test_atomic_mock_get_expires_once_and_rolls_back_after_each_write(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $order->update(['reserved_until' => now()->subMinute()]);
+        $order->reservations()->update(['expires_at' => now()->subMinute()]);
+        $id = $order->currentPaymentPreference->provider_preference_id;
+        $service = app(\App\Services\MockPaymentCheckoutService::class);
+        $before = $this->mockFinancialSnapshot($order);
+        $active = false;
+        $failAt = null;
+        $writes = 0;
+        DB::listen(function ($query) use (&$active, &$failAt, &$writes) {
+            if ($active && preg_match('/^\s*(insert|update|delete)\b/i', $query->sql)) {
+                $writes++;
+                if ($writes === $failAt) {
+                    throw new \RuntimeException('synthetic-write-failure');
+                }
+            }
+        });
+        // Discover the real write boundary count within a transaction rolled back by the test.
+        DB::beginTransaction();
+        try {
+            $active = true;
+            $service->inspect($id, $order->id);
+        } finally {
+            $active = false;
+            DB::rollBack();
+        }
+        $writeCount = $writes;
+        $this->assertGreaterThanOrEqual(4, $writeCount);
+        for ($failAt = 1; $failAt <= $writeCount; $failAt++) {
+            $writes = 0;
+            $thrown = false;
+            try {
+                $active = true;
+                $service->inspect($id, $order->id);
+            } catch (\RuntimeException $exception) {
+                $thrown = $exception->getMessage() === 'synthetic-write-failure';
+            } finally {
+                $active = false;
+            }
+            $this->assertTrue($thrown, 'Each expiration write boundary must propagate the injected failure.');
+            $this->assertTrue($before === $this->mockFinancialSnapshot($order), 'Failed expiration must roll back all evidence.');
+        }
+        $expired = $service->inspect($id, $order->id);
+        $this->assertSame('canceled', $expired->status);
+        $this->assertNull($expired->paid_at);
+        $this->assertSame('expired', $order->reservations()->sole()->status);
+        $after = $this->mockFinancialSnapshot($order);
+        $service->inspect($id, $order->id);
+        $this->assertTrue($after === $this->mockFinancialSnapshot($order), 'Repeated GET expiration must be idempotent.');
+    }
+
+    public function test_atomic_mock_get_skipped_expiration_does_not_cancel(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $order->update(['reserved_until' => now()->subMinute()]);
+        $expiration = \Mockery::mock(\App\Services\InventoryReservationExpirationService::class);
+        $expiration->shouldReceive('expireOrder')->once()->with($order->id)->andReturn(['processed' => false, 'reason' => 'paid_order_excluded']);
+        $service = new \App\Services\MockPaymentCheckoutService(app(\App\Services\MockPaymentPreferenceResolver::class), $expiration);
+        $before = $this->mockFinancialSnapshot($order);
+        $service->inspect($order->currentPaymentPreference->provider_preference_id, $order->id);
+        $this->assertTrue($before === $this->mockFinancialSnapshot($order), 'Skipped expiration must not cause a follow-up write.');
+    }
+
+    /** @dataProvider mockCurrencyRoutes */
+    public function test_mock_currency_uses_configuration_and_order_authority(string $route): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $original = config('payment.currency');
+        try {
+            config(['payment.currency' => 'USD']);
+            $url = URL::temporarySignedRoute($route, now()->addMinutes(30), ['paymentId' => $order->currentPaymentPreference->provider_preference_id, 'order_id' => $order->id]);
+            $this->post($url, ['action' => 'approve', 'currency' => 'EUR', 'amount' => 1])->assertRedirect();
+            $transaction = PaymentTransaction::where('order_id', $order->id)->sole();
+            $this->assertSame('USD', $transaction->currency);
+            $this->assertTrue($transaction->amount === $order->total, 'The order supplies the mock amount; no preference financial snapshot exists.');
+            $before = $this->mockFinancialSnapshot($order);
+            $this->post($url, ['action' => 'approve'])->assertRedirect();
+            $this->assertTrue($before === $this->mockFinancialSnapshot($order), 'Currency retry must preserve the original payment.');
+            $other = $this->orderFor($this->customer(), $this->product());
+            $real = DB::transaction(fn () => app(\App\Services\OrderPaymentService::class)->recordCardAttempt($other, 'SYNTHETIC-REAL-CONTRACT', PaymentTransaction::APPROVED));
+            $this->assertSame('PEN', $real->currency, 'Existing non-mock callers retain their currency contract without a provider call.');
+        } finally {
+            config(['payment.currency' => $original]);
+        }
+    }
+
+    public static function mockCurrencyRoutes(): array
+    {
+        return [['mock.payment.process'], ['mock.payment.approve']];
+    }
+
+    public function test_mock_currency_invalid_configuration_fails_before_writes(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $original = config('payment.currency');
+        try {
+            foreach ([null, '', 'usd', 'US', 'USD-extra'] as $invalid) {
+                config(['payment.currency' => $invalid]);
+                $before = $this->mockFinancialSnapshot($order);
+                $thrown = false;
+                try {
+                    app(\App\Services\OrderPaymentService::class)->recordMockCardAttempt($order, 'SYNTHETIC-CONFIG', PaymentTransaction::APPROVED);
+                } catch (\InvalidArgumentException) {
+                    $thrown = true;
+                }
+                $this->assertTrue($thrown && $before === $this->mockFinancialSnapshot($order), 'Invalid mock currency must fail without financial writes.');
+            }
+        } finally {
+            config(['payment.currency' => $original]);
+        }
+    }
+
+    private function mockFinancialSnapshot(Order $order): string
+    {
+        $snapshot = [];
+        foreach (['orders', 'payment_preferences', 'payment_transactions', 'inventory_reservations', 'warehouse_inventories', 'inventory_movements', 'order_fulfillment_histories', 'products'] as $table) {
+            $snapshot[$table] = DB::table($table)->orderBy('id')->get()->toArray();
+        }
+
+        return json_encode($snapshot, JSON_THROW_ON_ERROR);
+    }
+
+    /** The mock uses Order.total and payment.currency, not a preference financial snapshot. */
+    public function test_current_mock_preference_renders_order_authority_without_legacy_payment_id(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $preference = $order->currentPaymentPreference;
+        $this->assertTrue($preference->gateway === 'mock' && $preference->state === PaymentPreference::ACTIVE);
+        $this->assertSame($order->id, $preference->order_id);
+        $this->assertNull($order->payment_id);
+        $url = URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), ['paymentId' => $preference->provider_preference_id, 'order_id' => $order->id]);
+        $response = $this->get($url)->assertOk()->assertViewIs('mock-payment');
+        $this->assertTrue($response->viewData('order')->is($order));
+        $this->assertSame(config('payment.currency'), $response->viewData('currency'));
+        $this->assertTrue(str_contains($response->getContent(), 'Pagar '.config('payment.currency').' '.number_format($order->total, 2)), 'Mock rendering must use order and configuration authority.');
+        $this->assertNull($order->refresh()->payment_id);
+    }
+
+    /** @dataProvider invalidMockLinks */
+    public function test_current_mock_resolution_rejects_incoherent_links_without_writes(string $route, string $anomaly): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $preference = $order->currentPaymentPreference;
+        $paymentId = $preference->provider_preference_id;
+        $signedOrder = $order->id;
+        switch ($anomaly) {
+            case 'crossed-order':
+                $other = $this->orderFor($this->customer(), $this->product());
+                $signedOrder = $other->id;
+                break;
+            case 'crossed-preference':
+                $other = $this->orderFor($this->customer(), $this->product());
+                $order->update(['current_payment_preference_id' => $other->current_payment_preference_id]);
+                break;
+            case 'historical':
+                $preference->update(['state' => PaymentPreference::SUPERSEDED]);
+                app(\App\Services\PaymentPreferenceService::class)->createFor($order, ['order_id' => $order->id], 'mock');
+                break;
+            case 'missing-current': $order->update(['current_payment_preference_id' => null]);
+                break;
+            case 'gateway': $preference->update(['gateway' => 'mercadopago']);
+                break;
+            case 'missing-preference': $paymentId = 'SYNTHETIC-MISSING';
+                break;
+            case 'missing-order': $signedOrder = 999999;
+                break;
+            case 'failed': $preference->update(['state' => PaymentPreference::FAILED]);
+                break;
+            case 'orphaned': $preference->update(['state' => PaymentPreference::ORPHANED]);
+                break;
+            case 'creating': $preference->update(['state' => PaymentPreference::CREATING]);
+                break;
+            case 'substituted': $preference->update(['state' => PaymentPreference::SUPERSEDED]);
+                break;
+            case 'wrong-method': $order->update(['payment_method' => 'transferencia']);
+                break;
+            case 'refund-state': $order->update(['payment_status' => 'refund_pending']);
+                break;
+        }
+        // A crossed or stale link must fail before the GET expiration side effect too.
+        $order->update(['reserved_until' => now()->subMinute()]);
+        $writes = 0;
+        DB::listen(function ($query) use (&$writes) {
+            if (preg_match('/^\s*(insert|update|delete|replace|alter|drop|create)\b/i', $query->sql)) {
+                $writes++;
+            }
+        });
+        $url = URL::temporarySignedRoute($route, now()->addMinutes(30), ['paymentId' => $paymentId, 'order_id' => $signedOrder]);
+        $response = $route === 'mock.payment' ? $this->get($url) : $this->post($url, ['action' => 'approve']);
+        $this->assertSame(404, $response->getStatusCode(), 'Incoherent mock identities must fail privately.');
+        $this->assertSame(0, $writes, 'Rejected mock identities must not write.');
+    }
+
+    public static function invalidMockLinks(): array
+    {
+        $cases = [];
+        foreach (['mock.payment', 'mock.payment.process', 'mock.payment.approve'] as $route) {
+            foreach (['crossed-order', 'crossed-preference', 'historical', 'missing-current', 'gateway', 'missing-preference', 'missing-order', 'failed', 'orphaned', 'creating', 'substituted', 'wrong-method', 'refund-state'] as $anomaly) {
+                $cases[$route.' '.$anomaly] = [$route, $anomaly];
+            }
+        }
+
+        return $cases;
+    }
+
+    /** @dataProvider mockRouteGuards */
+    public function test_current_mock_route_environment_and_signature_guards(string $route, string $environment, bool $enabled, string $signature, int $expected): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $url = URL::temporarySignedRoute($route, $signature === 'expired' ? now()->subMinute() : now()->addMinutes(30), ['paymentId' => $order->currentPaymentPreference->provider_preference_id, 'order_id' => $order->id]);
+        if ($signature === 'invalid') {
+            $url = preg_replace('/signature=[^&]+/', 'signature=invalid', $url);
+        }
+        $this->withMockEnvironment($environment, $enabled, function () use ($route, $url, $expected) {
+            $token = Str::random(40);
+            $this->withSession(['_token' => $token]);
+            $response = $route === 'mock.payment' ? $this->get($url) : $this->post($url, ['_token' => $token, 'action' => 'reject', 'scenario' => 'declined']);
+            $this->assertSame($expected, $response->getStatusCode(), 'Mock environment and signature guards must remain effective.');
+        });
+    }
+
+    public static function mockRouteGuards(): array
+    {
+        $cases = [];
+        foreach (['mock.payment', 'mock.payment.process', 'mock.payment.approve'] as $route) {
+            foreach ([['local', false, 'valid', 404], ['testing', false, 'valid', 404], ['production', true, 'valid', 404], ['local', true, 'valid', $route === 'mock.payment' ? 200 : 302], ['testing', true, 'valid', $route === 'mock.payment' ? 200 : 302], ['local', true, 'invalid', 403], ['local', true, 'expired', 403], ['testing', true, 'invalid', 403], ['testing', true, 'expired', 403]] as $case) {
+                $cases[$route.' '.implode('-', array_map(fn ($value) => (string) $value, $case))] = [$route, ...$case];
+            }
+        }
+
+        return $cases;
+    }
+
+    /** @dataProvider invalidMockCsrf */
+    public function test_mock_posts_require_csrf_before_mock_or_signature_guards(string $route, bool $missing): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $url = URL::temporarySignedRoute($route, now()->addMinutes(30), ['paymentId' => $order->currentPaymentPreference->provider_preference_id, 'order_id' => $order->id]);
+        $this->withMockEnvironment('local', true, function () use ($url, $missing) {
+            $this->withSession(['_token' => Str::random(40)]);
+            $payload = ['action' => 'approve'];
+            if (! $missing) {
+                $payload['_token'] = 'synthetic-mismatched-csrf';
+            }
+            $response = $this->post($url, $payload);
+            $this->assertSame(419, $response->getStatusCode(), 'Mock POST routes must retain CSRF protection.');
+        });
+    }
+
+    public static function invalidMockCsrf(): array
+    {
+        return [
+            'process missing' => ['mock.payment.process', true],
+            'process mismatched' => ['mock.payment.process', false],
+            'approve missing' => ['mock.payment.approve', true],
+            'approve mismatched' => ['mock.payment.approve', false],
+        ];
+    }
+
+    private function withMockEnvironment(string $environment, bool $enabled, callable $callback): void
+    {
+        $originalEnvironment = $this->app->environment();
+        $originalEnabled = config('payment.mock.enabled');
+        $session = $this->app['session']->driver();
+        $originalSession = $session->all();
+        try {
+            $this->app->detectEnvironment(fn () => $environment);
+            config(['payment.mock.enabled' => $enabled]);
+            $callback();
+        } finally {
+            $session->flush();
+            $session->put($originalSession);
+            config(['payment.mock.enabled' => $originalEnabled]);
+            $this->app->detectEnvironment(fn () => $originalEnvironment);
+        }
+    }
+
+    public function test_current_mock_approve_is_idempotent_without_legacy_payment_id(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $url = URL::temporarySignedRoute('mock.payment.approve', now()->addMinutes(30), ['paymentId' => $order->currentPaymentPreference->provider_preference_id, 'order_id' => $order->id]);
+        $this->post($url)->assertRedirect('/orders/success/'.$order->id);
+        $before = $order->refresh()->getAttributes();
+        $transactions = PaymentTransaction::where('order_id', $order->id)->count();
+        $movements = DB::table('inventory_movements')->count();
+        $history = $order->fulfillmentHistory()->count();
+        $this->post($url)->assertRedirect('/orders/success/'.$order->id);
+        $this->assertTrue($before === $order->refresh()->getAttributes(), 'Replay must preserve the paid order.');
+        $this->assertSame(1, $transactions);
+        $this->assertSame($transactions, PaymentTransaction::where('order_id', $order->id)->count());
+        $this->assertSame($movements, DB::table('inventory_movements')->count());
+        $this->assertSame($history, $order->fulfillmentHistory()->count());
+        $this->assertSame('approved', $order->payment_status);
+        $this->assertNull($order->payment_id);
+        $this->assertTrue(PaymentTransaction::where('order_id', $order->id)->first()->amount === $order->total);
+    }
 
     protected function setUp(): void
     {
@@ -53,14 +385,12 @@ class PaymentConfigurationAndSimulationTest extends TestCase
 
     public function test_mock_gateway_is_blocked_in_production_environment(): void
     {
-        $this->app->detectEnvironment(fn () => 'production');
-        config()->set('payment.mock.enabled', true);
-
-        $service = app(PaymentSettingService::class);
-        $this->assertFalse($service->isMockActive());
-
-        $this->expectException(\RuntimeException::class);
-        PaymentGatewayFactory::create('mock');
+        $this->withMockEnvironment('production', true, function () {
+            $service = app(PaymentSettingService::class);
+            $this->assertFalse($service->isMockActive());
+            $this->expectException(\RuntimeException::class);
+            PaymentGatewayFactory::create('mock');
+        });
     }
 
     public function test_secret_access_token_is_never_exposed_and_empty_update_preserves_existing(): void
@@ -127,10 +457,10 @@ class PaymentConfigurationAndSimulationTest extends TestCase
     {
         $customer = $this->customer();
         $product = $this->product(['stock' => 5]);
-        $order = $this->orderFor($customer, $product, ['payment_method' => 'card', 'payment_id' => 'MOCK-OP-100']);
+        $order = $this->orderFor($customer, $product, ['payment_method' => 'card']);
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
-            'paymentId' => 'MOCK-OP-100',
+            'paymentId' => $order->currentPaymentPreference->provider_preference_id,
             'order_id' => $order->id,
         ]);
 
@@ -138,7 +468,7 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         $this->post($url, [
             'scenario' => 'insufficient_funds',
             'action' => 'reject',
-        ])->assertRedirect('/orders/payment-return?payment_id=MOCK-OP-100&external_reference='.$order->id.'&result=rejected');
+        ])->assertRedirect('/orders/payment-return?payment_id='.$order->currentPaymentPreference->provider_preference_id.'&external_reference='.$order->id.'&result=rejected');
 
         $order->refresh();
         $this->assertSame('pending', $order->status);
@@ -165,13 +495,12 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         $product = $this->product(['stock' => 5]);
         $order = $this->orderFor($customer, $product, [
             'payment_method' => 'card',
-            'payment_id' => 'MOCK-OP-200',
             'payment_status' => 'rejected',
             'status' => 'pending',
         ]);
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
-            'paymentId' => 'MOCK-OP-200',
+            'paymentId' => $order->currentPaymentPreference->provider_preference_id,
             'order_id' => $order->id,
         ]);
 
@@ -179,7 +508,7 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         $this->post($url, [
             'scenario' => 'approved',
             'action' => 'approve',
-        ])->assertRedirect('/orders/payment-return?payment_id=MOCK-OP-200&external_reference='.$order->id.'&result=approved');
+        ])->assertRedirect('/orders/payment-return?payment_id='.$order->currentPaymentPreference->provider_preference_id.'&external_reference='.$order->id.'&result=approved');
 
         $order->refresh();
         $this->assertSame('confirmed', $order->status);
@@ -211,10 +540,10 @@ class PaymentConfigurationAndSimulationTest extends TestCase
     {
         $customer = $this->customer();
         $product = $this->product(['stock' => 5]);
-        $order = $this->orderFor($customer, $product, ['payment_method' => 'card', 'payment_id' => 'MOCK-OP-300']);
+        $order = $this->orderFor($customer, $product, ['payment_method' => 'card']);
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
-            'paymentId' => 'MOCK-OP-300',
+            'paymentId' => $order->currentPaymentPreference->provider_preference_id,
             'order_id' => $order->id,
         ]);
 
@@ -235,11 +564,11 @@ class PaymentConfigurationAndSimulationTest extends TestCase
     {
         $customer = $this->customer();
         $product = $this->product();
-        $order = $this->orderFor($customer, $product, ['payment_method' => 'card', 'payment_id' => 'MOCK-EXP']);
+        $order = $this->orderFor($customer, $product, ['payment_method' => 'card']);
 
         // Expired 5 minutes ago
         $expiredUrl = URL::temporarySignedRoute('mock.payment.process', now()->subMinutes(5), [
-            'paymentId' => 'MOCK-EXP',
+            'paymentId' => $order->currentPaymentPreference->provider_preference_id,
             'order_id' => $order->id,
         ]);
 
@@ -294,10 +623,10 @@ class PaymentConfigurationAndSimulationTest extends TestCase
     {
         $customer = $this->customer();
         $product = $this->product();
-        $order = $this->orderFor($customer, $product, ['payment_method' => 'card', 'payment_id' => 'MOCK-CARD-DATA']);
+        $order = $this->orderFor($customer, $product, ['payment_method' => 'card']);
 
         $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), [
-            'paymentId' => 'MOCK-CARD-DATA',
+            'paymentId' => $order->currentPaymentPreference->provider_preference_id,
             'order_id' => $order->id,
         ]);
 
@@ -382,6 +711,8 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         $item->setRelation('product', $product);
         $item->setRelation('warehouse', app(InventoryService::class)->defaultWarehouse());
         app(InventoryService::class)->reserveForOrder($item, $order->reserved_until);
+
+        app(\App\Services\PaymentPreferenceService::class)->createFor($order, ['order_id' => $order->id], 'mock');
 
         return $order->refresh();
     }

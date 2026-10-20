@@ -154,7 +154,7 @@
                     <div class="space-y-3 pt-2">
                         <button type="button" onclick="submitPayment('approve', 'approved')" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-150 flex items-center justify-center gap-3 shadow-lg shadow-blue-900/40 text-base">
                             <i class="fa-solid fa-lock text-sm"></i>
-                            <span>Pagar S/ {{ number_format($order->total, 2) }}</span>
+                            <span>Pagar {{ $currency }} {{ number_format($order->total, 2) }}</span>
                         </button>
                         
                         <div class="grid grid-cols-2 gap-3">
@@ -189,9 +189,9 @@
                         <div class="flex justify-between items-center gap-3">
                             <div class="truncate">
                                 <span class="font-medium text-slate-200 block truncate">{{ $item->product->name ?? 'Producto' }}</span>
-                                <span class="text-xs text-slate-400">Cant: {{ $item->quantity }} × S/ {{ number_format($item->price, 2) }}</span>
+                                <span class="text-xs text-slate-400">Cant: {{ $item->quantity }} × {{ $currency }} {{ number_format($item->price, 2) }}</span>
                             </div>
-                            <span class="font-mono font-semibold text-slate-200 shrink-0">S/ {{ number_format($item->subtotal, 2) }}</span>
+                            <span class="font-mono font-semibold text-slate-200 shrink-0">{{ $currency }} {{ number_format($item->subtotal, 2) }}</span>
                         </div>
                     @endforeach
                 </div>
@@ -200,15 +200,15 @@
                 <div class="border-t border-slate-700/80 pt-4 space-y-2 text-sm">
                     <div class="flex justify-between text-slate-400">
                         <span>Subtotal de productos</span>
-                        <span class="font-mono text-slate-200">S/ {{ number_format($order->subtotal ?? $order->total, 2) }}</span>
+                        <span class="font-mono text-slate-200">{{ $currency }} {{ number_format($order->subtotal ?? $order->total, 2) }}</span>
                     </div>
                     <div class="flex justify-between text-slate-400">
                         <span>Costo de entrega ({{ $order->delivery_type === 'pickup' ? 'Recojo' : 'Domicilio' }})</span>
-                        <span class="font-mono text-slate-200">S/ {{ number_format($order->shipping_amount ?? 0, 2) }}</span>
+                        <span class="font-mono text-slate-200">{{ $currency }} {{ number_format($order->shipping_amount ?? 0, 2) }}</span>
                     </div>
                     <div class="flex justify-between text-base font-bold text-white pt-2 border-t border-slate-700/60">
                         <span>Total a pagar</span>
-                        <span class="font-mono text-emerald-400 text-lg">S/ {{ number_format($order->total, 2) }}</span>
+                        <span class="font-mono text-emerald-400 text-lg">{{ $currency }} {{ number_format($order->total, 2) }}</span>
                     </div>
                 </div>
 

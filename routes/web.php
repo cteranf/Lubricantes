@@ -5,6 +5,8 @@ use App\Models\OrderFulfillmentHistory;
 use App\Models\PaymentTransaction;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
+use App\Services\MockPaymentCheckoutService;
+use App\Services\MockPaymentPreferenceResolver;
 use App\Services\OrderPaymentService;
 use App\Services\OrderStateService;
 use Illuminate\Http\Request;
@@ -21,17 +23,13 @@ use Illuminate\Support\Facades\URL;
 // Mock Payment Gateway Routes (for testing in local/testing environments)
 Route::get('/mock-payment/{paymentId}', function ($paymentId, Request $request) {
     $orderId = $request->query('order_id');
-    $order = Order::with(['items.product', 'user'])
-        ->whereKey($orderId)
-        ->where('payment_id', $paymentId)
-        ->firstOrFail();
+    $order = app(MockPaymentCheckoutService::class)->inspect($paymentId, $orderId);
+    $order->load(['items.product', 'user']);
 
+    if ($order->payment_status === 'approved' && $order->paid_at) {
+        return redirect('/orders/payment-return?payment_id='.$paymentId.'&external_reference='.$order->id.'&result=approved');
+    }
     if ($order->status === 'canceled' || $order->status === 'rejected' || ($order->reserved_until && $order->reserved_until->isPast())) {
-        if ($order->status === 'pending' && $order->reserved_until && $order->reserved_until->isPast()) {
-            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
-            $order->update(['status' => 'canceled', 'tracking_status' => 'canceled']);
-        }
-
         return redirect('/orders/payment-return?payment_id='.$paymentId.'&external_reference='.$order->id.'&result=canceled');
     }
 
@@ -49,19 +47,18 @@ Route::get('/mock-payment/{paymentId}', function ($paymentId, Request $request) 
         'orderId' => $order->id,
         'processUrl' => $processUrl,
         'cancelUrl' => $cancelUrl,
+        // Mock preferences have no independent amount/currency snapshot.
+        'currency' => config('payment.currency'),
     ]);
 })->middleware(['payment.mock', 'signed'])->name('mock.payment');
 
 Route::post('/mock-payment/{paymentId}/process', function ($paymentId, Request $request) {
-    $orderId = $request->query('order_id') ?: $request->input('order_id');
+    $orderId = $request->query('order_id');
     $action = $request->input('action', 'approve');
     $scenario = $request->input('scenario', 'approved');
 
     return DB::transaction(function () use ($paymentId, $orderId, $action, $scenario) {
-        $order = Order::whereKey($orderId)
-            ->where('payment_id', $paymentId)
-            ->lockForUpdate()
-            ->firstOrFail();
+        $order = app(MockPaymentPreferenceResolver::class)->resolve($paymentId, $orderId, true);
 
         // Check if already approved (idempotency)
         if ($order->payment_status === 'approved' && $order->paid_at) {
@@ -80,7 +77,7 @@ Route::post('/mock-payment/{paymentId}/process', function ($paymentId, Request $
         }
 
         if ($action === 'approve' || $scenario === 'approved') {
-            app(OrderPaymentService::class)->recordCardAttempt(
+            app(OrderPaymentService::class)->recordMockCardAttempt(
                 $order,
                 $paymentId,
                 PaymentTransaction::APPROVED,
@@ -127,7 +124,7 @@ Route::post('/mock-payment/{paymentId}/process', function ($paymentId, Request $
             default => 'Pago rechazado en la simulación',
         };
 
-        app(OrderPaymentService::class)->recordCardAttempt(
+        app(OrderPaymentService::class)->recordMockCardAttempt(
             $order,
             $paymentId,
             PaymentTransaction::FAILED,
@@ -144,10 +141,17 @@ Route::post('/mock-payment/{paymentId}/process', function ($paymentId, Request $
 // Backward compatible approve route
 Route::post('/mock-payment/{paymentId}/approve', function ($paymentId, Request $request) {
     $request->merge(['action' => 'approve', 'scenario' => 'approved']);
-    $orderId = $request->query('order_id') ?: $request->input('order_id');
+    $orderId = $request->query('order_id');
 
     return DB::transaction(function () use ($paymentId, $orderId) {
-        $order = Order::whereKey($orderId)->where('payment_id', $paymentId)->lockForUpdate()->firstOrFail();
+        $order = app(MockPaymentPreferenceResolver::class)->resolve($paymentId, $orderId, true);
+
+        if ($order->payment_status === 'approved' && $order->paid_at) {
+            return redirect('/orders/success/'.$orderId);
+        }
+        if (in_array($order->status, ['canceled', 'rejected'], true)) {
+            return redirect('/orders/payment-return?payment_id='.$paymentId.'&external_reference='.$order->id.'&result=canceled');
+        }
 
         if ($order->reserved_until && $order->reserved_until->isPast()) {
             if ($order->status === 'pending' && $order->reservations()->where('status', \App\Models\InventoryReservation::ACTIVE)->exists()) {
@@ -158,7 +162,7 @@ Route::post('/mock-payment/{paymentId}/approve', function ($paymentId, Request $
             return redirect('/orders/payment-return?payment_id='.$paymentId.'&external_reference='.$order->id.'&result=rejected');
         }
 
-        app(OrderPaymentService::class)->recordCardAttempt($order, $paymentId, PaymentTransaction::APPROVED, ['gateway' => 'mock']);
+        app(OrderPaymentService::class)->recordMockCardAttempt($order, $paymentId, PaymentTransaction::APPROVED, ['gateway' => 'mock']);
         app(OrderStateService::class)->applyPaymentStatus($order, [
             'id' => $paymentId,
             'status' => 'approved',

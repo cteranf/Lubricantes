@@ -75,13 +75,27 @@ class OrderPaymentService
         });
     }
 
+    public function recordMockCardAttempt(Order $order, string $paymentId, string $status, array $gatewayData = [], ?string $failureReason = null): PaymentTransaction
+    {
+        $currency = config('payment.currency');
+        if (! is_string($currency) || preg_match('/\A[A-Z]{3}\z/', $currency) !== 1) {
+            throw new \InvalidArgumentException('La moneda configurada no es válida.');
+        }
+
+        return $this->recordCardAttempt($order, $paymentId, $status, $gatewayData, $failureReason, $currency);
+    }
+
     public function recordCardAttempt(
         Order $order,
         string $paymentId,
         string $status,
         array $gatewayData = [],
-        ?string $failureReason = null
+        ?string $failureReason = null,
+        ?string $currency = null
     ): PaymentTransaction {
+        if ($currency !== null && (! is_string($currency) || preg_match('/\A[A-Z]{3}\z/', $currency) !== 1)) {
+            throw new \InvalidArgumentException('La moneda configurada no es válida.');
+        }
         $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
         $isApproved = $status === PaymentTransaction::APPROVED;
         $scope = $isApproved ? PaymentTransaction::approvedScopeKeyForOrder($order->id) : null;
@@ -114,7 +128,7 @@ class OrderPaymentService
                 'transaction_type' => PaymentTransaction::PAYMENT,
                 'status' => $status,
                 'amount' => $order->total,
-                'currency' => 'PEN',
+                'currency' => $currency ?? 'PEN',
                 'idempotency_key' => $idempotencyKey,
                 'approved_scope_key' => $scope,
                 'external_reference' => $paymentId,
