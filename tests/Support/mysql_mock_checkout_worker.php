@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\URL;
 // Safe coordination evidence only: no requests, SQL, identifiers or exception messages.
 [$orderId, $action, $role, $directory] = array_slice($argv, 1) + array_fill(0, 4, null);
 $started = microtime(true);
-$diagnostic = ['role' => in_array($role, ['first', 'second'], true) ? $role : 'invalid', 'action' => in_array($action, ['approve', 'get'], true) ? $action : 'invalid', 'attempt' => 0, 'last_checkpoint' => null, 'failure_stage' => null, 'result' => 'starting', 'signature_valid' => false, 'sqlstate' => null, 'driver_code' => null, 'deadlock_1213' => false, 'lock_timeout_1205' => false, 'timeline' => []];
+$diagnostic = ['role' => in_array($role, ['first', 'second'], true) ? $role : 'invalid', 'action' => in_array($action, ['approve', 'get', 'reject'], true) ? $action : 'invalid', 'attempt' => 0, 'last_checkpoint' => null, 'failure_stage' => null, 'result' => 'starting', 'signature_valid' => false, 'sqlstate' => null, 'driver_code' => null, 'deadlock_1213' => false, 'lock_timeout_1205' => false, 'timeline' => []];
 $connected = false;
 $publish = function (string $path, array $payload): void {
     $data = json_encode($payload, JSON_THROW_ON_ERROR);
@@ -59,7 +59,7 @@ try {
     app(\Illuminate\Contracts\Debug\ExceptionHandler::class)->reportable($captureException);
     [$orderId, $action, $role, $directory] = array_slice($argv, 1) + array_fill(0, 4, null);
     if (count($argv) !== 5 || ! ctype_digit((string) $orderId)
-        || ! in_array($action, ['approve', 'get'], true) || ! in_array($role, ['first', 'second'], true)
+        || ! in_array($action, ['approve', 'get', 'reject'], true) || ! in_array($role, ['first', 'second'], true)
         || ! is_dir((string) $directory) || ! preg_match('/\Alubristore-mock-race-[a-f0-9]{16}\z/', basename($directory))
         || app()->environment() !== 'testing' || config('app.debug') || app()->configurationIsCached()
         || config('database.default') !== 'mysql' || config('database.connections.mysql.url')
@@ -110,7 +110,9 @@ try {
 
         public function resolve(string $paymentId, mixed $orderId, bool $lockOrder = false): Order
         {
-            $this->diagnostic['attempt']++;
+            if ($lockOrder) {
+                $this->diagnostic['attempt']++;
+            }
             ($this->checkpoint)('attempt_started');
             ($this->checkpoint)('order_locking');
             $order = parent::resolve($paymentId, $orderId, $lockOrder);
@@ -156,7 +158,7 @@ try {
     $session->start();
     $request = $action === 'get'
         ? Illuminate\Http\Request::create($url, 'GET')
-        : Illuminate\Http\Request::create($url, 'POST', ['_token' => $session->token()]);
+        : Illuminate\Http\Request::create($url, 'POST', ['_token' => $session->token(), 'action' => $action, 'scenario' => $action === 'reject' ? 'declined' : 'approved']);
     $diagnostic['signature_valid'] = URL::hasValidSignature($request);
     $checkpoint('signature_checked');
     if (! $diagnostic['signature_valid']) {

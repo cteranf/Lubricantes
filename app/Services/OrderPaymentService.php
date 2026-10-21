@@ -82,7 +82,63 @@ class OrderPaymentService
             throw new \InvalidArgumentException('La moneda configurada no es válida.');
         }
 
-        return $this->recordCardAttempt($order, $paymentId, $status, $gatewayData, $failureReason, $currency);
+        return DB::transaction(function () use ($order, $paymentId, $status, $gatewayData, $failureReason, $currency) {
+            Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $order = app(MockPaymentPreferenceResolver::class)->resolve($paymentId, $order->id);
+            if (! in_array($status, [PaymentTransaction::FAILED, PaymentTransaction::APPROVED], true)
+                || ($gatewayData['gateway'] ?? null) !== 'mock') {
+                $this->invalid('El intento mock no es coherente.');
+            }
+            $preferenceId = (int) $order->current_payment_preference_id;
+            $key = hash('sha256', "mock-card-attempt:v1\0".$order->id."\0".$preferenceId."\0".$status);
+            $scope = $status === PaymentTransaction::APPROVED ? PaymentTransaction::approvedScopeKeyForOrder($order->id) : null;
+            $existing = PaymentTransaction::where('idempotency_key', $key)->lockForUpdate()->get();
+            if ($existing->isNotEmpty()) {
+                $transaction = $existing->sole();
+                if ((int) $transaction->order_id !== (int) $order->id
+                    || (int) $transaction->payment_preference_id !== $preferenceId
+                    || $transaction->payment_submission_id !== null
+                    || $transaction->transaction_type !== PaymentTransaction::PAYMENT
+                    || $transaction->payment_method !== 'card'
+                    || $transaction->gateway !== 'mock'
+                    || $transaction->status !== $status
+                    || $transaction->amount !== $order->total
+                    || $transaction->currency !== $currency
+                    || $transaction->approved_scope_key !== $scope
+                    || $transaction->external_reference !== $paymentId
+                    || $transaction->provider_payment_id !== null
+                    || $transaction->confirmed_by !== null
+                    || $transaction->collected_by !== null
+                    || ($transaction->metadata['source'] ?? null) !== 'card_gateway') {
+                    $this->invalid('El intento mock no es coherente.');
+                }
+
+                return $transaction;
+            }
+            if (PaymentTransaction::where('order_id', $order->id)->where('transaction_type', PaymentTransaction::PAYMENT)->where('status', PaymentTransaction::APPROVED)->exists()) {
+                $this->invalid('El intento mock no es coherente.');
+            }
+
+            // The order lock serializes mock writers; unexpected UNIQUE errors propagate.
+            // Order/config remain the financial authority, not a preference snapshot.
+            return PaymentTransaction::create([
+                'order_id' => $order->id,
+                'payment_preference_id' => $preferenceId,
+                'payment_method' => 'card',
+                'transaction_type' => PaymentTransaction::PAYMENT,
+                'status' => $status,
+                'amount' => $order->total,
+                'currency' => $currency,
+                'idempotency_key' => $key,
+                'approved_scope_key' => $scope,
+                'external_reference' => $paymentId,
+                'gateway' => 'mock',
+                'confirmed_at' => $status === PaymentTransaction::APPROVED ? now() : null,
+                'failed_at' => $status === PaymentTransaction::FAILED ? now() : null,
+                'failure_reason' => $failureReason,
+                'metadata' => ['source' => 'card_gateway', 'order_total_snapshot' => (string) $order->total],
+            ]);
+        });
     }
 
     public function recordCardAttempt(

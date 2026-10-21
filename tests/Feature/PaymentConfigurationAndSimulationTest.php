@@ -37,6 +37,116 @@ class PaymentConfigurationAndSimulationTest extends TestCase
         }
     }
 
+    /** @dataProvider mockAttemptSequences */
+    public function test_mock_attempt_sequences_preserve_financial_identity(array $actions): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product(['stock' => 5]));
+        $preferenceId = $order->current_payment_preference_id;
+        $url = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), ['paymentId' => $order->currentPaymentPreference->provider_preference_id, 'order_id' => $order->id]);
+        $approved = false;
+        $failed = false;
+        $paidAt = null;
+        $approvedEvidence = null;
+        $failedEvidence = null;
+        foreach ($actions as $action) {
+            $this->post($url, ['action' => $action, 'scenario' => $action === 'approve' ? 'approved' : 'declined'])->assertRedirect();
+            if (! $approved && $action === 'reject') {
+                $failed = true;
+            }
+            $approved = $approved || $action === 'approve';
+            $order->refresh();
+            $rows = PaymentTransaction::where('order_id', $order->id)->get();
+            $this->assertTrue($rows->count() === (int) $approved + (int) $failed, 'Only the permitted immutable attempts may exist.');
+            foreach ($rows as $row) {
+                $this->assertTrue($row->transaction_type === PaymentTransaction::PAYMENT && $row->payment_method === 'card' && $row->gateway === 'mock' && $row->amount === $order->total && $row->currency === config('payment.currency') && (int) $row->payment_preference_id === (int) $preferenceId && $row->provider_payment_id === null, 'Each attempt must retain its exact mock contract.');
+                if ($row->status === PaymentTransaction::FAILED) {
+                    $failedEvidence ??= $row->getRawOriginal();
+                    $this->assertTrue($failedEvidence === $row->getRawOriginal(), 'Failed evidence must remain immutable.');
+                } else {
+                    $approvedEvidence ??= $row->getRawOriginal();
+                    $this->assertTrue($row->status === PaymentTransaction::APPROVED && $approvedEvidence === $row->getRawOriginal(), 'Approved evidence must remain immutable.');
+                }
+            }
+            if ($approved) {
+                $paidAt ??= $order->getRawOriginal('paid_at');
+                $this->assertTrue($paidAt !== null && $order->getRawOriginal('paid_at') === $paidAt && $order->payment_status === 'approved' && $order->status === 'confirmed', 'Approval cannot be degraded or dated again.');
+            } else {
+                $this->assertTrue($order->payment_status === 'rejected' && $order->paid_at === null && $order->status === 'pending', 'Rejection must preserve the pending order.');
+            }
+            $this->assertSame($approved ? 1 : 0, DB::table('inventory_movements')->where('reference_type', 'order')->where('reference_id', (string) $order->id)->where('type', 'sale')->count());
+            $this->assertSame($approved ? 1 : 0, DB::table('order_fulfillment_histories')->where('order_id', $order->id)->where('to_status', Order::FULFILLMENT_PREPARING)->count());
+            $this->assertSame(1, PaymentPreference::where('order_id', $order->id)->count());
+            $this->assertTrue((int) $order->current_payment_preference_id === (int) $preferenceId && $order->payment_id === null, 'Preference identity must remain unchanged.');
+        }
+    }
+
+    public static function mockAttemptSequences(): array
+    {
+        return [
+            'reject reject' => [['reject', 'reject']],
+            'reject approve' => [['reject', 'approve']],
+            'reject approve approve' => [['reject', 'approve', 'approve']],
+            'reject approve reject' => [['reject', 'approve', 'reject']],
+            'approve approve' => [['approve', 'approve']],
+            'approve reject' => [['approve', 'reject']],
+        ];
+    }
+
+    public function test_mock_preference_replaced_after_rejection_cannot_be_retried(): void
+    {
+        $order = $this->orderFor($this->customer(), $this->product());
+        $preference = $order->currentPaymentPreference;
+        $parameters = ['paymentId' => $preference->provider_preference_id, 'order_id' => $order->id];
+        $this->post(URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), $parameters), ['action' => 'reject', 'scenario' => 'declined'])->assertRedirect();
+        $preference->update(['state' => PaymentPreference::SUPERSEDED]);
+        app(\App\Services\PaymentPreferenceService::class)->createFor($order, ['order_id' => $order->id], 'mock');
+        $before = $this->mockFinancialSnapshot($order->refresh());
+        foreach (['mock.payment.process', 'mock.payment.approve'] as $route) {
+            $this->post(URL::temporarySignedRoute($route, now()->addMinutes(30), $parameters), ['action' => 'approve'])->assertNotFound();
+            $this->assertTrue($before === $this->mockFinancialSnapshot($order), 'A replaced preference must fail without changing evidence.');
+        }
+    }
+
+    public function test_real_mock_rejection_then_approval_preserves_distinct_immutable_attempts(): void
+    {
+        $previousCurrency = config('payment.currency');
+        config(['payment.currency' => 'USD']);
+        try {
+            $order = $this->orderFor($this->customer(), $this->product(['stock' => 5]));
+            $preferenceId = $order->current_payment_preference_id;
+            $paymentId = $order->currentPaymentPreference->provider_preference_id;
+            $parameters = ['paymentId' => $paymentId, 'order_id' => $order->id];
+            $process = URL::temporarySignedRoute('mock.payment.process', now()->addMinutes(30), $parameters);
+            $approve = URL::temporarySignedRoute('mock.payment.approve', now()->addMinutes(30), $parameters);
+            $this->assertTrue($order->payment_id === null, 'Mock checkout must not require the legacy link.');
+            $this->get(URL::temporarySignedRoute('mock.payment', now()->addMinutes(30), $parameters))->assertOk();
+            $reject = ['action' => 'reject', 'scenario' => 'declined'];
+            $this->post($process, $reject)->assertRedirect();
+            $failed = PaymentTransaction::where('order_id', $order->id)->sole();
+            $failedEvidence = $failed->getRawOriginal();
+            $this->assertTrue($failed->status === PaymentTransaction::FAILED && $failed->currency === 'USD' && $failed->amount === $order->total, 'Failed attempt must use order/config authority.');
+            $this->assertSame('rejected', $order->refresh()->payment_status);
+            $beforeRepeat = $this->mockFinancialSnapshot($order);
+            $this->post($process, $reject)->assertRedirect();
+            $this->assertTrue($beforeRepeat === $this->mockFinancialSnapshot($order), 'Repeated rejection must preserve all evidence.');
+            $this->post($approve)->assertRedirect();
+            $order->refresh();
+            $approved = PaymentTransaction::where('order_id', $order->id)->where('status', PaymentTransaction::APPROVED)->sole();
+            $this->assertTrue($approved->id !== $failed->id && $approved->idempotency_key !== $failed->idempotency_key, 'Approval must have a distinct immutable identity.');
+            $this->assertTrue($approved->amount === $order->total && $approved->currency === 'USD' && (int) $approved->payment_preference_id === (int) $preferenceId, 'Approval must preserve current preference and financial authority.');
+            $this->assertTrue($order->payment_status === 'approved' && $order->paid_at !== null && $order->payment_id === null, 'Approval must persist without a legacy link.');
+            $this->assertTrue($failedEvidence === $failed->fresh()->getRawOriginal(), 'Failed attempt must remain immutable.');
+            $after = $this->mockFinancialSnapshot($order);
+            $this->post($process, $reject)->assertRedirect();
+            $this->post($approve)->assertRedirect();
+            $this->assertTrue($after === $this->mockFinancialSnapshot($order), 'Approved replays must preserve all evidence.');
+            $this->assertSame(2, PaymentTransaction::where('order_id', $order->id)->count());
+            $this->assertSame(1, PaymentPreference::where('order_id', $order->id)->count());
+        } finally {
+            config(['payment.currency' => $previousCurrency]);
+        }
+    }
+
     public function test_atomic_mock_get_preserves_approval_committed_before_lock(): void
     {
         $order = $this->orderFor($this->customer(), $this->product());

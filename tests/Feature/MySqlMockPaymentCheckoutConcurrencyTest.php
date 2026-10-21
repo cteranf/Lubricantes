@@ -20,8 +20,9 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
     private array $observation = [];
 
     /** @dataProvider winners */
-    public function test_physical_approval_and_get_expiration_preserve_current_state(string $winner, int $iteration): void
+    public function test_physical_approval_and_get_expiration_preserve_current_state(string $winner, int $iteration, ?string $peerAction = null): void
     {
+        $peerAction ??= $winner === 'approve' ? 'get' : 'approve';
         $this->assertSame('testing', app()->environment());
         $this->assertFalse((bool) config('app.debug'));
         $this->assertFalse(app()->configurationIsCached());
@@ -58,7 +59,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
                     && $probe->table('payment_preferences')->where('order_id', $order->id)->where('gateway', 'mock')->where('state', 'active')->count() === 1
                     && $probe->table('inventory_reservations')->where('order_id', $order->id)->where('status', 'active')->count() === 1;
             $this->assertTrue($visible, 'Committed fixtures must be visible from an independent connection.');
-            foreach (['first' => $winner, 'second' => $winner === 'approve' ? 'get' : 'approve'] as $role => $action) {
+            foreach (['first' => $winner, 'second' => $peerAction] as $role => $action) {
                 $worker = new Process([PHP_BINARY, base_path('tests/Support/mysql_mock_checkout_worker.php'), (string) $order->id, $action, $role, $directory], base_path(), array_merge(getenv(), ['APP_ENV' => 'testing', 'APP_DEBUG' => 'false', 'DB_CONNECTION' => 'mysql']));
                 $worker->setTimeout(15);
                 $worker->start();
@@ -120,7 +121,9 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
             $order->refresh();
             $balance = DB::table('warehouse_inventories')->where('product_id', $product->id)->sole();
             $reservation = $order->reservations()->sole();
-            if ($winner === 'approve') {
+            $approvalWins = $winner === 'approve' || ($winner === 'reject' && $peerAction === 'approve');
+            $rejectionOnly = $winner === 'reject' && $peerAction === 'reject';
+            if ($approvalWins) {
                 $this->assertSame('approved', $order->payment_status);
                 $this->assertNotNull($order->paid_at);
                 $this->assertSame('confirmed', $order->status);
@@ -128,6 +131,14 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
                 $this->assertSame(9, (int) $balance->quantity);
                 $this->assertSame(1, $order->paymentTransactions()->where('status', 'approved')->count());
                 $this->assertSame(1, DB::table('inventory_movements')->where('product_id', $product->id)->where('type', 'sale')->count());
+            } elseif ($rejectionOnly) {
+                $this->assertSame('pending', $order->status);
+                $this->assertSame('rejected', $order->payment_status);
+                $this->assertNull($order->paid_at);
+                $this->assertSame('active', $reservation->status);
+                $this->assertSame(10, (int) $balance->quantity);
+                $this->assertSame(0, $order->paymentTransactions()->where('status', 'approved')->count());
+                $this->assertSame(0, DB::table('inventory_movements')->where('product_id', $product->id)->where('type', 'sale')->count());
             } else {
                 $this->assertSame('canceled', $order->status);
                 $this->assertNull($order->paid_at);
@@ -137,14 +148,22 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
                 $this->assertSame(0, $order->paymentTransactions()->count());
                 $this->assertSame(0, DB::table('inventory_movements')->where('product_id', $product->id)->where('type', 'sale')->count());
             }
-            $this->assertSame(0, (int) $balance->reserved_quantity);
-            $this->assertSame(1, $order->fulfillmentHistory()->count());
+            if ($winner === 'reject' || $peerAction === 'reject') {
+                $failedExpected = $winner === 'reject' ? 1 : 0;
+                $this->assertSame($failedExpected, $order->paymentTransactions()->where('status', 'failed')->count());
+                $this->assertSame($failedExpected + (int) $approvalWins, $order->paymentTransactions()->count());
+                foreach ($order->paymentTransactions()->get() as $transaction) {
+                    $this->assertTrue($transaction->amount === $order->total && $transaction->currency === config('payment.currency') && $transaction->gateway === 'mock' && $transaction->transaction_type === 'payment' && $transaction->payment_method === 'card' && (int) $transaction->payment_preference_id === (int) $order->current_payment_preference_id && $transaction->provider_payment_id === null, 'Physical attempts must preserve the exact mock contract.');
+                }
+            }
+            $this->assertSame($rejectionOnly ? 1 : 0, (int) $balance->reserved_quantity);
+            $this->assertSame($rejectionOnly ? 0 : 1, $order->fulfillmentHistory()->count());
             $this->assertSame(1, DB::table('payment_preferences')->where('order_id', $order->id)->count());
             $preference = DB::table('payment_preferences')->where('id', $order->current_payment_preference_id)->sole();
             $this->assertTrue((int) $preference->order_id === (int) $order->id && $preference->gateway === 'mock' && $preference->state === 'active', 'The current mock preference must remain coherent.');
             $this->assertSame((int) $balance->quantity, (int) $product->fresh()->stock);
             $this->assertGreaterThanOrEqual(0, (int) $balance->quantity);
-            $this->assertSame(0, $order->reservations()->where('status', 'active')->count());
+            $this->assertSame($rejectionOnly ? 1 : 0, $order->reservations()->where('status', 'active')->count());
             $this->assertFalse($order->status === 'canceled' && ($order->payment_status === 'approved' || $order->paid_at !== null));
             fwrite(STDOUT, "\nmock race: winner={$winner}; iteration={$iteration}; lock_wait_observed=true; invariant=true\n");
         } finally {
@@ -195,6 +214,21 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
                 rmdir($directory);
             }
         }
+    }
+
+    /** @dataProvider rejectionRaces */
+    public function test_physical_rejection_attempts_serialize_without_duplicate_effects(string $first, string $second): void
+    {
+        $this->test_physical_approval_and_get_expiration_preserve_current_state($first, 1, $second);
+    }
+
+    public static function rejectionRaces(): array
+    {
+        return [
+            'reject reject' => ['reject', 'reject'],
+            'reject approve' => ['reject', 'approve'],
+            'approve reject' => ['approve', 'reject'],
+        ];
     }
 
     private function requireObserver()
