@@ -9,6 +9,8 @@ class PaymentTransaction extends Model
 {
     private bool $allowResolutionApprovalTransition = false;
 
+    private bool $allowRemoteStatusTransition = false;
+
     public const PENDING = 'pending';
 
     public const APPROVED = 'approved';
@@ -50,11 +52,44 @@ class PaymentTransaction extends Model
                 && $transaction->approved_scope_key !== null
                 && empty(array_diff(array_keys($transaction->getDirty()), ['status', 'approved_scope_key', 'updated_at']));
 
-            if (! $allowed) {
+            $remoteAllowed = $transaction->allowRemoteStatusTransition
+                && $transaction->getOriginal('gateway') === 'mercadopago'
+                && in_array($transaction->getOriginal('status'), [self::PENDING, self::FAILED], true)
+                && in_array($transaction->getOriginal('provider_status'), ['pending', 'in_process'], true)
+                && empty(array_diff(array_keys($transaction->getDirty()), ['status', 'provider_status', 'provider_status_detail', 'verified_at', 'approved_scope_key', 'confirmed_at', 'failed_at', 'failure_reason', 'updated_at']));
+            if (! $allowed && ! $remoteAllowed) {
                 throw new LogicException('Una transaccion financiera confirmada es inmutable.');
             }
         });
         static::deleting(fn () => throw new LogicException('Una transaccion financiera no se puede eliminar.'));
+    }
+
+    /** Only the financially locked processor may finalize a verified pending payment. */
+    public function applyVerifiedRemoteStatus(string $status, ?string $detail): void
+    {
+        if ($this->getConnection()->transactionLevel() < 1 || ! $this->exists
+            || $this->gateway !== 'mercadopago' || $this->transaction_type !== self::PAYMENT || $this->payment_method !== 'card'
+            || ! in_array($this->status, [self::PENDING, self::FAILED], true)
+            || ! in_array($this->provider_status, ['pending', 'in_process'], true)
+            || ! in_array($status, ['pending', 'in_process', 'approved', 'rejected'], true)
+            || $this->approved_scope_key !== null) {
+            throw new LogicException('La transaccion no permite una transicion remota pendiente.');
+        }
+        $this->allowRemoteStatusTransition = true;
+        try {
+            $this->forceFill([
+                'status' => $status === 'approved' ? self::APPROVED : ($status === 'rejected' ? self::FAILED : self::PENDING),
+                'provider_status' => $status,
+                'provider_status_detail' => $detail,
+                'verified_at' => now(),
+                'approved_scope_key' => $status === 'approved' ? self::approvedScopeKeyForOrder($this->order_id) : null,
+                'confirmed_at' => $status === 'approved' ? now() : null,
+                'failed_at' => $status === 'rejected' ? now() : null,
+                'failure_reason' => $status === 'rejected' ? $detail : null,
+            ])->save();
+        } finally {
+            $this->allowRemoteStatusTransition = false;
+        }
     }
 
     public function approveReceivedForResolution(string $approvedScopeKey): void

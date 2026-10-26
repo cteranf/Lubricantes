@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\InventoryException;
+use App\Exceptions\PaymentFinancialReviewException;
+use App\Exceptions\PaymentLinkEvidenceException;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\PaymentPreference;
@@ -16,8 +18,8 @@ use App\Services\PaymentGateway\PaymentGatewayFactory;
 use App\Services\PaymentPreferenceService;
 use App\Services\PaymentProcessingService;
 use App\Services\PaymentSettingService;
+use App\Services\PaymentWebhookNormalizer;
 use App\Services\PaymentWebhookSignatureService;
-use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -26,7 +28,7 @@ use MercadoPago\Exceptions\InvalidWebhookSignatureException;
 
 class PaymentController extends Controller
 {
-    public function __construct(private PaymentSettingService $paymentSettings, private PaymentPreferenceService $preferences, private PaymentProcessingService $processor, private PaymentWebhookSignatureService $signatures, private OrderStateService $states, private InventoryService $inventory, private OrderPaymentService $payments, private InventoryReservationExpirationService $reservationExpiration) {}
+    public function __construct(private PaymentSettingService $paymentSettings, private PaymentPreferenceService $preferences, private PaymentProcessingService $processor, private PaymentWebhookSignatureService $signatures, private OrderStateService $states, private InventoryService $inventory, private OrderPaymentService $payments, private InventoryReservationExpirationService $reservationExpiration, private PaymentWebhookNormalizer $normalizer) {}
 
     public function createPayment(Request $request)
     {
@@ -80,61 +82,95 @@ class PaymentController extends Controller
         if ($this->legacyMockWebhookAllowed($request)) {
             return $this->processLegacyMockWebhook($request);
         }
-        $paymentId = (string) data_get($request->all(), 'data.id', '');
+        try {
+            $normalized = $this->normalizer->normalize($request);
+        } catch (\InvalidArgumentException) {
+            return response()->json(['status' => 'invalid'], 422);
+        }
+        $paymentId = $normalized['payment_id'];
         try {
             $this->signatures->validate($request->header('x-signature'), $request->header('x-request-id'), $paymentId ?: null);
-        } catch (InvalidWebhookSignatureException|\InvalidArgumentException|\RuntimeException) {
-            Log::warning('Mercado Pago webhook signature rejected', ['request_id_hash' => $this->hash($request->header('x-request-id'))]);
+        } catch (InvalidWebhookSignatureException|\InvalidArgumentException) {
+            Log::warning('Mercado Pago webhook signature rejected');
 
             return response()->json(['status' => 'unauthorized'], 401);
         }
-        if ($paymentId === '') {
+        $event = $this->recordEvent($request, $paymentId, $normalized['payload']);
+        if ($event->gateway !== 'mercadopago' || $event->provider_payment_id !== $paymentId || $event->event_type !== 'payment') {
             return response()->json(['status' => 'invalid'], 422);
         }
-        $event = $this->recordEvent($request, $paymentId);
-        if (in_array($event->status, [PaymentWebhookEvent::PROCESSED, PaymentWebhookEvent::IGNORED], true)) {
+        if ($event->status === PaymentWebhookEvent::PROCESSED) {
             return response()->json(['status' => 'ok']);
+        }
+        if ($event->status === PaymentWebhookEvent::REVIEW_REQUIRED) {
+            // 202 acknowledges durable reconciliation work; it never means the payment was approved.
+            $code = match ($event->failure_reason) {
+                PaymentWebhookEvent::MANUAL_RECONCILIATION_REQUIRED => PaymentWebhookEvent::MANUAL_RECONCILIATION_REQUIRED,
+                PaymentWebhookEvent::UNSUPPORTED_REMOTE_STATUS => PaymentWebhookEvent::UNSUPPORTED_REMOTE_STATUS,
+                default => PaymentWebhookEvent::FINANCIAL_REVIEW_REQUIRED,
+            };
+
+            return response()->json(['status' => 'review_required', 'code' => $code], 202);
+        }
+        if ($event->status === PaymentWebhookEvent::IGNORED && $event->failure_reason !== PaymentWebhookEvent::REMOTE_PREFERENCE_UNAVAILABLE) {
+            if ($event->failure_reason === null) {
+                $event->update(['failure_reason' => PaymentWebhookEvent::LEGACY_IGNORE_REASON_UNKNOWN]);
+            }
+
+            return response()->json(['status' => 'ignored']);
         }
         try {
             $payment = PaymentGatewayFactory::create('mercadopago')->verifyPayment($paymentId);
-            $preference = PaymentPreference::where('gateway', 'mercadopago')->where('provider_preference_id', $payment['preference_id'] ?? null)->where('external_reference', $payment['external_reference'] ?? null)->first();
+            // These fields only locate a candidate. The processor compares the
+            // full evidence and current local link under its financial locks.
+            $preference = PaymentPreference::where('provider_preference_id', $payment['preference_id'] ?? null)->first();
             if (! $preference) {
-                $this->finishEvent($event, PaymentWebhookEvent::IGNORED);
+                $preference = PaymentPreference::where('external_reference', $payment['external_reference'] ?? null)->first();
+            }
+            if (! $preference) {
+                $this->finishEvent($event, PaymentWebhookEvent::FAILED, PaymentWebhookEvent::LOCAL_LINK_NOT_FOUND);
 
-                return response()->json(['status' => 'ok']);
+                return response()->json(['status' => 'invalid'], 422);
             }
             $this->processor->process($preference, $payment);
             $this->finishEvent($event, PaymentWebhookEvent::PROCESSED);
+        } catch (PaymentFinancialReviewException $exception) {
+            $this->finishEvent($event, PaymentWebhookEvent::REVIEW_REQUIRED, $exception->category);
+
+            return response()->json(['status' => 'review_required', 'code' => $exception->category], 202);
+        } catch (PaymentLinkEvidenceException $exception) {
+            $this->finishEvent($event, PaymentWebhookEvent::FAILED, $exception->category);
+
+            return response()->json(['status' => 'invalid'], 422);
         } catch (ValidationException|InventoryException) {
             $this->finishEvent($event, PaymentWebhookEvent::FAILED, 'payment_validation_failed');
 
             return response()->json(['status' => 'invalid'], 422);
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
             $this->finishEvent($event, PaymentWebhookEvent::FAILED, 'provider_or_processing_error');
-            Log::error('Mercado Pago webhook processing failed', ['event_id' => $event->id]);
+            Log::error('Mercado Pago webhook processing failed');
 
-            return response()->json(['status' => 'error'], 500);
+            throw $exception;
         }
 
         return response()->json(['status' => 'ok']);
     }
 
-    private function recordEvent(Request $request, string $paymentId): PaymentWebhookEvent
+    private function recordEvent(Request $request, string $paymentId, array $payload): PaymentWebhookEvent
     {
-        $payload = $request->all();
         $canonicalPayload = $this->canonicalize($payload);
         $payloadHash = hash('sha256', json_encode($canonicalPayload, JSON_UNESCAPED_SLASHES));
         $eventId = data_get($payload, 'id');
-        $key = $eventId ? 'mp:event:'.$eventId : 'mp:notification:'.hash('sha256', implode('|', [$paymentId, data_get($payload, 'type', ''), data_get($payload, 'action', ''), $payloadHash]));
-        try {
-            return DB::transaction(function () use ($request, $paymentId, $payload, $payloadHash, $eventId, $key) {
-                $event = PaymentWebhookEvent::firstOrCreate(['idempotency_key' => $key], ['gateway' => 'mercadopago', 'provider_event_id' => $eventId ? (string) $eventId : null, 'provider_payment_id' => $paymentId, 'event_type' => data_get($payload, 'type'), 'action' => data_get($payload, 'action'), 'payload_hash' => $payloadHash, 'request_id_hash' => $this->hash($request->header('x-request-id')), 'status' => PaymentWebhookEvent::RECEIVED, 'received_at' => now()]);
+        // Query-only notifications carry no provider event identity. Separate
+        // authenticated requests so a later approval is not hidden by an older
+        // pending notification; financial idempotency remains under order locks.
+        $key = $eventId ? 'mp:event:'.$eventId : 'mp:notification:'.hash('sha256', implode('|', [$paymentId, data_get($payload, 'type', ''), data_get($payload, 'action', ''), $payloadHash, $this->hash($request->header('x-request-id'))]));
 
-                return PaymentWebhookEvent::whereKey($event->id)->lockForUpdate()->firstOrFail();
-            });
-        } catch (QueryException) {
-            return PaymentWebhookEvent::where('idempotency_key', $key)->firstOrFail();
-        }
+        return DB::transaction(function () use ($request, $paymentId, $payload, $payloadHash, $eventId, $key) {
+            $event = PaymentWebhookEvent::firstOrCreate(['idempotency_key' => $key], ['gateway' => 'mercadopago', 'provider_event_id' => $eventId ? (string) $eventId : null, 'provider_payment_id' => $paymentId, 'event_type' => data_get($payload, 'type'), 'action' => data_get($payload, 'action'), 'payload_hash' => $payloadHash, 'request_id_hash' => $this->hash($request->header('x-request-id')), 'status' => PaymentWebhookEvent::RECEIVED, 'received_at' => now()]);
+
+            return PaymentWebhookEvent::whereKey($event->id)->lockForUpdate()->firstOrFail();
+        }, 3);
     }
 
     private function finishEvent(PaymentWebhookEvent $event, string $status, ?string $reason = null): void

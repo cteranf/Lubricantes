@@ -13,10 +13,23 @@ class PaymentWebhookAdversarialTest extends TestCase
 {
     use RefreshDatabase;
 
+    private string $paymentId;
+    private string $merchantId;
+    private string $preferenceId;
+    private string $reference;
+    private string $eventId;
+    private string $secret;
+
     protected function setUp(): void
     {
         parent::setUp();
-        config()->set('payment.mercadopago.webhook_secret', 'fixture-secret');
+        $this->paymentId = (string) random_int(1000000, 1000000000);
+        $this->merchantId = (string) random_int(1000000001, 2000000000);
+        $this->preferenceId = 'synthetic-'.bin2hex(random_bytes(16));
+        $this->reference = 'synthetic-'.bin2hex(random_bytes(16));
+        $this->eventId = 'synthetic-'.bin2hex(random_bytes(16));
+        $this->secret = 'SYNTHETIC_'.bin2hex(random_bytes(16));
+        config()->set('payment.mercadopago.webhook_secret', $this->secret);
         config()->set('payment.testing_legacy_webhook', false);
         config()->set('payment.default_gateway', 'mercadopago');
         config()->set('payment.mock.enabled', false);
@@ -31,18 +44,19 @@ class PaymentWebhookAdversarialTest extends TestCase
         $user = \App\Models\User::factory()->create();
         Sanctum::actingAs($user);
         $order = Order::create(['user_id' => $user->id, 'status' => 'pending', 'total' => 10, 'shipping_info' => [], 'payment_method' => 'card', 'payment_status' => 'pending', 'delivery_type' => 'delivery', 'tracking_status' => 'pending']);
-        PaymentPreference::create(['order_id' => $order->id, 'gateway' => 'mercadopago', 'provider_preference_id' => 'pref-fixture', 'external_reference' => 'mp_fixture_ref', 'idempotency_key' => 'pref-fixture-key', 'state' => PaymentPreference::ACTIVE, 'creation_started_at' => now()]);
-        WebhookFakeGateway::$response = ['id' => 'pay-fixture', 'status' => 'pending', 'status_detail' => 'in_process', 'external_reference' => 'mp_fixture_ref', 'preference_id' => 'pref-fixture', 'transaction_amount' => 10, 'currency_id' => 'PEN'];
-        $response = $this->signedPost('pay-fixture', ['status' => 'approved', 'transaction_amount' => 999, 'currency_id' => 'USD', 'external_reference' => 'wrong']);
+        $preference = PaymentPreference::create(['order_id' => $order->id, 'gateway' => 'mercadopago', 'provider_preference_id' => $this->preferenceId, 'external_reference' => $this->reference, 'idempotency_key' => $this->preferenceId, 'state' => PaymentPreference::ACTIVE, 'creation_started_at' => now()]);
+        $order->update(['current_payment_preference_id' => $preference->id]);
+        WebhookFakeGateway::$response = $this->remote('pending');
+        $response = $this->signedPost($this->paymentId, ['status' => 'approved', 'transaction_amount' => 999, 'currency_id' => 'USD', 'external_reference' => 'wrong']);
         $response->assertOk();
-        $this->assertSame('pay-fixture', WebhookFakeGateway::$lastId);
+        $this->assertSame($this->paymentId, WebhookFakeGateway::$lastId);
         $this->assertSame('pending', $order->refresh()->payment_status);
     }
 
     public function test_invalid_signature_never_creates_event_or_calls_gateway(): void
     {
         WebhookFakeGateway::$calls = 0;
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'pay-invalid']], ['x-signature' => 'ts=1,v1=bad', 'x-request-id' => 'req'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => $this->paymentId]], ['x-signature' => 'ts=1,v1=bad', 'x-request-id' => 'req'])->assertUnauthorized();
         $this->assertDatabaseCount('payment_webhook_events', 0);
         $this->assertSame(0, WebhookFakeGateway::$calls);
     }
@@ -50,7 +64,7 @@ class PaymentWebhookAdversarialTest extends TestCase
     public function test_missing_signature_is_rejected_outside_explicit_testing_fallback(): void
     {
         config()->set('payment.testing_legacy_webhook', false);
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'pay-missing']])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => $this->paymentId]])->assertUnauthorized();
     }
 
     public function test_legacy_fallback_requires_explicit_testing_flag(): void
@@ -60,7 +74,7 @@ class PaymentWebhookAdversarialTest extends TestCase
         config()->set('payment.testing_legacy_webhook', true);
         $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'payment_id' => 'legacy-payment'])->assertOk();
         config()->set('payment.testing_legacy_webhook', false);
-        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'payment_id' => 'legacy-payment'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'payment_id' => 'legacy-payment', 'type' => 'payment', 'data' => ['id' => $this->paymentId]])->assertUnauthorized();
     }
 
     public function test_legacy_flag_does_not_accept_a_normal_request(): void
@@ -69,8 +83,8 @@ class PaymentWebhookAdversarialTest extends TestCase
         config()->set('payment.mock.enabled', true);
         config()->set('payment.testing_legacy_webhook', true);
 
-        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order'])->assertUnauthorized();
-        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'data' => ['id' => 'pay']])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'type' => 'payment', 'data' => ['id' => $this->paymentId]])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['order_id' => 'missing-order', 'type' => 'payment', 'data' => ['id' => $this->paymentId]])->assertUnauthorized();
     }
 
     public function test_legacy_flag_is_ignored_outside_testing_environment(): void
@@ -81,30 +95,30 @@ class PaymentWebhookAdversarialTest extends TestCase
 
         foreach (['local', 'staging', 'production'] as $environment) {
             $this->app->instance('env', $environment);
-            $this->postJson('/api/v1/payment/webhook', ['order_id' => 'legacy-order', 'payment_id' => 'legacy-payment'])->assertUnauthorized();
+            $this->postJson('/api/v1/payment/webhook', ['order_id' => 'legacy-order', 'payment_id' => 'legacy-payment', 'type' => 'payment', 'data' => ['id' => $this->paymentId]])->assertUnauthorized();
         }
     }
 
     public function test_signature_timestamp_request_id_and_data_id_are_bound(): void
     {
         $timestamp = time() - 1000;
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'pay-time']], ['x-signature' => $this->signature('pay-time', 'req', $timestamp), 'x-request-id' => 'req'])->assertUnauthorized();
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'pay-time']], ['x-signature' => $this->signature('pay-time', 'req', time()), 'x-request-id' => 'other'])->assertUnauthorized();
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'other']], ['x-signature' => $this->signature('pay-time', 'req', time()), 'x-request-id' => 'req'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => $this->paymentId]], ['x-signature' => $this->signature($this->paymentId, 'req', $timestamp), 'x-request-id' => 'req'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => $this->paymentId]], ['x-signature' => $this->signature($this->paymentId, 'req', time()), 'x-request-id' => 'other'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => (string) ((int) $this->paymentId + 1)]], ['x-signature' => $this->signature($this->paymentId, 'req', time()), 'x-request-id' => 'req'])->assertUnauthorized();
     }
 
     public function test_malformed_signature_is_controlled(): void
     {
-        $this->postJson('/api/v1/payment/webhook', ['data' => ['id' => 'pay-malformed']], ['x-signature' => 'not-a-signature', 'x-request-id' => 'req'])->assertUnauthorized();
+        $this->postJson('/api/v1/payment/webhook', ['type' => 'payment', 'data' => ['id' => $this->paymentId]], ['x-signature' => 'not-a-signature', 'x-request-id' => 'req'])->assertUnauthorized();
     }
 
     public function test_duplicate_provider_event_is_processed_once(): void
     {
         [$order] = $this->fixture();
         WebhookFakeGateway::$response = $this->remote('pending');
-        $first = $this->signedPost('pay-duplicate', ['id' => 'provider-event-1', 'type' => 'payment']);
+        $first = $this->signedPost($this->paymentId, ['id' => $this->eventId, 'type' => 'payment']);
         $first->assertOk();
-        $this->signedPost('pay-duplicate', ['id' => 'provider-event-1', 'type' => 'payment'])->assertOk();
+        $this->signedPost($this->paymentId, ['id' => $this->eventId, 'type' => 'payment'])->assertOk();
         $this->assertDatabaseCount('payment_webhook_events', 1);
         $this->assertDatabaseCount('payment_transactions', 1);
         $this->assertSame(1, WebhookFakeGateway::$calls);
@@ -115,8 +129,8 @@ class PaymentWebhookAdversarialTest extends TestCase
     {
         $this->fixture();
         WebhookFakeGateway::$response = $this->remote('pending');
-        $this->signedPost('pay-no-event', ['type' => 'payment', 'action' => 'updated'])->assertOk();
-        $this->signedPost('pay-no-event', ['action' => 'updated', 'type' => 'payment'])->assertOk();
+        $this->signedPost($this->paymentId, ['type' => 'payment', 'action' => 'updated'])->assertOk();
+        $this->signedPost($this->paymentId, ['action' => 'updated', 'type' => 'payment'])->assertOk();
         $this->assertDatabaseCount('payment_webhook_events', 1);
         $this->assertSame(1, WebhookFakeGateway::$calls);
     }
@@ -125,7 +139,7 @@ class PaymentWebhookAdversarialTest extends TestCase
     {
         [$order] = $this->fixture();
         WebhookFakeGateway::$response = array_merge($this->remote('approved'), ['transaction_amount' => 9, 'currency_id' => 'USD']);
-        $this->signedPost('pay-invalid-financial', ['type' => 'payment'])->assertStatus(422);
+        $this->signedPost($this->paymentId, ['type' => 'payment'])->assertStatus(422);
         $this->assertDatabaseHas('payment_webhook_events', ['status' => 'failed']);
         $this->assertDatabaseMissing('payment_transactions', ['status' => 'approved']);
         $this->assertSame('pending', $order->refresh()->payment_status);
@@ -135,10 +149,10 @@ class PaymentWebhookAdversarialTest extends TestCase
     {
         [$order] = $this->fixture();
         WebhookFakeGateway::$response = $this->remote('approved');
-        $this->signedPost('pay-state', ['id' => 'event-approved'])->assertOk();
+        $this->signedPost($this->paymentId, ['id' => $this->eventId])->assertOk();
         $this->assertSame('approved', $order->refresh()->payment_status);
         WebhookFakeGateway::$response = $this->remote('pending');
-        $this->signedPost('pay-state', ['id' => 'event-pending'])->assertOk();
+        $this->signedPost($this->paymentId, ['id' => $this->eventId.'-later'])->assertOk();
         $this->assertSame('approved', $order->refresh()->payment_status);
         $this->assertDatabaseCount('payment_transactions', 1);
     }
@@ -148,19 +162,21 @@ class PaymentWebhookAdversarialTest extends TestCase
         $user = \App\Models\User::factory()->create();
         Sanctum::actingAs($user);
         $order = Order::create(['user_id' => $user->id, 'status' => 'pending', 'total' => 10, 'shipping_info' => [], 'payment_method' => 'card', 'payment_status' => 'pending', 'delivery_type' => 'delivery', 'tracking_status' => 'pending']);
-        PaymentPreference::create(['order_id' => $order->id, 'gateway' => 'mercadopago', 'provider_preference_id' => 'pref-fixture', 'external_reference' => 'mp_fixture_ref', 'idempotency_key' => 'pref-fixture-key-'.$order->id, 'state' => PaymentPreference::ACTIVE, 'creation_started_at' => now()]);
+        $preference = PaymentPreference::create(['order_id' => $order->id, 'gateway' => 'mercadopago', 'provider_preference_id' => $this->preferenceId, 'external_reference' => $this->reference, 'idempotency_key' => $this->preferenceId.$order->id, 'state' => PaymentPreference::ACTIVE, 'creation_started_at' => now()]);
+        $order->update(['current_payment_preference_id' => $preference->id]);
 
         return [$order, $user];
     }
 
     private function remote(string $status): array
     {
-        return ['id' => 'pay-fixture', 'status' => $status, 'status_detail' => 'fixture', 'external_reference' => 'mp_fixture_ref', 'preference_id' => 'pref-fixture', 'transaction_amount' => 10, 'currency_id' => 'PEN'];
+        return ['gateway' => 'mercadopago', 'merchant_order_id' => $this->merchantId, 'id' => $this->paymentId, 'status' => $status, 'status_detail' => 'fixture', 'external_reference' => $this->reference, 'preference_id' => $this->preferenceId, 'transaction_amount' => 10, 'currency_id' => 'PEN'];
     }
 
     private function signedPost(string $id, array $body)
     {
         $body['data'] = ['id' => $id];
+        $body['type'] ??= 'payment';
 
         return $this->postJson('/api/v1/payment/webhook', $body, ['x-signature' => $this->signature($id, 'req-fixture'), 'x-request-id' => 'req-fixture']);
     }
@@ -169,7 +185,7 @@ class PaymentWebhookAdversarialTest extends TestCase
     {
         $timestamp ??= time();
 
-        return 'ts='.$timestamp.',v1='.hash_hmac('sha256', 'id:'.$id.';request-id:'.$requestId.';ts:'.$timestamp.';', 'fixture-secret');
+        return 'ts='.$timestamp.',v1='.hash_hmac('sha256', 'id:'.$id.';request-id:'.$requestId.';ts:'.$timestamp.';', $this->secret);
     }
 }
 

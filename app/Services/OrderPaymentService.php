@@ -195,7 +195,7 @@ class OrderPaymentService
                 'provider_status_detail' => $gatewayData['provider_status_detail'] ?? null,
                 'verified_at' => $gatewayData['verified_at'] ?? null,
                 'confirmed_at' => $isApproved ? now() : null,
-                'failed_at' => $isApproved ? null : now(),
+                'failed_at' => $status === PaymentTransaction::FAILED ? now() : null,
                 'failure_reason' => $failureReason,
                 'metadata' => array_merge([
                     'source' => 'card_gateway',
@@ -203,6 +203,9 @@ class OrderPaymentService
                 ], array_filter($gatewayData, fn ($key) => ! in_array($key, ['gateway', 'provider_payment_id', 'payment_preference_id', 'provider_status', 'provider_status_detail', 'verified_at'], true), ARRAY_FILTER_USE_KEY)),
             ]);
         } catch (QueryException $e) {
+            if ($gateway === 'mercadopago') {
+                throw $e;
+            }
             if ($isApproved && $scope) {
                 $transaction = PaymentTransaction::where('approved_scope_key', $scope)->first();
                 if ($transaction) {

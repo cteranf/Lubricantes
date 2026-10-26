@@ -2,12 +2,13 @@
 
 namespace App\Services;
 
+use App\Exceptions\PaymentLinkEvidenceException as LinkFailure;
 use App\Models\Order;
 use App\Models\PaymentPreference;
 use App\Services\PaymentGateway\PaymentGatewayFactory;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use MercadoPago\Exceptions\MPApiException;
 
 class PaymentPreferenceService
@@ -24,31 +25,26 @@ class PaymentPreferenceService
                 ->whereIn('state', [PaymentPreference::CREATING, PaymentPreference::ACTIVE, PaymentPreference::ORPHANED])
                 ->lockForUpdate()->first();
             if ($existing) {
+                if ((int) $order->current_payment_preference_id !== (int) $existing->id) {
+                    $this->staleLink();
+                }
                 return [$existing, false];
             }
 
-            try {
-                $preference = PaymentPreference::create([
+            // The order lock serializes creation; unexpected SQL failures must
+            // propagate rather than being mistaken for an idempotent retry.
+            $preference = PaymentPreference::create([
                     'order_id' => $order->id,
                     'gateway' => $gateway,
                     'external_reference' => 'mp_'.Str::lower((string) Str::uuid()),
                     'idempotency_key' => 'pref_'.Str::lower((string) Str::uuid()),
                     'state' => PaymentPreference::CREATING,
                     'creation_started_at' => now(),
-                ]);
-            } catch (QueryException $exception) {
-                $preference = PaymentPreference::where('order_id', $order->id)->where('gateway', $gateway)
-                    ->whereIn('state', [PaymentPreference::CREATING, PaymentPreference::ACTIVE, PaymentPreference::ORPHANED])->first();
-                if (! $preference) {
-                    throw $exception;
-                }
-
-                return [$preference, false];
-            }
+            ]);
             $order->update(['current_payment_preference_id' => $preference->id]);
 
             return [$preference, true];
-        });
+        }, 3);
 
         if (! $created) {
             return $preference;
@@ -73,11 +69,7 @@ class PaymentPreferenceService
             return $this->orphan($preference, 'remote_result_uncertain');
         }
 
-        return DB::transaction(function () use ($preference, $createdPreference) {
-            $locked = PaymentPreference::whereKey($preference->id)->lockForUpdate()->firstOrFail();
-            if ($locked->state !== PaymentPreference::CREATING) {
-                return $locked;
-            }
+        return $this->withLockedCandidate($preference, function ($order, $locked) use ($createdPreference) {
             $locked->update([
                 'provider_preference_id' => $createdPreference['id'],
                 'init_point' => $createdPreference['init_point'] ?? null,
@@ -85,7 +77,7 @@ class PaymentPreferenceService
                 'state' => PaymentPreference::ACTIVE,
                 'activated_at' => now(),
             ]);
-            $locked->order()->lockForUpdate()->first()->update(['current_payment_preference_id' => $locked->id]);
+            $order->update(['current_payment_preference_id' => $locked->id]);
 
             return $locked->refresh();
         });
@@ -117,11 +109,7 @@ class PaymentPreferenceService
 
     private function close(PaymentPreference $preference, string $state, string $code, string $message): PaymentPreference
     {
-        return DB::transaction(function () use ($preference, $state, $code, $message) {
-            $locked = PaymentPreference::whereKey($preference->id)->lockForUpdate()->firstOrFail();
-            if ($locked->state !== PaymentPreference::CREATING) {
-                return $locked;
-            }
+        return $this->withLockedCandidate($preference, function ($order, $locked) use ($state, $code, $message) {
             $locked->update([
                 'state' => $state,
                 'error_code' => $code,
@@ -131,5 +119,38 @@ class PaymentPreferenceService
 
             return $locked->refresh();
         });
+    }
+
+    private function withLockedCandidate(PaymentPreference $candidate, \Closure $transition): PaymentPreference
+    {
+        // This read locates rows only; all decisions are revalidated under locks.
+        $locator = PaymentPreference::whereKey($candidate->id)->first();
+        $identity = ['id', 'order_id', 'gateway', 'external_reference', 'idempotency_key'];
+        if (! $locator || $locator->only($identity) !== $candidate->only($identity)) {
+            $this->staleLink();
+        }
+        $fields = [...$identity, 'state', 'provider_preference_id'];
+        $located = $locator->only($fields);
+
+        return DB::transaction(function () use ($located, $fields, $transition) {
+            $order = Order::whereKey($located['order_id'])->lockForUpdate()->first();
+            $locked = PaymentPreference::whereKey($located['id'])->lockForUpdate()->first();
+            if (! $order || ! $locked || $locked->only($fields) !== $located
+                || (int) $locked->order_id !== (int) $order->id
+                || (int) $order->current_payment_preference_id !== (int) $locked->id) {
+                $this->staleLink();
+            }
+            // Already completed transitions remain idempotent, with no writes.
+            if ($locked->state !== PaymentPreference::CREATING) {
+                return $locked;
+            }
+
+            return $transition($order, $locked);
+        }, 3);
+    }
+
+    private function staleLink(): never
+    {
+        throw ValidationException::withMessages(['payment' => [LinkFailure::STALE_LOCAL_LINK]]);
     }
 }

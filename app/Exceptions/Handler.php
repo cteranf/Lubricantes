@@ -43,6 +43,19 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
+        // Technical webhook failures still reach the exception handler, but
+        // must never expose SDK messages, request headers or notification data.
+        $this->reportable(function (Throwable $exception) {
+            if (app()->bound('request') && request()->is('api/v1/payment/webhook')) {
+                \Illuminate\Support\Facades\Log::error('Payment webhook technical failure');
+                return false;
+            }
+        });
+        $this->renderable(function (Throwable $exception, \Illuminate\Http\Request $request) {
+            if ($request->is('api/v1/payment/webhook') && ! $exception instanceof \Illuminate\Validation\ValidationException) {
+                return response()->json(['status' => 'error'], 500);
+            }
+        });
         $this->reportable(function (Throwable $e) {
             //
         });

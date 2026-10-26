@@ -28,7 +28,7 @@ class PaymentGatewayFactory
         }
 
         return match ($provider) {
-            'mercadopago' => new MercadoPagoGateway,
+            'mercadopago' => new MercadoPagoGateway($settingService->current()->mercadopago_access_token),
             'mock' => new MockPaymentGateway,
             default => throw new \Exception("Payment gateway '{$provider}' not supported"),
         };

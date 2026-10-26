@@ -14,16 +14,18 @@ use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
 use MercadoPago\Net\MPResponse;
 use Tests\TestCase;
+use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 
 class MercadoPagoPreferenceHeaderTest extends TestCase
 {
     use RefreshDatabase;
+    use SyntheticMercadoPagoLink;
 
     public function test_productive_request_options_use_exact_lowercase_key_and_sdk_resolves_same_value_on_repetition(): void
     {
         $this->withIsolatedSdk(function ($transport) {
             $data = $this->orderData();
-            $gateway = new MercadoPagoGateway;
+            $gateway = new MercadoPagoGateway(PaymentSetting::current()->mercadopago_access_token);
             $gateway->createPayment($data);
             $gateway->createPayment($data);
             $this->assertTrue(count($transport->checks) === 2, 'Both executions must reach only the in-memory SDK transport.');
@@ -51,7 +53,7 @@ class MercadoPagoPreferenceHeaderTest extends TestCase
 
     private function withIsolatedSdk(\Closure $callback): void
     {
-        $this->assertTrue(config('database.default') === 'sqlite' && config('database.connections.sqlite.database') === ':memory:', 'Header regression requires isolated in-memory SQLite.');
+        $this->assertSyntheticDatabaseIsolation();
         $clientProperty = new \ReflectionProperty(MercadoPagoConfig::class, 'http_client');
         $originalClient = $clientProperty->getValue();
         $originalToken = MercadoPagoConfig::getAccessToken();
@@ -75,7 +77,7 @@ class MercadoPagoPreferenceHeaderTest extends TestCase
                     'sdk_resolved_same_value' => count($resolved) === 1 && substr($resolved[0], strlen('X-Idempotency-Key: ')) === $this->expectedKey,
                 ];
 
-                return new MPResponse(201, ['id' => 'synthetic-preference', 'init_point' => 'https://invalid.example/checkout', 'sandbox_init_point' => 'https://invalid.example/sandbox']);
+                return new MPResponse(201, ['id' => 'synthetic-'.bin2hex(random_bytes(16)), 'init_point' => 'https://example.invalid/checkout', 'sandbox_init_point' => 'https://example.invalid/sandbox']);
             }
 
             public function matchesKey(string $key): bool
@@ -84,8 +86,9 @@ class MercadoPagoPreferenceHeaderTest extends TestCase
             }
         };
         try {
-            PaymentSetting::current()->update(['mercadopago_access_token' => 'SYNTHETIC_TEST_TOKEN']);
             MercadoPagoConfig::setHttpClient($transport);
+            config(['payment.mercadopago.access_token' => null]);
+            PaymentSetting::current()->update(['mercadopago_access_token' => 'SYNTHETIC_'.bin2hex(random_bytes(16))]);
             $callback($transport);
         } finally {
             $clientProperty->setValue(null, $originalClient);
@@ -98,8 +101,8 @@ class MercadoPagoPreferenceHeaderTest extends TestCase
         return [
             'items' => [['name' => 'Synthetic item', 'quantity' => 1, 'price' => 10]],
             'customer' => ['name' => 'Synthetic buyer', 'email' => 'buyer@example.invalid'],
-            'external_reference' => 'SYNTHETIC_REFERENCE',
-            'idempotency_key' => 'SYNTHETIC_EXISTING_KEY',
+            'external_reference' => 'SYNTHETIC_'.bin2hex(random_bytes(16)),
+            'idempotency_key' => 'SYNTHETIC_'.bin2hex(random_bytes(16)),
         ];
     }
 }
