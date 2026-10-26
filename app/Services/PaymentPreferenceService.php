@@ -54,14 +54,21 @@ class PaymentPreferenceService
             return $preference;
         }
 
+        $failureStage = 'gateway_initialization';
         try {
-            $createdPreference = PaymentGatewayFactory::create($gateway)->createPayment(array_merge($orderData, [
+            $provider = PaymentGatewayFactory::create($gateway);
+            $failureStage = 'remote_creation';
+            $createdPreference = $provider->createPayment(array_merge($orderData, [
                 'external_reference' => $preference->external_reference,
                 'idempotency_key' => $preference->idempotency_key,
             ]));
         } catch (MPApiException $exception) {
+            $this->recordFailure($preference, $exception, $failureStage);
+
             return $this->fail($preference, 'provider_rejected', $exception->getMessage());
         } catch (\Throwable $exception) {
+            $this->recordFailure($preference, $exception, $failureStage);
+
             // A timeout may have created a remote preference. Reconciliation is required before another attempt.
             return $this->orphan($preference, 'remote_result_uncertain');
         }
@@ -82,6 +89,20 @@ class PaymentPreferenceService
 
             return $locked->refresh();
         });
+    }
+
+    private function recordFailure(PaymentPreference $preference, \Throwable $exception, string $stage): void
+    {
+        if ($preference->gateway !== 'mercadopago') {
+            return;
+        }
+        // Diagnostics must never prevent the existing failed/orphaned transition.
+        try {
+            \Illuminate\Support\Facades\Log::warning('payment_preference_creation_failed',
+                PaymentPreferenceFailureDiagnostics::context($preference, $exception, $stage));
+        } catch (\Throwable) {
+            // Do not fall back to reporting the exception/request through another logger.
+        }
     }
 
     public function fail(PaymentPreference $preference, string $code, string $message): PaymentPreference
