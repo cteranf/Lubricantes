@@ -54,7 +54,7 @@ class MercadoPagoGateway implements PaymentGatewayInterface
         ];
 
         $options = new RequestOptions;
-        $options->setCustomHeaders(['X-Idempotency-Key' => $orderData['idempotency_key']]);
+        $options->setCustomHeaders(['x-idempotency-key' => $orderData['idempotency_key']]);
         $preference = $client->create($preferenceData, $options);
 
         return [
