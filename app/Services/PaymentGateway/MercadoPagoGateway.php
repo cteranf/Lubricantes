@@ -4,15 +4,19 @@ namespace App\Services\PaymentGateway;
 
 use App\Exceptions\PaymentLinkEvidenceException as LinkFailure;
 use App\Services\MoneyService;
-use MercadoPago\Exceptions\MPApiException;
-use MercadoPago\Client\MerchantOrder\MerchantOrderClient;
 use MercadoPago\Client\Common\RequestOptions;
+use MercadoPago\Client\MerchantOrder\MerchantOrderClient;
 use MercadoPago\Client\Payment\PaymentClient;
 use MercadoPago\Client\Preference\PreferenceClient;
+use MercadoPago\Exceptions\MPApiException;
 use MercadoPago\MercadoPagoConfig;
 
 class MercadoPagoGateway implements PaymentGatewayInterface
 {
+    private const SDK_ID_OVERFLOW_MESSAGE = 'Mercado Pago identity exceeds the SDK integer range.';
+
+    private const SDK_ID_CONVERSION_MESSAGE = 'Mercado Pago identity conversion failed.';
+
     public function __construct(?string $accessToken = null)
     {
         $token = $accessToken === null || $accessToken === '' ? config('payment.mercadopago.access_token') : $accessToken;
@@ -75,63 +79,96 @@ class MercadoPagoGateway implements PaymentGatewayInterface
 
     public function verifyPayment(string $paymentId): array
     {
-        if (! preg_match('/^[1-9][0-9]*$/D', $paymentId)) {
+        $requestedPaymentId = $this->requireIdentity($paymentId);
+        $sdkPaymentId = $this->sdkIntegerIdentity($requestedPaymentId);
+        $payment = (new PaymentClient)->get($sdkPaymentId);
+        $raw = $payment->getResponse()->getContent();
+        if (! is_array($raw) || ! is_array($raw['order'] ?? null)) {
             throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
         }
-        $payment = (new PaymentClient)->get($paymentId);
+        $paymentIdentity = $this->requireIdentity($raw['id'] ?? null);
+        $paymentOrderIdentity = $this->requireIdentity($raw['order']['id'] ?? null);
+        $sdkPaymentOrderId = $this->sdkIntegerIdentity($paymentOrderIdentity);
         if (! isset($payment->id, $payment->status, $payment->external_reference, $payment->transaction_amount, $payment->currency_id, $payment->order)
             || ! is_object($payment->order) || ! isset($payment->order->id)) {
             throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
         }
-        $this->requireIdentity($payment->id);
-        $this->requireIdentity($payment->order->id);
-        $this->requireText($payment->status);
-        $this->requireText($payment->external_reference);
-        $raw = $payment->getResponse()->getContent();
-        $this->requireIdentity($raw['id'] ?? null);
-        $this->requireText($raw['status'] ?? null);
-        $this->requireText($raw['external_reference'] ?? null);
-        if (! is_array($raw['order'] ?? null)) {
-            throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
-        }
-        $this->requireIdentity($raw['order']['id'] ?? null);
-        if ((string) $payment->id !== $paymentId) {
+        $dtoPaymentIdentity = $this->requireIdentity($payment->id);
+        $dtoPaymentOrderIdentity = $this->requireIdentity($payment->order->id);
+        if ($paymentIdentity !== $dtoPaymentIdentity || $paymentOrderIdentity !== $dtoPaymentOrderIdentity) {
             throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
         }
-        $merchantOrder = $this->retrieveEvidence(fn () => (new MerchantOrderClient)->get($payment->order->id));
-        if (! isset($merchantOrder->id, $merchantOrder->preference_id, $merchantOrder->external_reference, $merchantOrder->payments, $merchantOrder->total_amount)
-            || ! is_array($merchantOrder->payments)) {
+        $this->requireText($payment->status);
+        $this->requireText($payment->external_reference);
+        $this->requireText($raw['status'] ?? null);
+        $this->requireText($raw['external_reference'] ?? null);
+        if ($paymentIdentity !== $requestedPaymentId) {
+            throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
+        }
+        $merchantOrder = $this->retrieveEvidence(fn () => (new MerchantOrderClient)->get($sdkPaymentOrderId));
+        $orderRaw = $merchantOrder->getResponse()->getContent();
+        if (! is_array($orderRaw)) {
             throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
         }
-        $this->requireIdentity($merchantOrder->id);
-        $this->requireText($merchantOrder->preference_id);
-        $this->requireText($merchantOrder->external_reference);
-        $orderRaw = $merchantOrder->getResponse()->getContent();
-        $this->requireIdentity($orderRaw['id'] ?? null);
-        $this->requireText($orderRaw['preference_id'] ?? null);
-        $this->requireText($orderRaw['external_reference'] ?? null);
+        $merchantOrderIdentity = $this->requireIdentity($orderRaw['id'] ?? null);
         if (! is_array($orderRaw['payments'] ?? null) || ! array_is_list($orderRaw['payments'])) {
             throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
         }
-        if ($merchantOrder->id !== $payment->order->id || $merchantOrder->external_reference !== $payment->external_reference) {
-            throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
-        }
+        $memberIdentities = [];
         foreach ($orderRaw['payments'] as $member) {
             if (! is_array($member)) {
                 throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
             }
-            $this->requireIdentity($member['id'] ?? null);
+            $memberIdentity = $this->requireIdentity($member['id'] ?? null);
+            $memberIdentities[] = $memberIdentity;
         }
-        $members = array_values(array_filter($orderRaw['payments'], static fn ($member) => $member['id'] === $payment->id));
-        if (count($members) !== 1) {
+        if (! isset($merchantOrder->id, $merchantOrder->preference_id, $merchantOrder->external_reference, $merchantOrder->payments, $merchantOrder->total_amount)
+            || ! is_array($merchantOrder->payments)) {
+            throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
+        }
+        $dtoMerchantOrderIdentity = $this->requireIdentity($merchantOrder->id);
+        if ($merchantOrderIdentity !== $dtoMerchantOrderIdentity) {
             throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
         }
-        foreach ([$raw['transaction_amount'] ?? null, $members[0]['transaction_amount'] ?? null, $orderRaw['total_amount'] ?? null] as $value) {
+        $this->requireText($merchantOrder->preference_id);
+        $this->requireText($merchantOrder->external_reference);
+        $this->requireText($orderRaw['preference_id'] ?? null);
+        $this->requireText($orderRaw['external_reference'] ?? null);
+        if ($merchantOrderIdentity !== $paymentOrderIdentity
+            || $merchantOrder->external_reference !== $payment->external_reference) {
+            throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
+        }
+        if (count($merchantOrder->payments) !== count($memberIdentities)) {
+            throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
+        }
+        foreach ($memberIdentities as $index => $memberIdentity) {
+            $memberDto = $merchantOrder->payments[$index] ?? null;
+            if (! is_object($memberDto) || ! isset($memberDto->id)) {
+                throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
+            }
+            $dtoMemberIdentity = $this->requireIdentity($memberDto->id);
+            if ($memberIdentity !== $dtoMemberIdentity) {
+                throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
+            }
+        }
+        $matchingMember = null;
+        $matchingMembers = 0;
+        foreach ($orderRaw['payments'] as $index => $member) {
+            $memberIdentity = $memberIdentities[$index];
+            if ($memberIdentity === $paymentIdentity) {
+                $matchingMember = $member;
+                $matchingMembers++;
+            }
+        }
+        if ($matchingMembers !== 1 || ! is_array($matchingMember)) {
+            throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
+        }
+        foreach ([$raw['transaction_amount'] ?? null, $matchingMember['transaction_amount'] ?? null, $orderRaw['total_amount'] ?? null] as $value) {
             if (! is_int($value) && ! is_float($value)) {
                 throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
             }
         }
-        foreach ([$raw['currency_id'] ?? null, $members[0]['currency_id'] ?? null] as $currency) {
+        foreach ([$raw['currency_id'] ?? null, $matchingMember['currency_id'] ?? null] as $currency) {
             if (! is_string($currency) || preg_match('/^[A-Z]{3}$/D', $currency) !== 1) {
                 throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
             }
@@ -139,25 +176,25 @@ class MercadoPagoGateway implements PaymentGatewayInterface
         $money = new MoneyService;
         try {
             $amount = $money->toMinor((string) $raw['transaction_amount']);
-            $memberAmount = $money->toMinor((string) $members[0]['transaction_amount']);
+            $memberAmount = $money->toMinor((string) $matchingMember['transaction_amount']);
             $remoteOrderAmount = $money->toMinor((string) $orderRaw['total_amount']);
         } catch (\InvalidArgumentException $exception) {
             throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE, $exception);
         }
         if ($amount <= 0 || $amount !== $memberAmount || $amount !== $remoteOrderAmount
-            || $members[0]['currency_id'] !== $payment->currency_id) {
+            || $matchingMember['currency_id'] !== $payment->currency_id) {
             throw new LinkFailure(LinkFailure::CONTRADICTORY_EVIDENCE);
         }
 
         return [
             'gateway' => 'mercadopago',
-            'id' => $payment->id,
+            'id' => $paymentIdentity,
             'status' => $payment->status ?? null,
             'external_reference' => $payment->external_reference ?? null,
             'transaction_amount' => $payment->transaction_amount,
             'currency_id' => $payment->currency_id ?? null,
             'preference_id' => $merchantOrder->preference_id,
-            'merchant_order_id' => $merchantOrder->id,
+            'merchant_order_id' => $merchantOrderIdentity,
         ];
     }
 
@@ -173,11 +210,38 @@ class MercadoPagoGateway implements PaymentGatewayInterface
         }
     }
 
-    private function requireIdentity(mixed $id): void
+    private function requireIdentity(mixed $id): string
     {
-        if (! is_int($id) || $id <= 0) {
-            throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
+        if (is_int($id) && $id > 0) {
+            return (string) $id;
         }
+
+        if (is_string($id) && preg_match('/\A[1-9][0-9]*\z/D', $id) === 1) {
+            return $id;
+        }
+
+        throw new LinkFailure(LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
+    }
+
+    private function sdkIntegerIdentity(string $canonicalId): int
+    {
+        if (preg_match('/\A[1-9][0-9]*\z/D', $canonicalId) !== 1) {
+            throw new \LogicException(self::SDK_ID_CONVERSION_MESSAGE);
+        }
+
+        $maximum = (string) PHP_INT_MAX;
+        $length = strlen($canonicalId);
+        $maximumLength = strlen($maximum);
+        if ($length > $maximumLength || ($length === $maximumLength && strcmp($canonicalId, $maximum) > 0)) {
+            throw new \OverflowException(self::SDK_ID_OVERFLOW_MESSAGE);
+        }
+
+        $sdkId = (int) $canonicalId;
+        if ((string) $sdkId !== $canonicalId) {
+            throw new \UnexpectedValueException(self::SDK_ID_CONVERSION_MESSAGE);
+        }
+
+        return $sdkId;
     }
 
     private function requireText(mixed $value): void
