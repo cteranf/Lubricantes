@@ -75,7 +75,8 @@ class UserAdministrationTest extends TestCase
         $this->assertDatabaseCount('personal_access_tokens', 0);
         $this->app['auth']->forgetGuards();
         $this->withToken($token)->getJson('/api/v1/profile')->assertUnauthorized();
-        $this->postJson('/api/v1/auth/login', ['email' => $target->email, 'password' => 'password'])->assertForbidden()->assertJsonPath('code', 'account_inactive');
+        $this->postJson('/api/v1/auth/login', ['email' => $target->email, 'password' => 'password'])
+            ->assertUnauthorized()->assertExactJson(['message' => 'Invalid login details']);
     }
 
     public function test_a_manually_surviving_token_is_blocked_by_active_user_middleware(): void

@@ -44,7 +44,7 @@ class UserController extends Controller
 
     public function store(StoreUserRequest $request)
     {
-        return (new UserResource($this->users->create($request->validated())))->response()->setStatusCode(201);
+        return (new UserResource($this->users->create($request->validated(), $request->user())))->response()->setStatusCode(201);
     }
 
     public function show(User $user): UserResource
@@ -64,6 +64,6 @@ class UserController extends Controller
 
     public function password(ResetUserPasswordRequest $request, User $user): UserResource
     {
-        return new UserResource($this->users->resetPassword($user, $request->validated('password')));
+        return new UserResource($this->users->resetPassword($request->user(), $user, $request->validated('password')));
     }
 }

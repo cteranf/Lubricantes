@@ -5,12 +5,17 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\AuditService;
+use App\Support\AuditEventContract;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
+    public function __construct(private AuditService $audit) {}
+
     public function register(Request $request)
     {
         $payload = $request->all();
@@ -25,14 +30,25 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $payload['email'],
-            'password' => Hash::make($payload['password']),
-            'role' => 'customer',
-        ]);
+        [$user, $token] = DB::transaction(function () use ($request, $payload) {
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $payload['email'],
+                'password' => Hash::make($payload['password']),
+                'role' => 'customer',
+            ]);
+            $this->audit->recordUser(
+                AuditEventContract::USER_CREATED,
+                null,
+                AuditEventContract::RESULT_SUCCEEDED,
+                auditableType: 'user',
+                auditableId: (string) $user->id,
+                newValues: ['role' => 'customer', 'is_active' => true],
+                request: $request
+            );
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+            return [$user, $user->createToken('auth_token')->plainTextToken];
+        });
 
         return response()->json([
             'access_token' => $token,
@@ -43,22 +59,51 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
-        $credentials = ['email' => mb_strtolower(trim((string) $request->input('email'))), 'password' => $request->input('password')];
-        $user = User::whereRaw('LOWER(email) = ?', [$credentials['email']])->first();
-        if (! $user || ! Hash::check((string) $credentials['password'], $user->password)) {
+        $emailInput = $request->input('email');
+        $passwordInput = $request->input('password');
+        $email = is_string($emailInput) ? mb_strtolower(trim($emailInput)) : '';
+        $password = is_string($passwordInput) ? $passwordInput : '';
+
+        $authenticated = DB::transaction(function () use ($email, $password, $request): ?array {
+            $user = User::whereRaw('LOWER(email) = ?', [$email])
+                ->lockForUpdate()
+                ->first();
+
+            if (! $user
+                || mb_strtolower(trim((string) $user->email)) !== $email
+                || ! $user->is_active
+                || ! Hash::check($password, $user->password)) {
+                return null;
+            }
+
+            $token = $user->createToken('auth_token')->plainTextToken;
+            $this->audit->recordUser(
+                AuditEventContract::AUTH_LOGIN_SUCCEEDED,
+                $user,
+                AuditEventContract::RESULT_SUCCEEDED,
+                auditableType: 'user',
+                auditableId: (string) $user->getAuthIdentifier(),
+                request: $request
+            );
+
+            return [$user, $token];
+        });
+
+        if ($authenticated === null) {
+            $this->audit->recordFailureOpen(
+                AuditEventContract::AUTH_LOGIN_FAILED,
+                null,
+                AuditEventContract::RESULT_FAILED,
+                AuditEventContract::FAILURE_INVALID_CREDENTIALS,
+                request: $request
+            );
+
             return response()->json([
                 'message' => 'Invalid login details',
             ], 401);
         }
 
-        if (! $user->is_active) {
-            return response()->json([
-                'message' => 'La cuenta está desactivada.',
-                'code' => 'account_inactive',
-            ], 403);
-        }
-
-        $token = $user->createToken('auth_token')->plainTextToken;
+        [$user, $token] = $authenticated;
 
         return response()->json([
             'access_token' => $token,
@@ -69,7 +114,18 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        DB::transaction(function () use ($request): void {
+            $user = $request->user();
+            $user->currentAccessToken()->delete();
+            $this->audit->recordUser(
+                AuditEventContract::AUTH_LOGOUT,
+                $user,
+                AuditEventContract::RESULT_SUCCEEDED,
+                auditableType: 'user',
+                auditableId: (string) $user->id,
+                request: $request
+            );
+        });
 
         return response()->json(['message' => 'Logged out successfully']);
     }
