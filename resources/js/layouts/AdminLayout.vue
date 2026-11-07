@@ -60,6 +60,7 @@ const SIDEBAR_STORAGE_KEY = 'lubristore.admin.sidebar.collapsed';
 const adminNavigation = [
     { label: 'Dashboard', to: '/admin/dashboard', icon: 'pi pi-home' },
     { label: 'Usuarios', to: '/admin/users', icon: 'pi pi-users' },
+    { label: 'Auditoría', to: '/admin/auditoria', icon: 'pi pi-history' },
     { label: 'Mi perfil', to: '/profile', icon: 'pi pi-user' },
     { label: 'Consultas', to: '/admin/contact-inquiries', icon: 'pi pi-inbox' },
     { label: 'Reportes gerenciales', to: '/admin/reports/management', icon: 'pi pi-chart-bar' },

@@ -32,6 +32,10 @@ final class AuditEventContract
 
     public const SYSTEM_COMMAND_COMPLETED = 'system.command.completed';
 
+    public const AUDIT_LOGS_VIEWED = 'audit.logs.viewed';
+
+    public const AUDIT_LOG_VIEWED = 'audit.log.viewed';
+
     public const ACTOR_USER = 'user';
 
     public const ACTOR_SYSTEM = 'system';
@@ -76,6 +80,8 @@ final class AuditEventContract
         self::USER_PASSWORD_RESET,
         self::SECURITY_ACCESS_DENIED,
         self::SYSTEM_COMMAND_COMPLETED,
+        self::AUDIT_LOGS_VIEWED,
+        self::AUDIT_LOG_VIEWED,
     ];
 
     public const ACTOR_TYPES = [self::ACTOR_USER, self::ACTOR_SYSTEM, self::ACTOR_COMMAND];
@@ -99,6 +105,7 @@ final class AuditEventContract
             self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED,
             self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED => self::CATEGORY_AUTHENTICATION,
             self::SECURITY_ACCESS_DENIED => self::CATEGORY_ACCESS,
+            self::AUDIT_LOGS_VIEWED, self::AUDIT_LOG_VIEWED => self::CATEGORY_ACCESS,
             self::USER_CREATED, self::USER_UPDATED, self::USER_ROLE_CHANGED,
             self::USER_STATUS_CHANGED, self::USER_PASSWORD_CHANGED, self::USER_PASSWORD_RESET => self::CATEGORY_USER_SECURITY,
             self::SYSTEM_COMMAND_COMPLETED => self::CATEGORY_SYSTEM,
@@ -108,7 +115,7 @@ final class AuditEventContract
 
     public static function retentionFor(string $action): string
     {
-        return in_array($action, [self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED, self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED, self::SECURITY_ACCESS_DENIED], true)
+        return in_array($action, [self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED, self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED, self::SECURITY_ACCESS_DENIED, self::AUDIT_LOGS_VIEWED, self::AUDIT_LOG_VIEWED], true)
             ? self::RETENTION_ACCESS
             : self::RETENTION_ADMINISTRATIVE;
     }
@@ -148,6 +155,8 @@ final class AuditEventContract
             self::USER_UPDATED => ['changed_fields'],
             self::AUTH_SESSION_REVOKED => ['reason', 'revoked_count'],
             self::SYSTEM_COMMAND_COMPLETED => ['command_name'],
+            self::AUDIT_LOGS_VIEWED => ['scope', 'page', 'per_page'],
+            self::AUDIT_LOG_VIEWED => ['scope', 'audit_log_id'],
             default => [],
         };
     }

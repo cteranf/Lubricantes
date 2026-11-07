@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\BranchController as AdminBranchController;
 use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
@@ -121,6 +122,8 @@ Route::prefix('v1')->group(function () {
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
+            Route::get('/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->name('audit-logs.show');
             Route::patch('/users/{user}/status', [AdminUserController::class, 'status'])->name('users.status');
             Route::put('/users/{user}/password', [AdminUserController::class, 'password'])->name('users.password');
             Route::apiResource('users', AdminUserController::class)->only(['index', 'store', 'show', 'update']);

@@ -82,6 +82,22 @@ class AuditSanitizer
                 if (! is_string($value) || preg_match('/\A[a-z0-9:.\-]{1,80}\z/D', $value) !== 1) {
                     throw new InvalidArgumentException('El nombre de comando no es válido.');
                 }
+            } elseif ($key === 'scope') {
+                if (! is_string($value) || ! in_array($value, ['list', 'detail'], true)) {
+                    throw new InvalidArgumentException('El alcance de auditoría no es válido.');
+                }
+            } elseif ($key === 'page') {
+                if (! is_int($value) || $value < 1) {
+                    throw new InvalidArgumentException('La página de auditoría no es válida.');
+                }
+            } elseif ($key === 'per_page') {
+                if (! is_int($value) || $value < 1 || $value > 100) {
+                    throw new InvalidArgumentException('El tamaño de página de auditoría no es válido.');
+                }
+            } elseif ($key === 'audit_log_id') {
+                if (! is_string($value) || preg_match('/\A[1-9][0-9]{0,19}\z/D', $value) !== 1) {
+                    throw new InvalidArgumentException('La referencia de auditoría no es válida.');
+                }
             } else {
                 throw new InvalidArgumentException('La clave de metadata no es válida.');
             }

@@ -1,8 +1,8 @@
 # Certificación local de auditoría general
 
 **Fecha de consolidación:** 2026-11-07
-**Fases:** A y B
-**Estado:** certificadas localmente; staging, commit, push y despliegue pendientes.
+**Fases:** A y B; visor administrativo documentado como extensión separada
+**Estado:** fases A/B y visor certificados localmente; staging, commit, push y despliegue pendientes.
 
 ## Alcance
 
@@ -14,7 +14,7 @@ No forman parte de las fases A/B:
 
 - Catálogo, productos, categorías y marcas.
 - Sedes, almacenes y logística.
-- Visor administrativo y exportación.
+- Exportación.
 - Job de retención o purga.
 - Segregación física de permisos de base de datos.
 - Hash encadenado e inmutabilidad física.
@@ -149,6 +149,97 @@ Después de la autorización correspondiente para commit, push y despliegue, el 
 7. Monitoreo inicial.
 
 Estos pasos son pendientes y no se presentan como ejecutados.
+
+## Visor administrativo de auditoría
+
+Esta sección documenta la extensión del visor, certificada por separado de los conteos de las fases A/B.
+
+### Alcance funcional
+
+- Ruta frontend: `/admin/auditoria`.
+- Endpoints de solo lectura:
+  - `GET /api/v1/admin/audit-logs`
+  - `GET /api/v1/admin/audit-logs/{auditLog}`
+- El acceso exige usuario autenticado, activo y administrador.
+- El visor no permite editar, eliminar, exportar ni purgar registros.
+- El listado pagina 25 filas por defecto, admite hasta 100 y ordena por `occurred_at DESC, id DESC`.
+- Los filtros allowlisted son `date_from`, `date_to`, `action`, `category`, `result`, `actor_type`, `actor_id`, `auditable_type`, `auditable_id`, `request_id` y `correlation_id`.
+
+### Privacidad del visor
+
+- El listado usa una proyección explícita y no expone valores anteriores o nuevos, metadata, IP ni User-Agent.
+- El detalle vuelve a sanitizar los datos estructurados.
+- La información actual del actor se limita a ID y nombre; no se muestra su email.
+- No se muestran contraseñas, tokens, hashes, cookies, encabezados de autorización ni secretos.
+- La interfaz no usa `v-html`.
+
+### Auditoría de accesos al visor
+
+Las acciones son `audit.logs.viewed` para el listado y `audit.log.viewed` para el detalle.
+
+- Se registra exactamente un evento por acceso exitoso.
+- El evento se escribe después de preparar el snapshot seguro y no aparece en la misma respuesta.
+- No se copian filas consultadas ni filtros sensibles al evento.
+- Si falla el registro del acceso, no se entregan los datos.
+- La escritura no produce recursión.
+- Rechazos y validaciones fallidas no se registran como accesos exitosos.
+
+### Correcciones y regresiones del visor
+
+- Las respuestas de detalle fuera de orden se protegen con secuencia e ID seleccionado; los errores obsoletos se ignoran.
+- Cerrar y desmontar invalida solicitudes pendientes.
+- El diálogo recibe el foco inicial, contiene `Tab` y `Shift+Tab`, cierra con Escape y restaura el foco al disparador.
+- No se usan listeners globales ni `v-html`.
+- Las pruebas incluyen filas objetivo y señuelo para los 11 filtros, combinaciones de filtros y rechazo de administradores inactivos.
+- Los límites diarios se fijaron con cuatro filas sintéticas: día anterior `23:59:59`, día seleccionado `00:00:00` y `23:59:59`, y día siguiente `00:00:00`. Se comprobó el inicio inclusivo, el comienzo exclusivo del día siguiente, el intervalo de un día, IDs concretos, ausencia de ambos señuelos, total exacto y orden descendente.
+
+### Evidencia de pruebas del visor
+
+Estas ejecuciones son bloques separados y se solapan; sus conteos no se suman entre sí ni a las cifras anteriores de las fases A/B.
+
+| Ejecución | Entorno | Tests | Assertions |
+|---|---|---:|---:|
+| Primera certificación del visor | SQLite | 9 | 140 |
+| Primera certificación del visor | MySQL aislado | 9 | 140 |
+| Después del hardening P2/P3 | SQLite | 21 | 219 |
+| Después del hardening P2/P3 | MySQL aislado | 21 | 219 |
+| Certificación final con límites diarios | SQLite | 22 | 236 |
+| Certificación final con límites diarios | MySQL aislado | 22 | 236 |
+
+Las ejecuciones se solapan. El conteo final representativo de la clase es SQLite: 22 tests / 236 assertions y MySQL aislado: 22 tests / 236 assertions. Estos resultados no se agregan a los conteos históricos de A/B.
+
+### Frontend y calidad
+
+- `npm run build` fue aprobado; quedaron avisos no bloqueantes de Browserslist desactualizado y tamaño del bundle.
+- El proyecto no tiene un harness automatizado frontend configurado. Las carreras de respuesta y la gestión del foco se revisaron estáticamente.
+- Pint focalizado, `php -l` para los PHP afectados y `git diff --check` fueron reportados como aprobados.
+
+### Límites de la certificación del visor
+
+- La certificación fue local: SQLite en memoria y MySQL local aislado con base `_test`; no hubo acceso a producción ni llamadas externas.
+- No certifica producción ni incluye pruebas automatizadas frontend.
+- No existe inmutabilidad física total: SQL directo, `DB::table` y `toBase()` pueden eludir la protección Eloquent.
+- El visor no sustituye los historiales especializados. No ofrece exportación, purga automática ni retención ejecutada automáticamente desde la interfaz.
+- El primer intento MySQL fue detenido por el guard antes de migraciones o escrituras. Solo las ejecuciones posteriores autorizadas y aprobadas constituyen evidencia.
+- Esta actualización documental no despliega nada.
+
+### Despliegue del conjunto completo pendiente
+
+Para desplegar por primera vez el conjunto de auditoría, el procedimiento autorizado deberá incluir:
+
+1. Respaldo de la base de datos.
+2. `git pull` del cambio aprobado.
+3. Instalación de dependencias conforme al procedimiento del servidor.
+4. `php artisan migrate --force` para crear `audit_logs` y aplicar las migraciones pendientes.
+5. Limpieza controlada de cachés Laravel.
+6. `npm run build` o despliegue de los assets construidos, porque el visor modifica Vue.
+7. Verificación de rutas y permisos administrativos.
+
+Si la migración de `audit_logs` ya fue aplicada, no debe ejecutarse manualmente otra vez; Laravel determinará qué migraciones siguen pendientes. No se afirma que haya habido push, despliegue ni migración productiva.
+
+### Revisión estática final del visor
+
+La revisión estática final no encontró hallazgos P0–P3, confirmó el inventario y los límites diarios, y aprobó el visor para actualización documental y staging explícito. Esta aprobación no declara despliegue ni certificación productiva.
 
 ## Estado final
 
