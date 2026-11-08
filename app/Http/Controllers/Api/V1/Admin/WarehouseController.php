@@ -14,12 +14,13 @@ class WarehouseController extends Controller
 {
     public function options()
     {
-        return Warehouse::with('branch:id,code,name,district,is_active')
+        return Warehouse::query()
             ->where('is_active', true)
             ->whereHas('branch', fn ($query) => $query->where('is_active', true))
             ->orderByDesc('is_default')
             ->orderBy('name')
-            ->get(['id', 'branch_id', 'code', 'name', 'is_default']);
+            ->limit(200)
+            ->get(['id', 'name']);
     }
 
     public function index(Request $request)

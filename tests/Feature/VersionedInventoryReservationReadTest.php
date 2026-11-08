@@ -115,7 +115,7 @@ class VersionedInventoryReservationReadTest extends TestCase
             ->assertJsonMissingPath('order.items.0.reservations');
     }
 
-    public function test_admin_order_list_uses_only_current_reservation_and_hides_history_internals(): void
+    public function test_admin_order_list_exposes_only_the_current_reservation_summary(): void
     {
         $fixture = $this->fixture();
         $this->reservation($fixture, 1, InventoryReservation::EXPIRED);
@@ -126,11 +126,70 @@ class VersionedInventoryReservationReadTest extends TestCase
         $response = $this->getJson('/api/v1/admin/orders')->assertOk();
         $order = collect($response->json('data'))->firstWhere('id', $fixture['order']->id);
 
-        $this->assertSame(InventoryReservation::CONSUMED, data_get($order, 'items.0.reservation.status'));
-        $this->assertArrayNotHasKey('reservations', $order['items'][0]);
-        foreach (['reservation_sequence', 'resolution_case_id', 'idempotency_key', 'metadata'] as $internal) {
-            $this->assertArrayNotHasKey($internal, $order['items'][0]['reservation']);
-        }
+        $this->assertSame(InventoryReservation::CONSUMED, data_get($order, 'reservation_status'));
+        $this->assertArrayNotHasKey('items', $order);
+    }
+
+    public function test_admin_order_list_returns_null_summary_when_an_item_has_no_reservation(): void
+    {
+        $fixture = $this->fixture();
+        $before = InventoryReservation::query()->where('order_id', $fixture['order']->id)->count();
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        Sanctum::actingAs($admin);
+
+        $response = $this->getJson('/api/v1/admin/orders')->assertOk();
+        $rows = collect($response->json('data'))->where('id', $fixture['order']->id)->values();
+        $after = InventoryReservation::query()->where('order_id', $fixture['order']->id)->count();
+
+        $this->assertCount(1, $rows);
+        $this->assertNull($rows->first()['reservation_status']);
+        $this->assertArrayNotHasKey('items', $rows->first());
+        $this->assertSame(0, $before);
+        $this->assertSame($before, $after);
+    }
+
+    public function test_admin_order_list_keeps_each_current_reservation_attached_to_its_item(): void
+    {
+        $fixture = $this->fixture();
+        $firstItem = $fixture['item'];
+        $secondItem = OrderItem::create([
+            'order_id' => $fixture['order']->id,
+            'product_id' => $fixture['product']->id,
+            'warehouse_id' => $fixture['inventory']->warehouse_id,
+            'quantity' => 1,
+            'price' => '25.00',
+            'subtotal' => '25.00',
+        ]);
+        $firstCurrent = $this->reservation($fixture, 1, InventoryReservation::ACTIVE);
+        $secondFixture = $fixture;
+        $secondFixture['item'] = $secondItem;
+        $this->reservation($secondFixture, 1, InventoryReservation::EXPIRED);
+        $secondCurrent = $this->reservation($secondFixture, 2, InventoryReservation::CONSUMED);
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        Sanctum::actingAs($admin);
+
+        $response = $this->getJson('/api/v1/admin/orders')->assertOk();
+        $rows = collect($response->json('data'))->where('id', $fixture['order']->id)->values();
+        $order = Order::query()->whereKey($fixture['order']->id)->with([
+            'items' => fn ($query) => $query
+                ->select(['order_items.id', 'order_items.order_id', 'order_items.warehouse_id'])
+                ->orderBy('order_items.id'),
+            'items.currentReservation' => fn ($query) => $query->select([
+                'inventory_reservations.id',
+                'inventory_reservations.order_item_id',
+                'inventory_reservations.status',
+            ]),
+        ])->firstOrFail();
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(InventoryReservation::ACTIVE, $rows->first()['reservation_status']);
+        $this->assertArrayNotHasKey('items', $rows->first());
+        $this->assertCount(2, $order->items);
+        $this->assertSame([$firstItem->id, $secondItem->id], $order->items->pluck('id')->all());
+        $this->assertTrue($order->items->every(fn (OrderItem $item) => $item->relationLoaded('currentReservation')));
+        $this->assertSame([$firstCurrent->id, $secondCurrent->id], $order->items->map(fn (OrderItem $item) => $item->currentReservation?->id)->all());
+        $this->assertSame([$firstItem->id, $secondItem->id], $order->items->map(fn (OrderItem $item) => $item->currentReservation?->order_item_id)->all());
+        $this->assertSame([InventoryReservation::ACTIVE, InventoryReservation::CONSUMED], $order->items->map(fn (OrderItem $item) => $item->currentReservation?->status)->all());
     }
 
     /** @return array{customer: User, order: Order, item: OrderItem, product: Product, inventory: WarehouseInventory} */
