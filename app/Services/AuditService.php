@@ -73,7 +73,7 @@ class AuditService
         ?array $metadata = null,
         ?Request $request = null
     ): void {
-        $allowed = [AuditEventContract::AUTH_LOGIN_FAILED, AuditEventContract::AUTH_LOGIN_DENIED, AuditEventContract::SECURITY_ACCESS_DENIED];
+        $allowed = [AuditEventContract::AUTH_LOGIN_FAILED, AuditEventContract::AUTH_LOGIN_DENIED, AuditEventContract::AUTH_LOGIN_UNVERIFIED_REJECTED, AuditEventContract::SECURITY_ACCESS_DENIED];
         if (! in_array($action, $allowed, true)) {
             throw new InvalidArgumentException('La acción no admite registro fail-open.');
         }

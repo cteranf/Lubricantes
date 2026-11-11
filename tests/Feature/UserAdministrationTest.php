@@ -5,12 +5,21 @@ namespace Tests\Feature;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class UserAdministrationTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Notification::fake();
+        Queue::fake();
+    }
 
     private function admin(array $attributes = []): User
     {
@@ -168,9 +177,34 @@ class UserAdministrationTest extends TestCase
 
     public function test_public_registration_normalizes_email_and_rejects_case_insensitive_duplicate(): void
     {
-        $this->postJson('/api/v1/auth/register', ['name' => 'Registro', 'email' => ' Registro@Example.test ', 'password' => 'register-password', 'password_confirmation' => 'register-password'])
-            ->assertCreated()->assertJsonPath('user.email', 'registro@example.test');
-        $this->postJson('/api/v1/auth/register', ['name' => 'Duplicado', 'email' => 'REGISTRO@EXAMPLE.TEST', 'password' => 'register-password', 'password_confirmation' => 'register-password'])
-            ->assertUnprocessable();
+        $registration = $this->postJson('/api/v1/auth/register', [
+            'name' => 'Registro',
+            'email' => ' Registro@Example.test ',
+            'password' => 'register-password',
+            'password_confirmation' => 'register-password',
+        ])->assertCreated()->assertExactJson([
+            'message' => 'Registro completado. Revisa tu correo para verificar la cuenta.',
+            'code' => 'email_verification_required',
+        ]);
+
+        foreach (['token', 'user', 'email', 'signature', 'url'] as $sensitiveField) {
+            $registration->assertJsonMissingPath($sensitiveField);
+        }
+        $this->assertStringNotContainsString('http://', $registration->getContent());
+        $this->assertStringNotContainsString('https://', $registration->getContent());
+        $this->assertDatabaseHas('users', ['email' => 'registro@example.test']);
+
+        $duplicate = $this->postJson('/api/v1/auth/register', [
+            'name' => 'Duplicado',
+            'email' => 'REGISTRO@EXAMPLE.TEST',
+            'password' => 'register-password',
+            'password_confirmation' => 'register-password',
+        ])->assertUnprocessable()->assertJsonValidationErrors('email');
+
+        foreach (['verification', 'signature', 'url', 'token'] as $verificationField) {
+            $duplicate->assertJsonMissingPath($verificationField);
+        }
+        $this->assertStringNotContainsString('http://', $duplicate->getContent());
+        $this->assertStringNotContainsString('https://', $duplicate->getContent());
     }
 }

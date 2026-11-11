@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateProfileRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditService;
+use App\Services\CustomerEmailVerificationService;
 use App\Support\AuditEventContract;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +17,10 @@ use Illuminate\Validation\ValidationException;
 
 class ProfileController extends Controller
 {
-    public function __construct(private AuditService $audit) {}
+    public function __construct(
+        private AuditService $audit,
+        private CustomerEmailVerificationService $verification
+    ) {}
 
     public function show(): UserResource
     {
@@ -27,9 +31,13 @@ class ProfileController extends Controller
     {
         $user = $request->user();
         $data = $request->validated();
-        DB::transaction(function () use ($user, $data, $request): void {
+        [$updated, $shouldSendVerification] = DB::transaction(function () use ($user, $data, $request): array {
             $locked = User::whereKey($user->id)->lockForUpdate()->firstOrFail();
             $before = ['name' => $locked->name, 'email' => $locked->email, 'phone' => $locked->phone];
+            $emailChanged = $before['email'] !== $data['email'];
+            if ($emailChanged && $locked->role === 'customer') {
+                $locked->email_verified_at = null;
+            }
             $locked->fill(['name' => trim($data['name']), 'email' => $data['email'], 'phone' => $data['phone'] ?? null])->save();
             $changed = [];
             foreach (['name', 'email', 'phone'] as $field) {
@@ -48,9 +56,15 @@ class ProfileController extends Controller
                     request: $request
                 );
             }
+
+            return [$locked, $emailChanged && $locked->role === 'customer'];
         });
 
-        return new UserResource($user->refresh());
+        if ($shouldSendVerification) {
+            $this->verification->queueForUser($updated);
+        }
+
+        return new UserResource($updated->refresh());
     }
 
     public function password(UpdateProfilePasswordRequest $request)

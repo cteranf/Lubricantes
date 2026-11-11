@@ -10,12 +10,15 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class UserAdministrationService
 {
-    public function __construct(private AuditService $audit) {}
+    public function __construct(
+        private AuditService $audit,
+        private CustomerEmailVerificationService $verification
+    ) {}
 
     /** @param array<string, mixed> $data */
     public function create(array $data, User $actor): User
     {
-        return DB::transaction(function () use ($data, $actor) {
+        $user = DB::transaction(function () use ($data, $actor) {
             $user = User::create([
                 'name' => trim($data['name']),
                 'email' => $data['email'],
@@ -36,12 +39,18 @@ class UserAdministrationService
 
             return $user;
         });
+
+        if ($user->role === 'customer') {
+            $this->verification->queueForUser($user);
+        }
+
+        return $user;
     }
 
     /** @param array<string, mixed> $data */
     public function update(User $actor, User $user, array $data): User
     {
-        return DB::transaction(function () use ($actor, $user, $data) {
+        [$updated, $shouldSendVerification] = DB::transaction(function () use ($actor, $user, $data): array {
             $locked = User::whereKey($user->id)->lockForUpdate()->firstOrFail();
             $oldRole = $locked->role;
             $oldCanDeliver = $locked->can_deliver;
@@ -52,6 +61,11 @@ class UserAdministrationService
                 throw new ConflictHttpException('No puedes degradar tu propia cuenta administrativa.');
             }
             $this->ensureLastActiveAdminIsNotRemoved($locked, $data['role']);
+            $emailChanged = $oldEmail !== $data['email'];
+            $enteringCustomerRole = $oldRole !== 'customer' && $data['role'] === 'customer';
+            if ($data['role'] === 'customer' && ($emailChanged || $enteringCustomerRole)) {
+                $locked->email_verified_at = null;
+            }
             $locked->fill([
                 'name' => trim($data['name']),
                 'email' => $data['email'],
@@ -88,8 +102,18 @@ class UserAdministrationService
                 );
             }
 
-            return $locked;
+            $shouldSendVerification = $locked->role === 'customer'
+                && $locked->email_verified_at === null
+                && ($emailChanged || $enteringCustomerRole);
+
+            return [$locked, $shouldSendVerification];
         });
+
+        if ($shouldSendVerification) {
+            $this->verification->queueForUser($updated);
+        }
+
+        return $updated;
     }
 
     public function changeStatus(User $actor, User $user, bool $isActive): User

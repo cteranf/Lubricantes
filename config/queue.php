@@ -42,6 +42,14 @@ return [
             'after_commit' => false,
         ],
 
+        'email_verification' => [
+            'driver' => env('EMAIL_VERIFICATION_QUEUE_CONNECTION', 'database'),
+            'table' => 'jobs',
+            'queue' => 'email-verification',
+            'retry_after' => 90,
+            'after_commit' => true,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => 'localhost',

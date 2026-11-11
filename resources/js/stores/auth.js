@@ -21,10 +21,12 @@ export const useAuthStore = defineStore('auth', {
         },
         async register(data) {
             const response = await api.post('/auth/register', data);
-            this.token = response.data.access_token;
-            this.user = response.data.user;
-            localStorage.setItem('token', this.token);
-            api.defaults.headers.common['Authorization'] = `Bearer ${this.token}`;
+
+            if (response.data?.code !== 'email_verification_required') {
+                throw new Error('No se pudo completar el registro.');
+            }
+
+            return response.data.code;
         },
         async logout() {
             try {

@@ -6,6 +6,7 @@ import Cart from '@/views/Cart.vue';
 import Checkout from '@/views/Checkout.vue';
 import Login from '@/views/Login.vue';
 import Register from '@/views/Register.vue';
+import EmailVerification from '@/views/EmailVerification.vue';
 import Profile from '@/views/Profile.vue';
 const Orders = () => import('./views/Orders.vue');
 const OrderSuccess = () => import('./views/OrderSuccess.vue');
@@ -26,6 +27,21 @@ const routes = [
     { path: '/checkout', component: Checkout },
     { path: '/login', component: Login },
     { path: '/register', component: Register },
+    { path: '/verificar-correo', name: 'EmailVerification', component: EmailVerification },
+    { path: '/email/verify/:id/:hash', name: 'EmailVerificationLink', component: EmailVerification },
+    {
+        path: '/email/verification',
+        redirect: (to) => {
+            const result = to.query.result;
+
+            return {
+                name: 'EmailVerification',
+                query: {
+                    status: result === 'verified' ? 'verified' : result === 'invalid' ? 'invalid' : 'pending',
+                },
+            };
+        },
+    },
     { path: '/profile', component: Profile, meta: { requiresAuth: true } },
     { path: '/treasury/payments', name: 'treasury-payments', component: () => import('@/views/treasury/TreasuryPayments.vue'), meta: { requiresTreasury: true } },
     { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true } },
@@ -80,7 +96,8 @@ router.beforeEach(async (to, from, next) => {
     const authStore = useAuthStore();
 
     // Check if user is logged in, if not try to fetch user if token exists
-    if (!authStore.user && authStore.token) {
+    const isEmailVerificationRoute = ['EmailVerification', 'EmailVerificationLink'].includes(to.name);
+    if (!isEmailVerificationRoute && !authStore.user && authStore.token) {
         await authStore.fetchUser();
     }
 

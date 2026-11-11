@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\AuditRequestContext;
+use App\Jobs\SendCustomerEmailVerification;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Notifications\VerifyCustomerEmail;
 use App\Services\AuditSanitizer;
 use App\Services\AuditService;
 use App\Services\UserAdministrationService;
@@ -16,6 +18,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use PDOException;
@@ -29,6 +33,13 @@ class AuditSecurityTraceTest extends TestCase
         refreshDatabase as protected refreshDatabaseAfterIsolation;
     }
     use SyntheticMercadoPagoLink;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Notification::fake();
+        Queue::fake();
+    }
 
     public function refreshDatabase()
     {
@@ -47,6 +58,20 @@ class AuditSecurityTraceTest extends TestCase
             'password_confirmation' => $password,
         ], ['X-Correlation-ID' => $correlation])->assertCreated();
         $user = User::where('email', 'audit-fixture@example.test')->firstOrFail();
+        $registration->assertExactJson([
+            'message' => 'Registro completado. Revisa tu correo para verificar la cuenta.',
+            'code' => 'email_verification_required',
+        ]);
+        $job = Queue::pushed(SendCustomerEmailVerification::class)->first();
+        $this->assertNotNull($job);
+        $job->handle(app(\App\Services\CustomerEmailVerificationService::class));
+        $verificationUrl = null;
+        Notification::assertSentTo($user, VerifyCustomerEmail::class, function (VerifyCustomerEmail $notification) use ($user, &$verificationUrl): bool {
+            $verificationUrl = $notification->toMail($user)->actionUrl;
+
+            return is_string($verificationUrl);
+        });
+        $this->postJson($verificationUrl)->assertOk()->assertJsonPath('code', 'email_verified');
 
         $this->assertTrue(AuditLog::where('action', AuditEventContract::USER_CREATED)->where('auditable_id', (string) $user->id)->exists());
         $login = $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => $password], ['X-Correlation-ID' => $correlation])->assertOk();
@@ -384,7 +409,7 @@ class AuditSecurityTraceTest extends TestCase
                 throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
-        $service = new UserAdministrationService($brokenAudit);
+        $service = new UserAdministrationService($brokenAudit, app(\App\Services\CustomerEmailVerificationService::class));
 
         try {
             $service->create([
@@ -411,7 +436,7 @@ class AuditSecurityTraceTest extends TestCase
                 throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
-        $service = new \App\Services\UserAdministrationService($brokenAudit);
+        $service = new \App\Services\UserAdministrationService($brokenAudit, app(\App\Services\CustomerEmailVerificationService::class));
 
         foreach ([
             fn () => $service->update($actor, $target, ['name' => 'Synthetic Changed', 'email' => 'changed@example.test', 'role' => 'treasury']),

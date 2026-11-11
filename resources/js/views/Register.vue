@@ -54,9 +54,9 @@ const handleRegister = async () => {
     error.value = '';
     try {
         await authStore.register(form.value);
-        router.push('/');
-    } catch (e) {
-         error.value = Object.values(e.response?.data?.errors || {}).flat().join(', ') || 'Error al registrarse';
+        await router.replace({ name: 'EmailVerification', query: { status: 'pending' } });
+    } catch {
+        error.value = 'No se pudo completar el registro. Revisa los datos e inténtalo nuevamente.';
     } finally {
         loading.value = false;
     }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\V1\EmailVerificationController;
+use App\Http\Middleware\VerifyCsrfToken;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
 use App\Models\PaymentTransaction;
@@ -182,6 +184,13 @@ Route::post('/mock-payment/{paymentId}/approve', function ($paymentId, Request $
 })->middleware(['payment.mock', 'signed'])->name('mock.payment.approve');
 
 // SPA Catch-all (must be last)
+Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'confirm'])
+    ->name('email.verification.landing');
+
+Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'confirm'])
+    ->withoutMiddleware(VerifyCsrfToken::class)
+    ->name('email.verification.confirm');
+
 Route::get('/{any}', function () {
     return view('welcome');
 })->where('any', '.*');

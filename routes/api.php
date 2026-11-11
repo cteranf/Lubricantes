@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CheckoutPickupBranchController;
 use App\Http\Controllers\Api\V1\CheckoutShippingQuoteController;
 use App\Http\Controllers\Api\V1\ContactInquiryController;
+use App\Http\Controllers\Api\V1\EmailVerificationController;
 use App\Http\Controllers\Api\V1\LocationOptionController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
@@ -50,6 +51,8 @@ Route::prefix('v1')->group(function () {
     // Auth Public
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/email/verification-notification', [EmailVerificationController::class, 'resend'])
+        ->name('email.verification.resend');
 
     Route::get('/contact-inquiries/form-context', [ContactInquiryController::class, 'context']);
     Route::post('/contact-inquiries', [ContactInquiryController::class, 'store'])->middleware('throttle:contact-submissions');

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditService;
+use App\Services\CustomerEmailVerificationService;
 use App\Support\AuditEventContract;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,10 @@ use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
 {
-    public function __construct(private AuditService $audit) {}
+    public function __construct(
+        private AuditService $audit,
+        private CustomerEmailVerificationService $verification
+    ) {}
 
     public function register(Request $request)
     {
@@ -30,7 +34,7 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        [$user, $token] = DB::transaction(function () use ($request, $payload) {
+        $user = DB::transaction(function () use ($request, $payload) {
             $user = User::create([
                 'name' => $request->name,
                 'email' => $payload['email'],
@@ -47,13 +51,14 @@ class AuthController extends Controller
                 request: $request
             );
 
-            return [$user, $user->createToken('auth_token')->plainTextToken];
+            return $user;
         });
 
+        $this->verification->queueForUser($user);
+
         return response()->json([
-            'access_token' => $token,
-            'token_type' => 'Bearer',
-            'user' => (new UserResource($user))->resolve($request),
+            'message' => 'Registro completado. Revisa tu correo para verificar la cuenta.',
+            'code' => 'email_verification_required',
         ], 201);
     }
 
@@ -76,6 +81,10 @@ class AuthController extends Controller
                 return null;
             }
 
+            if ($user->role === 'customer' && $user->email_verified_at === null) {
+                return ['unverified' => $user];
+            }
+
             $token = $user->createToken('auth_token')->plainTextToken;
             $this->audit->recordUser(
                 AuditEventContract::AUTH_LOGIN_SUCCEEDED,
@@ -86,7 +95,7 @@ class AuthController extends Controller
                 request: $request
             );
 
-            return [$user, $token];
+            return ['user' => $user, 'token' => $token];
         });
 
         if ($authenticated === null) {
@@ -103,7 +112,28 @@ class AuthController extends Controller
             ], 401);
         }
 
-        [$user, $token] = $authenticated;
+        if (isset($authenticated['unverified'])) {
+            /** @var User $unverified */
+            $unverified = $authenticated['unverified'];
+            $this->audit->recordFailureOpen(
+                AuditEventContract::AUTH_LOGIN_UNVERIFIED_REJECTED,
+                $unverified,
+                AuditEventContract::RESULT_DENIED,
+                AuditEventContract::FAILURE_EMAIL_VERIFICATION_REQUIRED,
+                auditableType: 'user',
+                auditableId: (string) $unverified->getAuthIdentifier(),
+                request: $request
+            );
+
+            return response()->json([
+                'message' => 'Debes verificar tu correo antes de iniciar sesión.',
+                'code' => 'email_verification_required',
+            ], 403);
+        }
+
+        /** @var User $user */
+        $user = $authenticated['user'];
+        $token = $authenticated['token'];
 
         return response()->json([
             'access_token' => $token,

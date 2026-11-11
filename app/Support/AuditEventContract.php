@@ -12,6 +12,8 @@ final class AuditEventContract
 
     public const AUTH_LOGIN_DENIED = 'auth.login.denied';
 
+    public const AUTH_LOGIN_UNVERIFIED_REJECTED = 'auth.login.unverified_rejected';
+
     public const AUTH_LOGOUT = 'auth.logout';
 
     public const AUTH_SESSION_REVOKED = 'auth.session.revoked';
@@ -27,6 +29,12 @@ final class AuditEventContract
     public const USER_PASSWORD_CHANGED = 'user.password.changed';
 
     public const USER_PASSWORD_RESET = 'user.password.reset';
+
+    public const EMAIL_VERIFICATION_SENT = 'email_verification.sent';
+
+    public const EMAIL_VERIFICATION_COMPLETED = 'email_verification.completed';
+
+    public const EMAIL_VERIFICATION_RESEND_REQUESTED = 'email_verification.resend_requested';
 
     public const SECURITY_ACCESS_DENIED = 'security.access.denied';
 
@@ -54,6 +62,8 @@ final class AuditEventContract
 
     public const FAILURE_PROTECTED_ACCESS_DENIED = 'protected_access_denied';
 
+    public const FAILURE_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required';
+
     public const CATEGORY_AUTHENTICATION = 'authentication';
 
     public const CATEGORY_ACCESS = 'access';
@@ -70,6 +80,7 @@ final class AuditEventContract
         self::AUTH_LOGIN_SUCCEEDED,
         self::AUTH_LOGIN_FAILED,
         self::AUTH_LOGIN_DENIED,
+        self::AUTH_LOGIN_UNVERIFIED_REJECTED,
         self::AUTH_LOGOUT,
         self::AUTH_SESSION_REVOKED,
         self::USER_CREATED,
@@ -78,6 +89,9 @@ final class AuditEventContract
         self::USER_STATUS_CHANGED,
         self::USER_PASSWORD_CHANGED,
         self::USER_PASSWORD_RESET,
+        self::EMAIL_VERIFICATION_SENT,
+        self::EMAIL_VERIFICATION_COMPLETED,
+        self::EMAIL_VERIFICATION_RESEND_REQUESTED,
         self::SECURITY_ACCESS_DENIED,
         self::SYSTEM_COMMAND_COMPLETED,
         self::AUDIT_LOGS_VIEWED,
@@ -88,7 +102,7 @@ final class AuditEventContract
 
     public const RESULTS = [self::RESULT_SUCCEEDED, self::RESULT_FAILED, self::RESULT_DENIED];
 
-    public const FAILURE_CODES = [self::FAILURE_INVALID_CREDENTIALS, self::FAILURE_ACCOUNT_INACTIVE, self::FAILURE_PROTECTED_ACCESS_DENIED];
+    public const FAILURE_CODES = [self::FAILURE_INVALID_CREDENTIALS, self::FAILURE_ACCOUNT_INACTIVE, self::FAILURE_PROTECTED_ACCESS_DENIED, self::FAILURE_EMAIL_VERIFICATION_REQUIRED];
 
     public const AUDITABLE_TYPES = ['user', 'order', 'product', 'category', 'brand', 'branch', 'warehouse', 'payment_setting', 'payment_receiving_account'];
 
@@ -103,11 +117,12 @@ final class AuditEventContract
     {
         return match ($action) {
             self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED,
-            self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED => self::CATEGORY_AUTHENTICATION,
+            self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED, self::AUTH_LOGIN_UNVERIFIED_REJECTED => self::CATEGORY_AUTHENTICATION,
             self::SECURITY_ACCESS_DENIED => self::CATEGORY_ACCESS,
             self::AUDIT_LOGS_VIEWED, self::AUDIT_LOG_VIEWED => self::CATEGORY_ACCESS,
             self::USER_CREATED, self::USER_UPDATED, self::USER_ROLE_CHANGED,
             self::USER_STATUS_CHANGED, self::USER_PASSWORD_CHANGED, self::USER_PASSWORD_RESET => self::CATEGORY_USER_SECURITY,
+            self::EMAIL_VERIFICATION_SENT, self::EMAIL_VERIFICATION_COMPLETED, self::EMAIL_VERIFICATION_RESEND_REQUESTED => self::CATEGORY_USER_SECURITY,
             self::SYSTEM_COMMAND_COMPLETED => self::CATEGORY_SYSTEM,
             default => throw new InvalidArgumentException('La acción de auditoría no está permitida.'),
         };
@@ -115,7 +130,7 @@ final class AuditEventContract
 
     public static function retentionFor(string $action): string
     {
-        return in_array($action, [self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED, self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED, self::SECURITY_ACCESS_DENIED, self::AUDIT_LOGS_VIEWED, self::AUDIT_LOG_VIEWED], true)
+        return in_array($action, [self::AUTH_LOGIN_SUCCEEDED, self::AUTH_LOGIN_FAILED, self::AUTH_LOGIN_DENIED, self::AUTH_LOGIN_UNVERIFIED_REJECTED, self::AUTH_LOGOUT, self::AUTH_SESSION_REVOKED, self::SECURITY_ACCESS_DENIED, self::AUDIT_LOGS_VIEWED, self::AUDIT_LOG_VIEWED, self::EMAIL_VERIFICATION_RESEND_REQUESTED], true)
             ? self::RETENTION_ACCESS
             : self::RETENTION_ADMINISTRATIVE;
     }
@@ -125,6 +140,7 @@ final class AuditEventContract
         return match ($action) {
             self::AUTH_LOGIN_FAILED => self::FAILURE_INVALID_CREDENTIALS,
             self::AUTH_LOGIN_DENIED => self::FAILURE_ACCOUNT_INACTIVE,
+            self::AUTH_LOGIN_UNVERIFIED_REJECTED => self::FAILURE_EMAIL_VERIFICATION_REQUIRED,
             self::SECURITY_ACCESS_DENIED => self::FAILURE_PROTECTED_ACCESS_DENIED,
             default => null,
         };
@@ -134,7 +150,7 @@ final class AuditEventContract
     {
         return match ($action) {
             self::AUTH_LOGIN_FAILED => self::RESULT_FAILED,
-            self::AUTH_LOGIN_DENIED, self::SECURITY_ACCESS_DENIED => self::RESULT_DENIED,
+            self::AUTH_LOGIN_DENIED, self::AUTH_LOGIN_UNVERIFIED_REJECTED, self::SECURITY_ACCESS_DENIED => self::RESULT_DENIED,
             default => self::RESULT_SUCCEEDED,
         };
     }

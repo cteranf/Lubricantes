@@ -49,8 +49,16 @@ const handleLogin = async () => {
         await authStore.login(form.value);
         const redirect = route.query.redirect || '/';
         router.push(redirect);
-    } catch (e) {
-        error.value = e.response?.data?.message || 'Error al iniciar sesión';
+    } catch (requestError) {
+        if (requestError?.response?.status === 403
+            && requestError?.response?.data?.code === 'email_verification_required') {
+            await router.replace({ name: 'EmailVerification', query: { status: 'pending' } });
+            return;
+        }
+
+        error.value = requestError?.response?.status === 401
+            ? 'Credenciales incorrectas. Revisa tus datos e inténtalo nuevamente.'
+            : 'No se pudo iniciar sesión. Inténtalo nuevamente.';
     } finally {
         loading.value = false;
     }
