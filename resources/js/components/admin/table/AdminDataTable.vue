@@ -12,7 +12,7 @@
             <Button type="button" label="Limpiar filtros" icon="pi pi-filter-slash" severity="secondary" size="small" @click="clearFilters" />
             <IconField class="w-full sm:max-w-xs">
                 <InputIcon class="pi pi-search" />
-                <InputText v-model="tableFilters.global.value" class="w-full" placeholder="Buscar pedido o cliente" aria-label="Buscar pedido o cliente" @input="emitFilters" />
+                <InputText v-model="tableFilters.global.value" class="w-full" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder" @input="emitFilters" />
             </IconField>
         </div>
 
@@ -22,7 +22,7 @@
             :data-key="rowIdentityContract.rowKey"
             v-model:filters="tableFilters"
             filter-display="menu"
-            :global-filter-fields="['id', 'customer_name']"
+            :global-filter-fields="globalFilterFields"
             :lazy="true"
             :paginator="true"
             :first="first"
@@ -37,7 +37,7 @@
             :scrollable="true"
             size="small"
             paginator-template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
-            current-page-report-template="Mostrando {first} a {last} de {totalRecords} pedidos"
+            :current-page-report-template="currentPageReportTemplate"
             v-model:expandedRows="expandedRows"
             @page="onPage"
             @sort="onSort"
@@ -47,10 +47,10 @@
                 <div class="p-6 text-center text-slate-500"><slot name="empty">No hay registros para mostrar.</slot></div>
             </template>
             <template #loading>
-                <span class="sr-only">Cargando pedidos…</span>
+                <span class="sr-only">{{ loadingMessage }}</span>
             </template>
             <template #expansion="{ data }">
-                <div class="grid grid-cols-1 gap-3 bg-slate-50 p-4 text-sm sm:grid-cols-2" :aria-label="`Detalle del pedido ${data.id}`">
+                <div class="grid grid-cols-1 gap-3 bg-slate-50 p-4 text-sm sm:grid-cols-2" :aria-label="mobileDetailsLabel.replace('{id}', String(data.id))">
                     <div v-for="column in detailColumns" :key="column.key">
                         <div class="text-xs font-medium text-slate-500">{{ column.label }}</div>
                         <slot :name="`cell-${column.key}`" :row="data" :value="data[column.key]">{{ data[column.key] ?? '—' }}</slot>
@@ -109,6 +109,11 @@ const props = defineProps({
     loading: Boolean,
     error: { type: [Object, String, Boolean], default: null },
     sort: { type: Object, default: () => ({ column: null, direction: 'desc' }) },
+    searchPlaceholder: { type: String, default: 'Buscar pedido o cliente' },
+    currentPageReportTemplate: { type: String, default: 'Mostrando {first} a {last} de {totalRecords} pedidos' },
+    loadingMessage: { type: String, default: 'Cargando pedidos…' },
+    mobileDetailsLabel: { type: String, default: 'Detalle del pedido {id}' },
+    globalFilterFields: { type: Array, default: () => ['id', 'customer_name'] },
 });
 const emit = defineEmits(['retry', 'page', 'per-page', 'sort', 'filters-change', 'clear-filters']);
 const pageSizeOptions = [15, 25, 50, 100];

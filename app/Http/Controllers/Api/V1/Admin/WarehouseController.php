@@ -17,10 +17,22 @@ class WarehouseController extends Controller
         return Warehouse::query()
             ->where('is_active', true)
             ->whereHas('branch', fn ($query) => $query->where('is_active', true))
+            ->with('branch:id,name')
             ->orderByDesc('is_default')
             ->orderBy('name')
             ->limit(200)
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'code', 'is_default', 'branch_id'])
+            ->map(fn (Warehouse $warehouse) => [
+                'id' => (int) $warehouse->id,
+                'name' => (string) $warehouse->name,
+                'code' => (string) $warehouse->code,
+                'is_default' => (bool) $warehouse->is_default,
+                'branch' => $warehouse->branch ? [
+                    'id' => (int) $warehouse->branch->id,
+                    'name' => (string) $warehouse->branch->name,
+                ] : null,
+            ])
+            ->values();
     }
 
     public function index(Request $request)

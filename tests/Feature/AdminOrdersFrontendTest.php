@@ -55,6 +55,10 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringContainsString('v-model:expandedRows', $table);
         $this->assertStringContainsString('#expansion', $table);
         $this->assertStringContainsString('visibleTokens', $table);
+        $this->assertStringContainsString("searchPlaceholder: { type: String, default: 'Buscar pedido o cliente' }", $table);
+        $this->assertStringContainsString("currentPageReportTemplate: { type: String, default: 'Mostrando {first} a {last} de {totalRecords} pedidos' }", $table);
+        $this->assertStringContainsString("loadingMessage: { type: String, default: 'Cargando pedidos…' }", $table);
+        $this->assertStringContainsString("mobileDetailsLabel: { type: String, default: 'Detalle del pedido {id}' }", $table);
         $this->assertStringContainsString(':page="list.meta.value.current_page"', $view);
         $this->assertStringContainsString(':page-size="list.meta.value.per_page"', $view);
         $this->assertStringContainsString(':total-records="list.meta.value.total"', $view);
@@ -161,13 +165,38 @@ class AdminOrdersFrontendTest extends TestCase
     {
         $table = file_get_contents(resource_path('js/components/admin/table/AdminDataTable.vue'));
         $view = file_get_contents(resource_path('js/views/admin/Orders.vue'));
+        $productsView = file_get_contents(resource_path('js/views/admin/Products.vue'));
         $composable = file_get_contents(resource_path('js/composables/useAdminListQuery.js'));
         $request = file_get_contents(app_path('Http/Requests/Admin/ListAdminOrdersRequest.php'));
         $controller = file_get_contents(app_path('Http/Controllers/Api/V1/Admin/OrderController.php'));
 
         $this->assertStringContainsString('filter-display="menu"', $table);
         $this->assertStringContainsString('label="Limpiar filtros"', $table);
-        $this->assertStringContainsString('placeholder="Buscar pedido o cliente"', $table);
+        $this->assertStringContainsString(':placeholder="searchPlaceholder"', $table);
+        $this->assertStringContainsString("searchPlaceholder: { type: String, default: 'Buscar pedido o cliente' }", $table);
+        $this->assertStringContainsString(':current-page-report-template="currentPageReportTemplate"', $table);
+        $this->assertStringContainsString("currentPageReportTemplate: { type: String, default: 'Mostrando {first} a {last} de {totalRecords} pedidos' }", $table);
+        $this->assertStringContainsString('{{ loadingMessage }}', $table);
+        $this->assertStringContainsString("loadingMessage: { type: String, default: 'Cargando pedidos…' }", $table);
+        $this->assertStringContainsString('mobileDetailsLabel.replace(\'{id}\', String(data.id))', $table);
+        $this->assertStringContainsString("mobileDetailsLabel: { type: String, default: 'Detalle del pedido {id}' }", $table);
+        $this->assertStringContainsString('<slot name="empty">No hay registros para mostrar.</slot>', $table);
+        $this->assertStringContainsString('<template #empty>', $view);
+        $this->assertStringContainsString('No hay pedidos para mostrar', $view);
+        $this->assertStringContainsString('<AdminDataTable', $view);
+        $this->assertStringNotContainsString('search-placeholder=', $view);
+        $this->assertStringNotContainsString('current-page-report-template=', $view);
+        $this->assertStringNotContainsString('loading-message=', $view);
+        $this->assertStringNotContainsString('mobile-details-label=', $view);
+        foreach ([
+            'search-placeholder="Buscar productos por nombre o SKU"',
+            'current-page-report-template="Mostrando {first} a {last} de {totalRecords} productos"',
+            'loading-message="Cargando productos…"',
+            'mobile-details-label="Detalles del producto {id}"',
+            '<template #empty>',
+        ] as $productOverride) {
+            $this->assertStringContainsString($productOverride, $productsView);
+        }
         $this->assertStringContainsString('import Button from \'primevue/button\'', $table);
         $this->assertStringContainsString('import InputText from \'primevue/inputtext\'', $table);
         $this->assertStringContainsString('import IconField from \'primevue/iconfield\'', $table);
@@ -215,7 +244,7 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringContainsString('aria-controls="orders-mobile-filters-panel"', $view);
         $this->assertStringContainsString('id="orders-mobile-filters-panel"', $view);
         $this->assertStringContainsString('class="space-y-3 p-3 lg:hidden"', $view);
-        $this->assertStringContainsString('placeholder="Buscar pedido o cliente"', $table);
+        $this->assertStringContainsString(':placeholder="searchPlaceholder"', $table);
 
         foreach ([
             'orders-mobile-order-id' => 'list.filters.order_id',
