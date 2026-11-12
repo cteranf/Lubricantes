@@ -1,7 +1,235 @@
-<template><AdminLayout><main class="mx-auto max-w-7xl space-y-6" aria-labelledby="sliders-title"><AdminPageHeader eyebrow="CONTENIDO DE LA TIENDA" title="Sliders" title-id="sliders-title" description="Administra las imágenes y mensajes destacados de la página principal."><template #action><button type="button" class="primary" :disabled="loading || processing" @click="openModal()"><i class="pi pi-plus mr-2" aria-hidden="true"></i>Nuevo slider</button></template></AdminPageHeader><section class="grid gap-3 sm:grid-cols-2"><article class="metric"><span>Total de sliders</span><strong>{{ sliders.length }}</strong><small>Registros cargados</small></article><article class="metric"><span>Visibles</span><strong>{{ activeCount }}</strong><small>Sliders activos actualmente</small></article></section><section v-if="error" class="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900" role="alert"><p class="font-bold">No se pudo cargar sliders</p><p class="mt-1 text-sm">{{ error }}</p><button class="mt-3 secondary" type="button" @click="fetchSliders">Reintentar</button></section><section v-else class="overflow-hidden rounded-2xl bg-white shadow-sm"><div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-slate-100 text-xs font-bold uppercase tracking-wide text-slate-600"><tr><th scope="col" class="p-4">Imagen</th><th scope="col" class="p-4">Contenido</th><th scope="col" class="p-4 text-center">Orden</th><th scope="col" class="p-4 text-center">Estado</th><th scope="col" class="p-4 text-right">Acciones</th></tr></thead><tbody><template v-if="loading"><tr v-for="row in 4" :key="row" class="border-t"><td v-for="cell in 5" :key="cell" class="p-4"><div class="h-8 animate-pulse rounded bg-slate-200"></div></td></tr></template><template v-else-if="sliders.length"><tr v-for="slider in sliders" :key="slider.id" class="border-t border-slate-100 hover:bg-slate-50"><td class="p-4"><img v-if="slider.image_path" :src="slider.image_path" :alt="`Vista previa de ${slider.title}`" class="h-16 w-32 rounded-lg object-cover"><span v-else class="flex h-16 w-32 items-center justify-center rounded-lg bg-slate-100 text-slate-400"><i class="pi pi-image text-xl" aria-hidden="true"></i><span class="sr-only">Sin imagen</span></span></td><td class="max-w-md p-4"><p class="font-bold text-slate-900">{{ slider.title || 'Sin título' }}</p><p class="mt-1 line-clamp-2 text-xs text-slate-500">{{ slider.description || 'Sin descripción' }}</p></td><td class="p-4 text-center font-semibold">{{ safeOrder(slider.sort_order) }}</td><td class="p-4 text-center"><AdminStatusBadge :active="!!slider.is_active" active-label="Visible" inactive-label="Oculto" /></td><td class="p-4"><div class="flex justify-end gap-1"><AdminIconButton icon="pi pi-pencil" label="Editar slider" @click="openModal(slider)" /><AdminIconButton icon="pi pi-trash" label="Eliminar slider" tone="text-red-700" @click="deleteSlider(slider)" /></div></td></tr></template><tr v-else><td colspan="5"><AdminEmptyState icon="pi pi-images" title="Todavía no hay sliders" description="Crea el primer contenido destacado para la portada."><button type="button" class="mt-4 primary" @click="openModal()">Nuevo slider</button></AdminEmptyState></td></tr></tbody></table></div></section><div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-labelledby="slider-modal-title"><form class="max-h-[94vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl" @submit.prevent="submitForm"><header class="flex items-start gap-3 border-b border-slate-100 p-5"><span class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-800"><i class="pi pi-image" aria-hidden="true"></i></span><div class="flex-1"><h2 id="slider-modal-title" class="text-xl font-black">{{ isEditing ? 'Editar slider' : 'Nuevo slider' }}</h2><p class="mt-1 text-sm text-slate-600">{{ isEditing ? 'Actualiza el contenido sin alterar su ubicación.' : 'Agrega una imagen destacada para la portada.' }}</p></div><AdminIconButton icon="pi pi-times" label="Cerrar" @click="closeModal" /></header><div class="space-y-4 p-5"><label class="label">Título<input v-model.trim="form.title" required class="field mt-1"></label><label class="label">Descripción<textarea v-model.trim="form.description" class="field mt-1" rows="3"></textarea></label><div class="grid gap-4 sm:grid-cols-2"><label class="label">Orden<input v-model="form.sort_order" class="field mt-1" type="number"></label><label class="flex items-center gap-2 self-end pb-2 text-sm font-bold text-slate-700"><input v-model="form.is_active" type="checkbox"> Visible en la portada</label></div><label class="label">Imagen<input class="field mt-1" type="file" accept="image/jpeg,image/png,image/jpg,image/webp" @change="handleFileUpload"><span class="mt-1 block text-xs font-normal text-slate-500">JPEG, PNG, JPG o WebP; máximo 2 MB. {{ isEditing ? 'Déjalo vacío para conservar la imagen actual.' : '' }}</span></label><img v-if="previewUrl" :src="previewUrl" alt="Vista previa de la imagen seleccionada" class="max-h-48 w-full rounded-xl object-cover"><p v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{{ formError }}</p></div><footer class="flex justify-end gap-3 border-t border-slate-100 p-5"><button type="button" class="secondary" :disabled="processing" @click="closeModal">Cancelar</button><button class="primary" :disabled="processing">{{ processing ? 'Guardando…' : 'Guardar slider' }}</button></footer></form></div></main></AdminLayout></template>
+<template>
+    <AdminLayout>
+        <main class="mx-auto max-w-7xl space-y-6" aria-labelledby="sliders-title">
+            <AdminPageHeader eyebrow="CONTENIDO DE LA TIENDA" title="Sliders" title-id="sliders-title" description="Administra las imágenes y mensajes destacados de la página principal.">
+                <template #action>
+                    <button type="button" class="primary" :disabled="loading || processing || categoriesLoading" @click="openModal()">
+                        <i class="pi pi-plus mr-2" aria-hidden="true"></i>Nuevo slider
+                    </button>
+                </template>
+            </AdminPageHeader>
+
+            <section class="grid gap-3 sm:grid-cols-2">
+                <article class="metric"><span>Total de sliders</span><strong>{{ sliders.length }}</strong><small>Registros cargados</small></article>
+                <article class="metric"><span>Visibles</span><strong>{{ activeCount }}</strong><small>Sliders activos actualmente</small></article>
+            </section>
+
+            <section v-if="error" class="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900" role="alert">
+                <p class="font-bold">No se pudo cargar sliders</p><p class="mt-1 text-sm">{{ error }}</p>
+                <button class="mt-3 secondary" type="button" @click="fetchSliders">Reintentar</button>
+            </section>
+            <section v-else class="overflow-hidden rounded-2xl bg-white shadow-sm">
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[760px] text-left text-sm">
+                        <thead class="bg-slate-100 text-xs font-bold uppercase tracking-wide text-slate-600">
+                            <tr><th scope="col" class="p-4">Imagen</th><th scope="col" class="p-4">Contenido</th><th scope="col" class="p-4 text-center">Orden</th><th scope="col" class="p-4 text-center">Estado</th><th scope="col" class="p-4 text-right">Acciones</th></tr>
+                        </thead>
+                        <tbody>
+                            <template v-if="loading"><tr v-for="row in 4" :key="row" class="border-t"><td v-for="cell in 5" :key="cell" class="p-4"><div class="h-8 animate-pulse rounded bg-slate-200"></div></td></tr></template>
+                            <template v-else-if="sliders.length">
+                                <tr v-for="slider in sliders" :key="slider.id" class="border-t border-slate-100 hover:bg-slate-50">
+                                    <td class="p-4"><img v-if="slider.image_path" :src="slider.image_path" :alt="`Vista previa de ${slider.title}`" class="h-16 w-32 rounded-lg object-cover"><span v-else class="flex h-16 w-32 items-center justify-center rounded-lg bg-slate-100 text-slate-400"><i class="pi pi-image text-xl" aria-hidden="true"></i><span class="sr-only">Sin imagen</span></span></td>
+                                    <td class="max-w-md p-4"><p class="font-bold text-slate-900">{{ slider.title || 'Sin título' }}</p><p class="mt-1 line-clamp-2 text-xs text-slate-500">{{ slider.description || 'Sin descripción' }}</p><p v-if="slider.category" class="mt-1 text-xs text-slate-500">Categoría: {{ slider.category.name }}<span v-if="slider.category.is_active === false"> (inactiva)</span></p></td>
+                                    <td class="p-4 text-center font-semibold">{{ safeOrder(slider.sort_order) }}</td>
+                                    <td class="p-4 text-center"><AdminStatusBadge :active="!!slider.is_active" active-label="Visible" inactive-label="Oculto" /></td>
+                                    <td class="p-4"><div class="flex justify-end gap-1"><AdminIconButton icon="pi pi-pencil" label="Editar slider" @click="openModal(slider)" /><AdminIconButton icon="pi pi-trash" label="Eliminar slider" tone="text-red-700" @click="deleteSlider(slider)" /></div></td>
+                                </tr>
+                            </template>
+                            <tr v-else><td colspan="5"><AdminEmptyState icon="pi pi-images" title="Todavía no hay sliders" description="Crea el primer contenido destacado para la portada."><button type="button" class="mt-4 primary" @click="openModal()">Nuevo slider</button></AdminEmptyState></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-labelledby="slider-modal-title">
+                <form class="max-h-[94vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl" @submit.prevent="submitForm">
+                    <header class="flex items-start gap-3 border-b border-slate-100 p-5"><span class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-800"><i class="pi pi-image" aria-hidden="true"></i></span><div class="flex-1"><h2 id="slider-modal-title" class="text-xl font-black">{{ isEditing ? 'Editar slider' : 'Nuevo slider' }}</h2><p class="mt-1 text-sm text-slate-600">{{ isEditing ? 'Actualiza el contenido sin alterar su ubicación.' : 'Agrega una imagen destacada para la portada.' }}</p></div><AdminIconButton icon="pi pi-times" label="Cerrar" @click="closeModal" /></header>
+                    <div class="space-y-4 p-5">
+                        <label class="label">Título<input v-model.trim="form.title" required class="field mt-1"></label>
+                        <label class="label">Descripción<textarea v-model.trim="form.description" class="field mt-1" rows="3"></textarea></label>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <label class="label">Orden<input v-model="form.sort_order" class="field mt-1" type="number"></label>
+                            <label class="flex items-center gap-2 self-end pb-2 text-sm font-bold text-slate-700"><input v-model="form.is_active" type="checkbox"> Visible en la portada</label>
+                        </div>
+                        <div>
+                            <label for="slider-category" class="label">Categoría de destino (opcional)</label>
+                            <select id="slider-category" v-model.number="form.category_id" class="field mt-1" :disabled="categoriesLoading">
+                                <option :value="null">Sin categoría de destino</option>
+                                <option v-for="category in selectableCategories" :key="category.id" :value="category.id">{{ category.name }}{{ category.is_active === false ? ' (inactiva)' : '' }}</option>
+                            </select>
+                            <p class="mt-1 text-xs text-slate-500">Al hacer clic en el banner, el cliente verá el catálogo filtrado por esta categoría.</p>
+                            <div v-if="categoriesError" class="mt-2 text-sm text-red-700" role="alert"><span>No se pudieron cargar las categorías activas.</span><button type="button" class="ml-2 font-bold underline" @click="fetchCategories">Reintentar</button></div>
+                        </div>
+                        <label class="label">Imagen<input class="field mt-1" type="file" accept="image/jpeg,image/png,image/jpg,image/webp" @change="handleFileUpload"><span class="mt-1 block text-xs font-normal text-slate-500">JPEG, PNG, JPG o WebP; máximo 2 MB. {{ isEditing ? 'Déjalo vacío para conservar la imagen actual.' : '' }}</span></label>
+                        <img v-if="previewUrl" :src="previewUrl" alt="Vista previa de la imagen seleccionada" class="max-h-48 w-full rounded-xl object-cover">
+                        <p v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{{ formError }}</p>
+                    </div>
+                    <footer class="flex justify-end gap-3 border-t border-slate-100 p-5"><button type="button" class="secondary" :disabled="processing" @click="closeModal">Cancelar</button><button class="primary" :disabled="processing">{{ processing ? 'Guardando…' : 'Guardar slider' }}</button></footer>
+                </form>
+            </div>
+        </main>
+    </AdminLayout>
+</template>
+
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'; import { useConfirm } from 'primevue/useconfirm'; import { useToast } from 'primevue/usetoast'; import AdminLayout from '@/layouts/AdminLayout.vue'; import AdminEmptyState from '@/components/admin/AdminEmptyState.vue'; import AdminIconButton from '@/components/admin/AdminIconButton.vue'; import AdminPageHeader from '@/components/admin/AdminPageHeader.vue'; import AdminStatusBadge from '@/components/admin/AdminStatusBadge.vue'; import api from '@/api';
-const toast=useToast(),confirm=useConfirm(),sliders=ref([]),loading=ref(false),error=ref(''),showModal=ref(false),isEditing=ref(false),processing=ref(false),formError=ref(''),previewUrl=ref(''); const blank=()=>({id:null,title:'',description:'',sort_order:0,is_active:true,image:null}); const form=ref(blank()); const activeCount=computed(()=>sliders.value.filter(slider=>!!slider.is_active).length); const safeOrder=value=>Math.max(0,Number(value)||0); const revokePreview=()=>{if(previewUrl.value){URL.revokeObjectURL(previewUrl.value);previewUrl.value='';}};
-async function fetchSliders(){if(loading.value)return;loading.value=true;error.value='';try{const {data}=await api.get('/admin/sliders');sliders.value=Array.isArray(data)?data:[];}catch(e){error.value=e.response?.data?.message||'No se pudo cargar la información.';}finally{loading.value=false;}} function closeModal(){revokePreview();showModal.value=false;isEditing.value=false;form.value=blank();formError.value='';} function openModal(slider=null){revokePreview();isEditing.value=!!slider;form.value=slider?{...slider,image:null,is_active:!!slider.is_active}:blank();formError.value='';showModal.value=true;} function handleFileUpload(event){const file=event.target.files?.[0]||null;revokePreview();form.value.image=file;if(file)previewUrl.value=URL.createObjectURL(file);} async function submitForm(){if(processing.value)return;processing.value=true;formError.value='';try{const data=new FormData();data.append('title',form.value.title);if(form.value.description)data.append('description',form.value.description);data.append('sort_order',form.value.sort_order);data.append('is_active',form.value.is_active?1:0);if(form.value.image)data.append('image',form.value.image);if(isEditing.value){data.append('_method','PUT');await api.post(`/admin/sliders/${form.value.id}`,data,{headers:{'Content-Type':'multipart/form-data'}});}else await api.post('/admin/sliders',data,{headers:{'Content-Type':'multipart/form-data'}});closeModal();toast.add({severity:'success',summary:'Guardado',detail:'Slider guardado correctamente.',life:2500});await fetchSliders();}catch(e){formError.value=e.response?.data?.message||'No se pudo guardar el slider.';}finally{processing.value=false;}} function deleteSlider(slider){confirm.require({message:`¿Desea eliminar “${slider.title}”?`,header:'Eliminar slider',icon:'pi pi-exclamation-triangle',acceptClass:'p-button-danger',accept:async()=>{try{await api.delete(`/admin/sliders/${slider.id}`);toast.add({severity:'success',summary:'Eliminado',detail:'Slider eliminado correctamente.',life:2500});await fetchSliders();}catch(e){toast.add({severity:'error',summary:'No se pudo eliminar',detail:e.response?.data?.message||e.message,life:4000});}}});} onMounted(fetchSliders);onBeforeUnmount(revokePreview);
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useConfirm } from 'primevue/useconfirm';
+import { useToast } from 'primevue/usetoast';
+import AdminLayout from '@/layouts/AdminLayout.vue';
+import AdminEmptyState from '@/components/admin/AdminEmptyState.vue';
+import AdminIconButton from '@/components/admin/AdminIconButton.vue';
+import AdminPageHeader from '@/components/admin/AdminPageHeader.vue';
+import AdminStatusBadge from '@/components/admin/AdminStatusBadge.vue';
+import api from '@/api';
+
+const toast = useToast();
+const confirm = useConfirm();
+const sliders = ref([]);
+const categories = ref([]);
+const loading = ref(false);
+const categoriesLoading = ref(true);
+const categoriesError = ref(false);
+const error = ref('');
+const showModal = ref(false);
+const isEditing = ref(false);
+const processing = ref(false);
+const formError = ref('');
+const previewUrl = ref('');
+const blank = () => ({ id: null, title: '', description: '', sort_order: 0, is_active: true, category_id: null, category: null, image: null });
+const form = ref(blank());
+const activeCount = computed(() => sliders.value.filter(slider => !!slider.is_active).length);
+const safeOrder = value => Math.max(0, Number(value) || 0);
+const selectableCategories = computed(() => {
+    const options = [...categories.value];
+    const current = form.value.category;
+    if (current && !options.some(category => Number(category.id) === Number(current.id))) options.push(current);
+    return options;
+});
+
+const revokePreview = () => {
+    if (previewUrl.value) {
+        URL.revokeObjectURL(previewUrl.value);
+        previewUrl.value = '';
+    }
+};
+
+async function fetchSliders() {
+    if (loading.value) return;
+    loading.value = true;
+    error.value = '';
+    try {
+        const { data } = await api.get('/admin/sliders');
+        sliders.value = Array.isArray(data) ? data : [];
+    } catch {
+        error.value = 'No se pudo cargar la información. Inténtalo nuevamente.';
+    } finally {
+        loading.value = false;
+    }
+}
+
+async function fetchCategories() {
+    categoriesLoading.value = true;
+    categoriesError.value = false;
+    try {
+        const { data } = await api.get('/admin/categories/options');
+        categories.value = Array.isArray(data)
+            ? data.filter(category => category && Number.isInteger(Number(category.id)) && typeof category.name === 'string')
+                .map(category => ({ id: Number(category.id), name: category.name, is_active: true }))
+            : [];
+    } catch {
+        categoriesError.value = true;
+    } finally {
+        categoriesLoading.value = false;
+    }
+}
+
+function closeModal() {
+    revokePreview();
+    showModal.value = false;
+    isEditing.value = false;
+    form.value = blank();
+    formError.value = '';
+}
+
+function openModal(slider = null) {
+    revokePreview();
+    isEditing.value = !!slider;
+    form.value = slider
+        ? { ...slider, image: null, category_id: slider.category_id ?? slider.category?.id ?? null, is_active: !!slider.is_active }
+        : blank();
+    formError.value = '';
+    showModal.value = true;
+}
+
+function handleFileUpload(event) {
+    const file = event.target.files?.[0] || null;
+    revokePreview();
+    form.value.image = file;
+    if (file) previewUrl.value = URL.createObjectURL(file);
+}
+
+async function submitForm() {
+    if (processing.value) return;
+    processing.value = true;
+    formError.value = '';
+    try {
+        const data = new FormData();
+        data.append('title', form.value.title);
+        if (form.value.description) data.append('description', form.value.description);
+        data.append('sort_order', form.value.sort_order);
+        data.append('is_active', form.value.is_active ? 1 : 0);
+        data.append('category_id', form.value.category_id == null ? '' : String(form.value.category_id));
+        if (form.value.image) data.append('image', form.value.image);
+        if (isEditing.value) {
+            data.append('_method', 'PUT');
+            await api.post(`/admin/sliders/${form.value.id}`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
+        } else {
+            await api.post('/admin/sliders', data, { headers: { 'Content-Type': 'multipart/form-data' } });
+        }
+        closeModal();
+        toast.add({ severity: 'success', summary: 'Guardado', detail: 'Slider guardado correctamente.', life: 2500 });
+        await fetchSliders();
+    } catch (requestError) {
+        formError.value = requestError.response?.status === 422
+            ? 'Revisa los datos del slider y la categoría seleccionada.'
+            : 'No se pudo guardar el slider. Inténtalo nuevamente.';
+    } finally {
+        processing.value = false;
+    }
+}
+
+function deleteSlider(slider) {
+    confirm.require({
+        message: `¿Desea eliminar “${slider.title}”?`,
+        header: 'Eliminar slider',
+        icon: 'pi pi-exclamation-triangle',
+        acceptClass: 'p-button-danger',
+        accept: async () => {
+            try {
+                await api.delete(`/admin/sliders/${slider.id}`);
+                toast.add({ severity: 'success', summary: 'Eliminado', detail: 'Slider eliminado correctamente.', life: 2500 });
+                await fetchSliders();
+            } catch {
+                toast.add({ severity: 'error', summary: 'No se pudo eliminar', detail: 'Inténtalo nuevamente.', life: 4000 });
+            }
+        },
+    });
+}
+
+onMounted(() => Promise.all([fetchSliders(), fetchCategories()]));
+onBeforeUnmount(revokePreview);
 </script>
-<style scoped>.metric{border:1px solid #e2e8f0;border-radius:1rem;background:#fff;padding:1rem;box-shadow:0 1px 2px #0f172a0d}.metric span,.metric small{display:block;color:#64748b;font-size:.8rem;font-weight:600}.metric strong{display:block;margin:.35rem 0;font-size:1.65rem;color:#0f172a}.label{display:block;font-size:.875rem;font-weight:700;color:#334155}.field{width:100%;border:1px solid #cbd5e1;border-radius:.65rem;padding:.65rem .8rem;color:#0f172a}.field:focus{outline:2px solid #3b82f6;outline-offset:1px}.primary,.secondary{min-height:2.5rem;border-radius:.6rem;padding:.55rem .85rem;font-weight:700}.primary{background:#2563eb;color:#fff}.secondary{border:1px solid #cbd5e1;color:#334155}button:disabled{cursor:not-allowed;opacity:.55}button:focus-visible{outline:2px solid #2563eb;outline-offset:2px}</style>
+
+<style scoped>
+.metric { border: 1px solid #e2e8f0; border-radius: 1rem; background: #fff; padding: 1rem; box-shadow: 0 1px 2px #0f172a0d; }
+.metric span, .metric small { display: block; color: #64748b; font-size: .8rem; font-weight: 600; }
+.metric strong { display: block; margin: .35rem 0; font-size: 1.65rem; color: #0f172a; }
+.label { display: block; font-size: .875rem; font-weight: 700; color: #334155; }
+.field { width: 100%; border: 1px solid #cbd5e1; border-radius: .65rem; padding: .65rem .8rem; color: #0f172a; }
+.field:focus { outline: 2px solid #3b82f6; outline-offset: 1px; }
+.primary, .secondary { min-height: 2.5rem; border-radius: .6rem; padding: .55rem .85rem; font-weight: 700; }
+.primary { background: #2563eb; color: #fff; }
+.secondary { border: 1px solid #cbd5e1; color: #334155; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+</style>

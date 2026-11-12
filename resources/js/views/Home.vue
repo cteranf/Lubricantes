@@ -24,6 +24,12 @@
                 class="hero-carousel"
             >
                 <template #item="slotProps">
+                    <component
+                        :is="slotProps.data.category?.slug ? RouterLink : 'div'"
+                        :to="slotProps.data.category?.slug ? { name: 'Catalog', query: { category: slotProps.data.category.slug } } : undefined"
+                        :aria-label="slotProps.data.category?.slug ? `Ver productos de ${slotProps.data.category.name}` : undefined"
+                        class="hero-slide-container block"
+                    >
                     <div class="hero-panel">
                         <img
                             v-if="slotProps.data.image && !failedSlideImages[slotProps.data.image]"
@@ -45,12 +51,16 @@
                                 </component>
                                 <p v-if="slotProps.data.description" class="mt-4 max-w-2xl text-base leading-relaxed text-slate-100 sm:text-lg lg:text-xl">{{ slotProps.data.description }}</p>
                                 <div class="mt-7 flex flex-col gap-3 sm:flex-row">
-                                    <router-link to="/catalog" class="btn-primary">Ver catálogo <i class="pi pi-arrow-right" aria-hidden="true"></i></router-link>
-                                    <a :href="whatsappLink" target="_blank" rel="noopener noreferrer" class="btn-secondary-on-dark"><i class="pi pi-whatsapp" aria-hidden="true"></i> Solicitar asesoría</a>
+                                    <span v-if="slotProps.data.category?.slug" class="btn-primary">Ver productos <i class="pi pi-arrow-right" aria-hidden="true"></i></span>
+                                    <template v-else>
+                                        <router-link to="/catalog" class="btn-primary">Ver catálogo <i class="pi pi-arrow-right" aria-hidden="true"></i></router-link>
+                                        <a :href="whatsappLink" target="_blank" rel="noopener noreferrer" class="btn-secondary-on-dark"><i class="pi pi-whatsapp" aria-hidden="true"></i> Solicitar asesoría</a>
+                                    </template>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    </component>
                 </template>
             </Carousel>
 
@@ -136,6 +146,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Carousel from 'primevue/carousel';
 import Skeleton from 'primevue/skeleton';
@@ -180,20 +191,18 @@ const runLoad = async (state, request) => {
     state.error = false;
     try { await request(); } catch (error) { state.error = true; if (import.meta.env.DEV) console.error(error); } finally { state.loading = false; }
 };
-const isPlaceholderSlide = slide => {
-    const title = slide.title?.trim().toLowerCase() || '';
-    const description = slide.description?.trim() || '';
-    return ['prueba', 'test', 'demo'].includes(title) || (title.length < 8 && description.length < 8);
-};
 const loadSliders = () => runLoad(heroState, async () => {
     const response = await api.get('/sliders');
     slides.value = (Array.isArray(response.data) ? response.data : []).map(slide => {
-        const placeholder = isPlaceholderSlide(slide);
+        const category = slide.category && typeof slide.category.slug === 'string' && slide.category.slug.trim() !== ''
+            ? { id: slide.category.id, name: slide.category.name, slug: slide.category.slug }
+            : null;
         return {
             id: slide.id,
-            title: placeholder ? defaultHero.title : (slide.title?.trim() || defaultHero.title),
-            description: placeholder ? defaultHero.description : (slide.description?.trim() || ''),
-            image: placeholder ? null : (slide.image_path || null),
+            title: typeof slide.title === 'string' ? slide.title : defaultHero.title,
+            description: typeof slide.description === 'string' ? slide.description : '',
+            image: typeof slide.image_path === 'string' && slide.image_path !== '' ? slide.image_path : null,
+            category,
         };
     });
     activeSlide.value = 0;
@@ -226,6 +235,7 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.('change', syncMotionPre
 .hero-overlay { background: linear-gradient(90deg, rgba(3, 12, 31, .94) 0%, rgba(6, 25, 55, .8) 48%, rgba(6, 25, 55, .34) 100%); }
 .hero-technical-bg { background-color: #081a38; background-image: radial-gradient(circle at 78% 35%, rgba(37, 99, 235, .55), transparent 24%), radial-gradient(circle at 85% 70%, rgba(245, 158, 11, .25), transparent 18%), linear-gradient(135deg, transparent 0 48%, rgba(255,255,255,.045) 48% 50%, transparent 50% 100%); background-size: auto, auto, 52px 52px; }
 .hero-title { font-size: clamp(2.1rem, 6vw, 4.5rem); line-height: 1.02; text-wrap: balance; }
+.hero-slide-container:focus-visible { outline: 3px solid #fbbf24; outline-offset: 4px; }
 .category-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: .9rem; }
 .category-card { display: flex; min-height: 12rem; flex: 0 1 calc(50% - .45rem); flex-direction: column; align-items: center; justify-content: center; padding: 1.1rem .75rem; text-align: center; }
 .product-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }

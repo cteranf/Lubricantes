@@ -13,6 +13,7 @@ class Slider extends Model
         'title',
         'description',
         'image_path',
+        'category_id',
         'is_active',
         'sort_order',
     ];
@@ -21,4 +22,9 @@ class Slider extends Model
         'is_active' => 'boolean',
         'sort_order' => 'integer',
     ];
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
 }

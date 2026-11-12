@@ -29,19 +29,19 @@
                             <div class="grid gap-5 sm:grid-cols-2">
                                 <div>
                                     <label for="contact-name" class="mb-1.5 block text-sm font-bold text-slate-800">Nombre *</label>
-                                    <input id="contact-name" ref="nameInput" v-model="form.name" type="text" maxlength="120" autocomplete="name" class="contact-input" :class="errors.name && 'contact-input-error'" :aria-invalid="Boolean(errors.name)" :aria-describedby="errors.name ? 'contact-name-error' : undefined">
+                                    <input id="contact-name" ref="nameInput" v-model="form.name" @input="markContactFieldTouched('name')" type="text" maxlength="120" autocomplete="name" class="contact-input" :class="errors.name && 'contact-input-error'" :aria-invalid="Boolean(errors.name)" :aria-describedby="errors.name ? 'contact-name-error' : undefined">
                                     <p v-if="errors.name" id="contact-name-error" class="contact-error">{{ errors.name[0] }}</p>
                                 </div>
                                 <div>
                                     <label for="contact-email" class="mb-1.5 block text-sm font-bold text-slate-800">Correo *</label>
-                                    <input id="contact-email" v-model="form.email" type="email" maxlength="190" autocomplete="email" class="contact-input" :class="errors.email && 'contact-input-error'" :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'contact-email-error' : undefined">
+                                    <input id="contact-email" v-model="form.email" @input="markContactFieldTouched('email')" type="email" maxlength="190" autocomplete="email" class="contact-input" :class="errors.email && 'contact-input-error'" :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'contact-email-error' : undefined">
                                     <p v-if="errors.email" id="contact-email-error" class="contact-error">{{ errors.email[0] }}</p>
                                 </div>
                             </div>
 
                             <div>
                                 <label for="contact-phone" class="mb-1.5 block text-sm font-bold text-slate-800">Teléfono <span class="font-normal text-slate-500">(opcional)</span></label>
-                                <input id="contact-phone" v-model="form.phone" type="tel" maxlength="30" autocomplete="tel" class="contact-input" :class="errors.phone && 'contact-input-error'" aria-describedby="contact-phone-help contact-phone-error" :aria-invalid="Boolean(errors.phone)">
+                                <input id="contact-phone" v-model="form.phone" @input="markContactFieldTouched('phone')" type="tel" maxlength="30" autocomplete="tel" class="contact-input" :class="errors.phone && 'contact-input-error'" aria-describedby="contact-phone-help contact-phone-error" :aria-invalid="Boolean(errors.phone)">
                                 <p id="contact-phone-help" class="mt-1.5 text-xs text-slate-500">Inclúyelo únicamente si deseas que podamos contactarte también por teléfono o WhatsApp.</p>
                                 <p v-if="errors.phone" id="contact-phone-error" class="contact-error">{{ errors.phone[0] }}</p>
                             </div>
@@ -76,18 +76,23 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, reactive, ref } from 'vue';
+import { nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import api from '@/api';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useAuthStore } from '@/stores/auth';
 
 const seoConfig = getSiteSeoConfig();
 useSiteSeo(() => ({ title: `Contacto | ${seoConfig.name}`, description: `Comunícate con el equipo de ${seoConfig.name} mediante nuestro formulario de contacto.`, robots: 'index,follow', canonicalPath: '/contact' }));
 
 const toast = useToast();
+const authStore = useAuthStore();
 const emptyForm = () => ({ name: '', email: '', phone: '', subject: '', message: '', website: '' });
 const form = reactive(emptyForm());
+const contactFields = ['name', 'email', 'phone'];
+const touchedContactFields = reactive({ name: false, email: false, phone: false });
+const autofilledContactValues = { name: null, email: null, phone: null };
 const errors = ref({});
 const sending = ref(false);
 const contextLoading = ref(true);
@@ -98,6 +103,54 @@ const liveMessage = ref('');
 const submissionToken = ref('');
 const formContext = ref(null);
 const nameInput = ref(null);
+let mounted = true;
+let observedToken = authStore.token;
+let contextSequence = 0;
+let submissionSequence = 0;
+let contextController = null;
+let submissionController = null;
+
+function markContactFieldTouched(field) {
+    if (contactFields.includes(field)) touchedContactFields[field] = true;
+}
+
+function clearUnmodifiedAutofill() {
+    for (const field of contactFields) {
+        const autofilledValue = autofilledContactValues[field];
+        if (!touchedContactFields[field] && autofilledValue !== null && form[field] === autofilledValue) {
+            form[field] = '';
+        }
+        autofilledContactValues[field] = null;
+    }
+}
+
+function applyProfileContact(user) {
+    for (const field of contactFields) {
+        const value = user[field];
+        if (!touchedContactFields[field] && form[field] === '' && typeof value === 'string' && value !== '') {
+            form[field] = value;
+            autofilledContactValues[field] = value;
+        }
+    }
+}
+
+const stopAuthWatch = watch(
+    () => [authStore.token, authStore.user],
+    ([token, user]) => {
+        if (token !== observedToken) {
+            clearUnmodifiedAutofill();
+            observedToken = token;
+        }
+
+        if (!token) {
+            clearUnmodifiedAutofill();
+            return;
+        }
+
+        if (user) applyProfileContact(user);
+    },
+    { immediate: true }
+);
 
 const uuid = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -110,15 +163,25 @@ const uuid = () => {
 };
 
 async function prepareFormContext() {
+    const sequence = ++contextSequence;
+    contextController?.abort();
+    contextController = new AbortController();
     contextLoading.value = true; contextError.value = false; generalError.value = '';
     submissionToken.value = uuid();
     try {
-        const { data } = await api.get('/contact-inquiries/form-context', { params: { submission_token: submissionToken.value } });
+        const { data } = await api.get('/contact-inquiries/form-context', {
+            params: { submission_token: submissionToken.value },
+            signal: contextController.signal,
+        });
+        if (!mounted || sequence !== contextSequence) return;
         formContext.value = data;
     } catch {
+        if (!mounted || sequence !== contextSequence) return;
         contextError.value = true;
         generalError.value = 'No pudimos preparar el formulario. Revisa tu conexión e inténtalo nuevamente.';
-    } finally { contextLoading.value = false; }
+    } finally {
+        if (mounted && sequence === contextSequence) contextLoading.value = false;
+    }
 }
 
 function validateClient() {
@@ -134,24 +197,43 @@ function validateClient() {
 async function submitForm() {
     if (sending.value || !validateClient()) { await nextTick(); document.querySelector('[aria-invalid="true"]')?.focus(); return; }
     if (!formContext.value) { generalError.value = 'El formulario todavía no está listo. Inténtalo nuevamente.'; return; }
+    const sequence = ++submissionSequence;
+    submissionController?.abort();
+    submissionController = new AbortController();
     sending.value = true; errors.value = {}; generalError.value = ''; successMessage.value = ''; liveMessage.value = 'Enviando consulta.';
     try {
-        const { data } = await api.post('/contact-inquiries', {
+        await api.post('/contact-inquiries', {
             ...form,
             submission_token: submissionToken.value,
             ...formContext.value,
-        });
-        Object.assign(form, emptyForm());
-        successMessage.value = data.message;
-        liveMessage.value = data.message;
-        toast.add({ severity: 'success', summary: 'Consulta recibida', detail: data.message, life: 4000 });
+        }, { signal: submissionController.signal });
+        if (!mounted || sequence !== submissionSequence) return;
+        form.subject = '';
+        form.message = '';
+        form.website = '';
+        successMessage.value = 'Recibimos tu consulta. Nuestro equipo se comunicará contigo a la brevedad.';
+        liveMessage.value = successMessage.value;
+        toast.add({ severity: 'success', summary: 'Consulta recibida', detail: successMessage.value, life: 4000 });
         await prepareFormContext();
     } catch (error) {
+        if (!mounted || sequence !== submissionSequence) return;
         if (error.response?.status === 422) {
-            errors.value = error.response.data.errors || {};
-            if (errors.value.form_token) {
-                generalError.value = errors.value.form_token[0];
+            const fieldMessages = {
+                name: ['Revisa el nombre ingresado.'],
+                email: ['Revisa el correo ingresado.'],
+                phone: ['Revisa el teléfono ingresado.'],
+                subject: ['Revisa el asunto ingresado.'],
+                message: ['Revisa el mensaje ingresado.'],
+            };
+            const remoteErrors = error.response?.data?.errors;
+            errors.value = Object.fromEntries(Object.keys(remoteErrors && typeof remoteErrors === 'object' ? remoteErrors : {})
+                .filter(field => Object.hasOwn(fieldMessages, field))
+                .map(field => [field, fieldMessages[field]]));
+            if (remoteErrors && Object.hasOwn(remoteErrors, 'form_token')) {
+                generalError.value = 'El formulario expiró o no pudo validarse. Prepáralo nuevamente.';
                 await prepareFormContext();
+            } else if (Object.keys(errors.value).length === 0) {
+                generalError.value = 'No pudimos validar la consulta. Revisa los datos e inténtalo nuevamente.';
             }
         } else if (error.response?.status === 429) {
             generalError.value = 'Se realizaron demasiados intentos. Espera un momento antes de volver a enviar.';
@@ -160,10 +242,20 @@ async function submitForm() {
         }
         liveMessage.value = generalError.value || 'Revisa los errores del formulario.';
         await nextTick(); document.querySelector('[aria-invalid="true"]')?.focus();
-    } finally { sending.value = false; }
+    } finally {
+        if (mounted && sequence === submissionSequence) sending.value = false;
+    }
 }
 
-onMounted(prepareFormContext);
+prepareFormContext();
+onBeforeUnmount(() => {
+    mounted = false;
+    contextSequence++;
+    submissionSequence++;
+    contextController?.abort();
+    submissionController?.abort();
+    stopAuthWatch();
+});
 </script>
 
 <style scoped>

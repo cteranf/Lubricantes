@@ -7,8 +7,8 @@ use App\Models\ContactInquiry;
 use App\Models\ContactInquiryHistory;
 use App\Models\User;
 use App\Services\ContactFormSecurity;
-use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
@@ -53,6 +53,33 @@ class ContactInquiryModuleTest extends TestCase
         $this->assertDatabaseHas('contact_inquiries', ['user_id' => $user->id]);
     }
 
+    public function test_authenticated_inquiry_uses_session_identity_and_preserves_submitted_contact_snapshots(): void
+    {
+        $authenticatedUser = User::factory()->create([
+            'role' => 'customer',
+            'name' => 'Nombre de cuenta',
+            'email' => 'account@example.test',
+            'phone' => '+51 900 000 001',
+        ]);
+        $untrustedUser = User::factory()->create(['role' => 'customer']);
+        Sanctum::actingAs($authenticatedUser);
+
+        $this->postJson('/api/v1/contact-inquiries', $this->payload([
+            'user_id' => $untrustedUser->id,
+            'name' => 'Nombre para esta consulta',
+            'email' => 'snapshot@example.test',
+            'phone' => '+51 955 555 555',
+        ]))->assertCreated();
+
+        $this->assertDatabaseHas('contact_inquiries', [
+            'user_id' => $authenticatedUser->id,
+            'name' => 'Nombre para esta consulta',
+            'email' => 'snapshot@example.test',
+            'phone' => '+51 955 555 555',
+        ]);
+        $this->assertDatabaseMissing('contact_inquiries', ['user_id' => $untrustedUser->id]);
+    }
+
     public function test_required_fields_limits_and_formats_are_validated(): void
     {
         $this->postJson('/api/v1/contact-inquiries', [])->assertUnprocessable()
@@ -83,7 +110,8 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_repeated_submission_token_is_idempotent_and_not_notified_twice(): void
     {
-        Mail::fake(); config(['contact.notification_email' => 'admin@example.com']);
+        Mail::fake();
+        config(['contact.notification_email' => 'admin@example.com']);
         $payload = $this->payload();
         $first = $this->postJson('/api/v1/contact-inquiries', $payload)->assertCreated();
         $second = $this->postJson('/api/v1/contact-inquiries', $payload)->assertOk();
@@ -119,6 +147,7 @@ class ContactInquiryModuleTest extends TestCase
         $this->postJson('/api/v1/contact-inquiries', $this->payload())->assertCreated();
         Mail::assertQueued(NewContactInquiryMail::class, function (NewContactInquiryMail $mail) {
             $mail->build();
+
             return $mail->hasTo('contact-admin@example.com')
                 && $mail->hasFrom('no-reply@lubristore.test')
                 && $mail->hasReplyTo('visitor@example.com');
@@ -140,6 +169,7 @@ class ContactInquiryModuleTest extends TestCase
         $this->assertDatabaseCount('contact_inquiries', 2);
         Log::shouldHaveReceived('warning')->withArgs(function ($message, $context) use ($payload) {
             $encoded = json_encode([$message, $context]);
+
             return ! str_contains($encoded, $payload['email']) && ! str_contains($encoded, $payload['message']);
         });
     }
@@ -158,8 +188,11 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_admin_list_supports_search_filters_sort_and_pagination(): void
     {
-        $admin = $this->admin(); Sanctum::actingAs($admin);
-        for ($index = 0; $index < 16; $index++) $this->inquiry(['name' => "Persona {$index}", 'email' => "person{$index}@example.com", 'subject' => "Asunto {$index}"]);
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        for ($index = 0; $index < 16; $index++) {
+            $this->inquiry(['name' => "Persona {$index}", 'email' => "person{$index}@example.com", 'subject' => "Asunto {$index}"]);
+        }
         $special = $this->inquiry(['name' => 'Nombre único', 'email' => 'unique@example.com', 'subject' => 'Filtro especial', 'status' => ContactInquiry::IN_ATTENTION, 'assigned_to' => $admin->id]);
         $this->getJson('/api/v1/admin/contact-inquiries')->assertOk()->assertJsonPath('meta.current_page', 1)->assertJsonCount(15, 'data');
         $this->getJson('/api/v1/admin/contact-inquiries?search=Filtro%20especial&status=in_attention&assigned_to='.$admin->id.'&sort=activity_asc')
@@ -178,7 +211,10 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_only_real_admin_can_be_assigned_and_assignment_is_historical(): void
     {
-        $admin = $this->admin(); $customer = User::factory()->create(['role' => 'customer']); $inquiry = $this->inquiry(); Sanctum::actingAs($admin);
+        $admin = $this->admin();
+        $customer = User::factory()->create(['role' => 'customer']);
+        $inquiry = $this->inquiry();
+        Sanctum::actingAs($admin);
         $url = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/assignment';
         $this->patchJson($url, ['assigned_to' => $customer->id])->assertUnprocessable()->assertJsonValidationErrors('assigned_to');
         $this->patchJson($url, ['assigned_to' => $admin->id])->assertOk()->assertJsonPath('data.assignee.id', $admin->id);
@@ -188,7 +224,9 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_status_transitions_update_dates_preserve_them_on_reopen_and_record_history(): void
     {
-        Sanctum::actingAs($this->admin()); $inquiry = $this->inquiry(); $url = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/status';
+        Sanctum::actingAs($this->admin());
+        $inquiry = $this->inquiry();
+        $url = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/status';
         $this->patchJson($url, ['status' => ContactInquiry::ATTENDED])->assertUnprocessable();
         $this->patchJson($url, ['status' => ContactInquiry::IN_ATTENTION])->assertOk();
         $attentionAt = $inquiry->refresh()->attention_started_at;
@@ -205,7 +243,9 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_internal_note_records_author_and_is_not_editable_or_public(): void
     {
-        $admin = $this->admin(); Sanctum::actingAs($admin); $inquiry = $this->inquiry();
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $inquiry = $this->inquiry();
         $url = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/notes';
         $this->postJson($url, ['body' => 'Nota exclusivamente interna.'])->assertCreated()->assertJsonPath('data.notes.0.author.id', $admin->id);
         $this->assertDatabaseHas('contact_inquiry_notes', ['contact_inquiry_id' => $inquiry->id, 'user_id' => $admin->id]);
@@ -215,10 +255,14 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_archive_and_restore_preserve_inquiry_notes_and_history_without_delete_route(): void
     {
-        $admin = $this->admin(); Sanctum::actingAs($admin); $inquiry = $this->inquiry();
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $inquiry = $this->inquiry();
         $this->postJson('/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/notes', ['body' => 'Nota conservada'])->assertCreated();
         $this->postJson('/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/archive')->assertOk();
-        $this->assertNotNull($inquiry->refresh()->archived_at); $this->assertDatabaseCount('contact_inquiries', 1); $this->assertDatabaseCount('contact_inquiry_notes', 1);
+        $this->assertNotNull($inquiry->refresh()->archived_at);
+        $this->assertDatabaseCount('contact_inquiries', 1);
+        $this->assertDatabaseCount('contact_inquiry_notes', 1);
         $this->postJson('/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/restore')->assertOk();
         $this->assertNull($inquiry->refresh()->archived_at);
         $this->assertFalse(collect(Route::getRoutes())->contains(fn ($route) => in_array('DELETE', $route->methods()) && str_contains($route->uri(), 'contact-inquiries')));
@@ -226,17 +270,21 @@ class ContactInquiryModuleTest extends TestCase
 
     public function test_email_and_whatsapp_actions_are_recorded_as_opened_not_sent(): void
     {
-        Sanctum::actingAs($this->admin()); $inquiry = $this->inquiry(['phone' => '+51 999 111 222']); $base = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/actions/';
+        Sanctum::actingAs($this->admin());
+        $inquiry = $this->inquiry(['phone' => '+51 999 111 222']);
+        $base = '/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/actions/';
         $this->postJson($base.'email')->assertOk()->assertJsonPath('url', fn ($url) => str_starts_with($url, 'mailto:'));
         $this->postJson($base.'whatsapp')->assertOk()->assertJsonPath('url', fn ($url) => str_starts_with($url, 'https://wa.me/51999111222'));
         $events = ContactInquiryHistory::where('contact_inquiry_id', $inquiry->id)->pluck('event_type');
-        $this->assertTrue($events->contains('email_client_opened')); $this->assertTrue($events->contains('whatsapp_opened'));
+        $this->assertTrue($events->contains('email_client_opened'));
+        $this->assertTrue($events->contains('whatsapp_opened'));
         $this->assertFalse($events->contains(fn ($event) => str_contains($event, 'sent') || str_contains($event, 'delivered')));
     }
 
     public function test_whatsapp_requires_a_valid_phone(): void
     {
-        Sanctum::actingAs($this->admin()); $inquiry = $this->inquiry(['phone' => null]);
+        Sanctum::actingAs($this->admin());
+        $inquiry = $this->inquiry(['phone' => null]);
         $this->postJson('/api/v1/admin/contact-inquiries/'.$inquiry->public_id.'/actions/whatsapp')->assertUnprocessable()->assertJsonValidationErrors('phone');
     }
 
@@ -244,6 +292,7 @@ class ContactInquiryModuleTest extends TestCase
     {
         $token = (string) Str::uuid();
         $context = app(ContactFormSecurity::class)->context($token);
+
         return array_merge([
             'name' => '  Visitante   Ejemplo ',
             'email' => 'VISITOR@EXAMPLE.COM',
@@ -264,5 +313,8 @@ class ContactInquiryModuleTest extends TestCase
         ], $overrides));
     }
 
-    private function admin(): User { return User::factory()->create(['role' => 'admin']); }
+    private function admin(): User
+    {
+        return User::factory()->create(['role' => 'admin']);
+    }
 }

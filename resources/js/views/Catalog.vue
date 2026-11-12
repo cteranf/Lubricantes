@@ -173,6 +173,7 @@ const closeFiltersButton = ref(null);
 const optionsState = reactive({ categoriesLoading: true, categoriesError: false, brandsLoading: true, brandsError: false });
 let productRequestController;
 let productRequestId = 0;
+let pendingCategorySignature = null;
 let previouslyFocused;
 let previousBodyOverflow = '';
 
@@ -182,7 +183,7 @@ const filters = computed(() => {
     const page = Number.parseInt(firstString(route.query.page), 10);
     return {
         search: firstString(route.query.search).trim(),
-        category: firstString(route.query.category).trim(),
+        category: typeof route.query.category === 'string' ? route.query.category.trim() : '',
         brand: firstString(route.query.brand).trim(),
         viscosity: firstString(route.query.viscosity).trim(),
         type: firstString(route.query.type).trim(),
@@ -211,7 +212,7 @@ const pageNumbers = computed(() => {
     const start = Math.max(1, Math.min(current - 2, last - 4));
     return Array.from({ length: Math.min(5, last) }, (_, index) => start + index);
 });
-const requestSignature = computed(() => JSON.stringify(filters.value));
+const requestSignature = computed(() => JSON.stringify({ filters: filters.value, rawCategory: route.query.category }));
 const visibleCategories = computed(() => {
     const result = [];
     const visit = (items, ancestorsActive = true) => {
@@ -256,7 +257,12 @@ const updateQuery = (changes, replace = false) => {
     const next = cleanQuery({ ...route.query, ...changes });
     if (next.page === '1' || next.page === 1) delete next.page;
     if (next.sort === 'newest') delete next.sort;
-    return router[replace ? 'replace' : 'push']({ path: '/catalog', query: next });
+    const destination = { path: '/catalog', query: next };
+    if (replace) {
+        return router.replace(destination);
+    }
+
+    return router.push(destination);
 };
 const setFilter = (key, value) => updateQuery({ [key]: value, page: undefined });
 const removeFilter = key => updateQuery({ [key]: undefined, page: undefined });
@@ -269,6 +275,23 @@ const setPage = page => {
 const submitSearch = () => updateQuery({ search: searchDraft.value.trim() || undefined, page: undefined }, true);
 
 const loadProducts = async () => {
+    const signature = requestSignature.value;
+    const rawCategory = route.query.category;
+    const hasCategory = Object.prototype.hasOwnProperty.call(route.query, 'category');
+    if (pendingCategorySignature && pendingCategorySignature !== signature) pendingCategorySignature = null;
+
+    if (hasCategory && optionsState.categoriesLoading) {
+        pendingCategorySignature = signature;
+        return;
+    }
+
+    if (hasCategory && (typeof rawCategory !== 'string' || !visibleCategories.value.some(category => category.slug === rawCategory.trim()))) {
+        pendingCategorySignature = null;
+        const query = cleanQuery({ ...route.query, category: undefined });
+        router.replace({ path: '/catalog', query });
+        return;
+    }
+
     productRequestController?.abort();
     const controller = new AbortController();
     productRequestController = controller;
@@ -292,7 +315,13 @@ const loadCategories = async () => {
     optionsState.categoriesLoading = true; optionsState.categoriesError = false;
     try { const { data } = await api.get('/categories'); categories.value = (Array.isArray(data) ? data : []).filter(item => item.is_active !== false); }
     catch { optionsState.categoriesError = true; }
-    finally { optionsState.categoriesLoading = false; }
+    finally {
+        optionsState.categoriesLoading = false;
+        if (pendingCategorySignature && pendingCategorySignature === requestSignature.value) {
+            pendingCategorySignature = null;
+            loadProducts();
+        }
+    }
 };
 const loadBrands = async () => {
     optionsState.brandsLoading = true; optionsState.brandsError = false;
