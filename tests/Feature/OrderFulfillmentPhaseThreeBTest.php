@@ -12,6 +12,8 @@ use App\Models\User;
 use App\Models\WarehouseInventory;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\CreatesShippingCoverage;
@@ -108,9 +110,12 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
 
     public function test_customer_tracking_uses_public_image_url_iso_instants_and_clear_cod_payment_event(): void
     {
+        Storage::fake('public');
+        $legacyImagePath = 'products/aceite.jpg';
+        Storage::disk('public')->put($legacyImagePath, 'public fixture image bytes');
         $admin = $this->admin();
         $product = $this->product(4);
-        $product->update(['image_path' => '/storage/products/aceite.jpg']);
+        $product->update(['image_path' => '/storage/'.$legacyImagePath]);
         $order = $this->createOrder($product, 1, 'contra_entrega');
         Sanctum::actingAs($admin);
         $this->postJson($this->url($order, 'start-preparation'))->assertOk();
@@ -118,19 +123,57 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->postJson($this->url($order, 'ready'))->assertOk();
         $this->completeDelivery($order);
 
+        // Tracking reads the current public product image; it is not an order-image snapshot.
+        // A second item exercises eager loading across multiple products.
+        $secondProduct = $this->product(1);
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'product_id' => $secondProduct->id,
+            'quantity' => 1,
+            'price' => '10.00',
+            'subtotal' => '10.00',
+        ]);
+
         $order->refresh();
         Sanctum::actingAs($order->user);
+        $imageQueries = [];
+        DB::listen(static function ($query) use (&$imageQueries): void {
+            if (preg_match('/\bfrom\s+[`"]?product_images\b/i', $query->sql) === 1) {
+                $imageQueries[] = strtolower(preg_replace('/\s+/', ' ', trim($query->sql)));
+            }
+        });
         $response = $this->getJson('/api/v1/orders/'.$order->id.'/tracking')->assertOk();
         $timeline = $response->json('timeline');
         $delivered = collect($timeline)->firstWhere('status', 'delivered');
         $payment = collect($timeline)->last();
 
-        $response->assertJsonPath('order.items.0.image_url', config('filesystems.disks.public.url').'/products/aceite.jpg');
+        $response->assertJsonPath('order.items.0.image_url', Storage::disk('public')->url($legacyImagePath));
+        $this->assertCount(1, $imageQueries, 'Tracking must eager-load product_images once across order items.');
+        foreach (['original_path', 'pending_original_path', 'generation_id'] as $privateKey) {
+            $response->assertJsonMissingPath('order.items.0.'.$privateKey);
+        }
         $this->assertMatchesRegularExpression('/(?:Z|[+-]00:00)$/', $response->json('order.created_at'));
         $this->assertSame('payment', $payment['status']);
         $this->assertSame('Pago confirmado', $payment['label']);
         $this->assertTrue($payment['completed']);
         $this->assertSame($order->paid_at->copy()->utc()->toIso8601String(), $payment['date']);
+    }
+
+    public function test_tracking_uses_a_placeholder_when_the_current_public_image_is_removed(): void
+    {
+        Storage::fake('public');
+        $legacyImagePath = 'products/removed-after-order.jpg';
+        Storage::disk('public')->put($legacyImagePath, 'public fixture image bytes');
+        $product = $this->product(1);
+        $product->update(['image_path' => '/storage/'.$legacyImagePath]);
+        $order = $this->createOrder($product, 1, 'contra_entrega');
+
+        Storage::disk('public')->delete($legacyImagePath);
+        Sanctum::actingAs($order->user);
+
+        $this->getJson('/api/v1/orders/'.$order->id.'/tracking')
+            ->assertOk()
+            ->assertJsonPath('order.items.0.image_url', null);
     }
 
     public function test_product_image_url_does_not_expose_local_paths_and_tracking_allows_no_image(): void
@@ -265,7 +308,7 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->postJson($base.'/dispatch')->assertOk();
         $this->postJson($base.'/attempts')->assertCreated();
         $this->postJson($base.'/out-for-delivery')->assertOk();
-        $this->postJson($base.'/confirm', $this->deliveryPayload())->assertOk()->assertJsonPath('delivery.status','delivered');
+        $this->postJson($base.'/confirm', $this->deliveryPayload())->assertOk()->assertJsonPath('delivery.status', 'delivered');
     }
 
     private function deliveryPayload(): array

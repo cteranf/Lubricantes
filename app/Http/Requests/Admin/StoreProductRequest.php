@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Exceptions\InvalidProductImage;
 use App\Models\Product;
+use App\Services\ProductImageProcessor;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 
 class StoreProductRequest extends FormRequest
 {
@@ -37,7 +40,31 @@ class StoreProductRequest extends FormRequest
             'sku' => ['nullable', 'string', 'max:64', 'unique:products,sku'],
             'description' => ['nullable', 'string'],
             'viscosity' => ['nullable', 'string'],
-            'image' => ['nullable', 'image', 'max:2048'],
+            'image' => ['nullable', 'file', 'max:10240', function ($attribute, $value, $fail) {
+                if ($value === null || ! $value instanceof UploadedFile) {
+                    return;
+                }
+                try {
+                    app(ProductImageProcessor::class)->validateUpload($value);
+                } catch (InvalidProductImage) {
+                    $fail('La imagen debe ser JPEG, PNG o WebP válida y cumplir los límites permitidos.');
+                }
+            }],
+            'images' => ['sometimes', 'array', 'max:'.(int) config('product_images.max_images', 6), function ($attribute, $value, $fail) {
+                if ($this->hasFile('image') && is_array($value) && $value !== []) {
+                    $fail('Envía imágenes en un solo campo.');
+                }
+            }],
+            'images.*' => ['required', 'file', 'max:10240', function ($attribute, $value, $fail) {
+                if (! $value instanceof UploadedFile) {
+                    return;
+                }
+                try {
+                    app(ProductImageProcessor::class)->validateUpload($value);
+                } catch (InvalidProductImage) {
+                    $fail('La imagen debe ser JPEG, PNG o WebP válida y cumplir los límites permitidos.');
+                }
+            }],
         ];
     }
 }

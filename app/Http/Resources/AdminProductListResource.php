@@ -25,6 +25,10 @@ class AdminProductListResource extends JsonResource
             ] : null),
             'physical_stock' => (int) ($this->inventory_stock ?? $this->stock ?? 0),
             'image_url' => $this->image_url,
+            'image_variants' => $this->image_variants,
+            'image_srcset' => $this->image_srcset,
+            'image_dimensions' => $this->image_dimensions,
+            'images' => $this->whenLoaded('images', fn () => AdminProductImageResource::collection($this->images)->resolve($request)),
         ];
     }
 }

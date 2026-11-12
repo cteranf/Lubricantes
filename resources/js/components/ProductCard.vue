@@ -1,7 +1,7 @@
 <template>
     <article class="group flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl focus-within:border-blue-400">
         <router-link :to="productRoute" class="focus-ring relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-100 sm:aspect-square" :aria-label="`Ver ${product.name}`">
-            <img v-if="primaryImage && !imageFailed" :src="primaryImage" :alt="product.name" class="h-full w-full object-contain p-4 transition duration-300 group-hover:scale-105" loading="lazy" @error="imageFailed = true">
+            <img v-if="primaryImage && !imageFailed" :src="primaryImage" :srcset="productImageSrcset(product, ['card', 'medium'])" :sizes="imageSizes" :width="imageDimensions?.width" :height="imageDimensions?.height" :alt="product.name" class="h-full w-full object-contain p-4 transition duration-300 group-hover:scale-105" loading="lazy" @error="imageFailed = true">
             <span v-else class="flex h-20 w-20 items-center justify-center rounded-2xl bg-white text-slate-400 shadow-sm" aria-hidden="true"><i class="pi pi-image text-3xl"></i></span>
             <span v-if="hasDiscount" class="absolute left-3 top-3 rounded-full bg-amber-400 px-2.5 py-1 text-xs font-black text-slate-950">-{{ discount }}%</span>
             <span v-if="!hasStock" class="absolute inset-x-3 bottom-3 rounded-lg bg-slate-950/85 px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-white">Agotado</span>
@@ -36,7 +36,7 @@
 import { computed, ref, watch } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import { useCartStore } from '@/stores/cart';
-import { discountPercentage, formatPen, hasValidSale, productPrice, resolveProductImages } from '@/utils/productPresentation';
+import { discountPercentage, formatPen, hasValidSale, productImageDimensions, productImageSrcset, productImageVariants, productPrice, resolveProductImages } from '@/utils/productPresentation';
 
 const props = defineProps({
     product: { type: Object, required: true },
@@ -46,7 +46,15 @@ const cartStore = useCartStore();
 const toast = useToast();
 const imageFailed = ref(false);
 const productRoute = computed(() => `/product/${encodeURIComponent(props.product.slug)}`);
-const primaryImage = computed(() => resolveProductImages(props.product)[0] || null);
+const preferredImage = computed(() => productImageVariants(props.product).find(image => image.key === 'card')
+    || productImageVariants(props.product).find(image => image.key === 'medium')
+    || productImageVariants(props.product).find(image => image.key === 'detail_source')
+    || productImageVariants(props.product).find(image => image.key === 'detail'));
+const primaryImage = computed(() => preferredImage.value?.url || resolveProductImages(props.product)[0] || null);
+const imageDimensions = computed(() => preferredImage.value || productImageDimensions(props.product));
+const imageSizes = computed(() => props.variant === 'catalog'
+    ? '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw'
+    : '(max-width: 640px) 85vw, 360px');
 const stock = computed(() => Number(props.product.stock || 0));
 const hasStock = computed(() => stock.value > 0);
 const hasDiscount = computed(() => hasValidSale(props.product));

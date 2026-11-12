@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ProductResource;
 use App\Models\Product;
 use App\Models\WarehouseInventory;
 use App\Services\InventoryService;
@@ -31,8 +32,8 @@ class ProductController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(fn ($search) => $search->where('name', 'like', '%' . $request->search . '%')
-                ->orWhere('sku', 'like', '%' . $request->search . '%'));
+            $query->where(fn ($search) => $search->where('name', 'like', '%'.$request->search.'%')
+                ->orWhere('sku', 'like', '%'.$request->search.'%'));
         }
 
         if ($request->has('viscosity')) {
@@ -67,13 +68,14 @@ class ProductController extends Controller
             $warehouseId = $this->inventory->defaultWarehouse()->id;
             $sellable = WarehouseInventory::where('warehouse_id', $warehouseId)
                 ->whereIn('product_id', $products->getCollection()->pluck('id'))
-                ->get(['product_id','quantity','reserved_quantity'])->keyBy('product_id');
+                ->get(['product_id', 'quantity', 'reserved_quantity'])->keyBy('product_id');
             $products->getCollection()->each(function ($product) use ($sellable) {
                 $inventory = $sellable->get($product->id);
                 $product->setAttribute('stock', $inventory ? max(0, $inventory->quantity - $inventory->reserved_quantity) : 0);
             });
         }
-        return $products;
+
+        return ProductResource::collection($products);
     }
 
     public function show($slug)
@@ -86,6 +88,7 @@ class ProductController extends Controller
         if (Schema::hasTable('warehouse_inventories')) {
             $product->setAttribute('stock', $this->inventory->sellableStock($product));
         }
-        return response()->json($product);
+
+        return response()->json((new ProductResource($product))->resolve($request = request()));
     }
 }

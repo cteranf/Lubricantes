@@ -95,7 +95,7 @@ class PublicSeoMetadata
                     ->select(['id', 'brand_id', 'name', 'slug', 'sku', 'description', 'image_path', 'updated_at'])
                     ->addSelect([
                         'seo_brand_name' => Brand::query()->select('name')->whereColumn('brands.id', 'products.brand_id')->limit(1),
-                        'seo_image_path' => ProductImage::query()->select('image_path')->whereColumn('product_images.product_id', 'products.id')->orderBy('sort_order')->limit(1),
+                        'seo_image_path' => ProductImage::query()->select('image_path')->whereColumn('product_images.product_id', 'products.id')->where('is_primary', true)->where('processing_status', 'ready')->whereNotNull('image_path')->orderBy('sort_order')->limit(1),
                     ])
                     ->first()
                 : null;

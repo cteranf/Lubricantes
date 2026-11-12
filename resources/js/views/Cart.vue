@@ -19,7 +19,7 @@
                         <tbody>
                             <tr v-for="item in cartStore.items" :key="item.product_id" class="border-b">
                                 <td class="py-4 px-6 flex items-center">
-                                    <img v-if="item.image" :src="item.image" class="h-16 w-16 object-cover rounded mr-4">
+                                    <img v-if="item.image" :src="item.image" :srcset="item.image_srcset" :sizes="item.image_sizes || '160px'" :width="item.image_dimensions?.width" :height="item.image_dimensions?.height" :alt="item.name" loading="lazy" class="h-16 w-16 object-cover rounded mr-4">
                                     <span class="font-medium">{{ item.name }}</span>
                                 </td>
                                 <td class="py-4 px-6 text-center">S/ {{ item.price }}</td>

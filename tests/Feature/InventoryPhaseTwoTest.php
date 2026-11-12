@@ -191,7 +191,7 @@ class InventoryPhaseTwoTest extends TestCase
 
         $this->getJson('/api/v1/products/'.$product->slug)->assertOk()->assertJsonPath('stock', 2);
         Sanctum::actingAs($this->admin());
-        $this->getJson('/api/v1/admin/products?search='.$product->sku)->assertOk()->assertJsonPath('data.0.stock', 12);
+        $this->getJson('/api/v1/admin/products?search='.$product->sku)->assertOk()->assertJsonPath('data.0.physical_stock', 12);
     }
 
     public function test_sale_and_cancellation_are_idempotent_per_order_item(): void

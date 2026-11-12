@@ -50,6 +50,14 @@ return [
             'after_commit' => true,
         ],
 
+        'image_processing' => [
+            'driver' => env('PRODUCT_IMAGE_QUEUE_CONNECTION', 'database'),
+            'table' => 'jobs',
+            'queue' => 'image-processing',
+            'retry_after' => 180,
+            'after_commit' => true,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => 'localhost',

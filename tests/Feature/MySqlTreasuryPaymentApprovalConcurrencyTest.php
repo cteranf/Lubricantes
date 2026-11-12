@@ -14,10 +14,14 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use Illuminate\Support\Facades\DB;
+use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
+/** @group mysql */
 class MySqlTreasuryPaymentApprovalConcurrencyTest extends TestCase
 {
+    use RequiresMySqlDriver;
+
     public function test_ten_real_process_races_produce_one_coherent_treasury_approval(): void
     {
         $this->requireIsolatedMysql();

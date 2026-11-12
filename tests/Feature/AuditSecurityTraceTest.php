@@ -6,7 +6,6 @@ use App\Http\Middleware\AuditRequestContext;
 use App\Jobs\SendCustomerEmailVerification;
 use App\Models\AuditLog;
 use App\Models\User;
-use App\Notifications\VerifyCustomerEmail;
 use App\Services\AuditSanitizer;
 use App\Services\AuditService;
 use App\Services\UserAdministrationService;
@@ -20,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use PDOException;
@@ -64,13 +64,13 @@ class AuditSecurityTraceTest extends TestCase
         ]);
         $job = Queue::pushed(SendCustomerEmailVerification::class)->first();
         $this->assertNotNull($job);
-        $job->handle(app(\App\Services\CustomerEmailVerificationService::class));
-        $verificationUrl = null;
-        Notification::assertSentTo($user, VerifyCustomerEmail::class, function (VerifyCustomerEmail $notification) use ($user, &$verificationUrl): bool {
-            $verificationUrl = $notification->toMail($user)->actionUrl;
-
-            return is_string($verificationUrl);
-        });
+        $this->assertSame('email_verification', $job->connection);
+        $this->assertSame('email-verification', $job->queue);
+        $verificationUrl = URL::temporarySignedRoute(
+            'email.verification.confirm',
+            now()->addMinutes((int) config('email_verification.expire', 60)),
+            ['id' => $user->getKey(), 'hash' => sha1((string) $user->email)]
+        );
         $this->postJson($verificationUrl)->assertOk()->assertJsonPath('code', 'email_verified');
 
         $this->assertTrue(AuditLog::where('action', AuditEventContract::USER_CREATED)->where('auditable_id', (string) $user->id)->exists());

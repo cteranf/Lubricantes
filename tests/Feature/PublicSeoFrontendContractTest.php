@@ -308,7 +308,7 @@ class PublicSeoFrontendContractTest extends TestCase
     /** @dataProvider invalidProductionAppUrlCases */
     public function test_production_without_a_public_app_url_fails_closed_for_seo(?string $appUrl): void
     {
-        config(['app.env' => 'production', 'app.url' => $appUrl]);
+        config(['app.env' => 'production', 'app.url' => $appUrl, 'app.asset_url' => null]);
         $seo = app(\App\Services\PublicSeoMetadata::class);
 
         $this->assertFalse($seo->hasPublicBaseUrl());
@@ -332,6 +332,7 @@ class PublicSeoFrontendContractTest extends TestCase
         $this->assertSame('noindex, nofollow', $sitemap->headers->get('X-Robots-Tag'));
         $this->assertStringNotContainsString('localhost', $sitemap->getContent());
 
+        $this->withServerVariables(['HTTP_HOST' => 'seo-fixture.example.test', 'HTTPS' => 'on']);
         $shell = $this->get('/');
         $shell->assertOk();
         $document = new \DOMDocument;
@@ -341,9 +342,27 @@ class PublicSeoFrontendContractTest extends TestCase
         $this->assertSame(0, $xpath->query('//link[@rel="canonical"]')->length);
         $this->assertSame(0, $xpath->query('//meta[@property="og:url"]')->length);
         $this->assertSame(0, $xpath->query('//meta[@property="og:image"]')->length);
+        $this->assertSame(0, $xpath->query('//meta[@name="twitter:image"]')->length);
         $jsonLd = $xpath->query('//script[@id="site-seo-jsonld"]')->item(0)?->textContent;
         $this->assertSame([], json_decode($jsonLd, true, 512, JSON_THROW_ON_ERROR));
-        $this->assertStringNotContainsString('localhost', $shell->getContent());
+        $seoConfigJson = $xpath->query('//script[@id="site-seo-config"]')->item(0)?->textContent;
+        $seoSurfaceValues = implode("\n", array_filter([
+            $xpath->query('//meta[@name="robots"]')->item(0)?->getAttribute('content'),
+            $xpath->query('//link[@rel="canonical"]')->item(0)?->getAttribute('href'),
+            $xpath->query('//meta[@property="og:url"]')->item(0)?->getAttribute('content'),
+            $xpath->query('//meta[@property="og:image"]')->item(0)?->getAttribute('content'),
+            $xpath->query('//meta[@name="twitter:image"]')->item(0)?->getAttribute('content'),
+            $jsonLd,
+            $seoConfigJson,
+        ], static fn ($value) => is_string($value)));
+        $this->assertStringNotContainsString('localhost', $seoSurfaceValues);
+
+        $viteAssetNodes = $xpath->query(
+            '//script[@type="module" and (contains(@src, "/build/assets/") or contains(@src, "/resources/js/app.js") or contains(@src, "/@vite/client"))]'
+            .' | //link[@rel="stylesheet" and (contains(@href, "/build/assets/") or contains(@href, "/resources/css/app.css"))]'
+        );
+        $this->assertGreaterThan(0, $viteAssetNodes->length, 'Ordinary Vite asset references remain separate from SEO metadata.');
+        $this->assertStringNotContainsString('/build/assets/', $seoSurfaceValues);
     }
 
     public static function invalidProductionAppUrlCases(): array

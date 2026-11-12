@@ -20,12 +20,16 @@ use MercadoPago\MercadoPagoConfig;
 use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
 use MercadoPago\Net\MPResponse;
+use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
-/** Physical MySQL races; intentionally does not use RefreshDatabase. */
+/** @group mysql
+ * Physical MySQL races; intentionally does not use RefreshDatabase.
+ */
 class RemotePaymentPhysicalConcurrencyTest extends TestCase
 {
+    use RequiresMySqlDriver;
     use SyntheticMercadoPagoLink;
 
     private const WEBHOOK_SECRET = 'physical-synthetic-webhook-secret';

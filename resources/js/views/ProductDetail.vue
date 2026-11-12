@@ -25,11 +25,11 @@
                     <section class="grid gap-8 lg:grid-cols-2 lg:gap-14">
                         <div class="min-w-0">
                             <div class="flex aspect-square items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                                <img v-if="selectedImage && !failedImages.has(selectedImage)" :src="selectedImage" :alt="product.name" class="h-full w-full object-contain p-5 sm:p-8" @error="markImageFailed(selectedImage)">
+                                <img v-if="selectedImage && !failedImages.has(selectedImage.url)" :src="selectedImage.url" :srcset="productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])" sizes="(max-width: 1024px) 100vw, 50vw" :width="selectedImageDimensions?.width" :height="selectedImageDimensions?.height" :alt="`${product.name}, imagen ${images.findIndex(item => item.id === selectedImage.id) + 1}`" class="h-full w-full object-contain p-5 sm:p-8" @error="markImageFailed(selectedImage.url)">
                                 <div v-else class="flex flex-col items-center gap-3 text-slate-400"><i class="pi pi-image text-6xl" aria-hidden="true"></i><span class="text-sm font-semibold">Imagen no disponible</span></div>
                             </div>
                             <div v-if="images.length > 1" class="mt-4 flex gap-3 overflow-x-auto pb-2" aria-label="Imágenes del producto">
-                                <button v-for="(image, index) in images" :key="`${image}-${index}`" type="button" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 transition" :class="selectedImage === image ? 'border-blue-700' : 'border-slate-200 hover:border-slate-400'" :aria-label="`Ver imagen ${index + 1}`" :aria-pressed="selectedImage === image" @click="selectedImage = image"><img :src="image" :alt="`Vista ${index + 1} de ${product.name}`" class="h-full w-full object-contain" loading="lazy"></button>
+                                <button v-for="(image, index) in images" :key="image.id || image.url" type="button" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 transition" :class="selectedImage?.id === image.id ? 'border-blue-700' : 'border-slate-200 hover:border-slate-400'" :aria-label="`Ver imagen ${index + 1}`" :aria-pressed="selectedImage?.id === image.id" @click="selectedImage = image"><img :src="image.url" :srcset="thumbnailSrcset(image)" sizes="80px" :width="productImageDimensions(image)?.width" :height="productImageDimensions(image)?.height" :alt="`Vista ${index + 1} de ${product.name}`" class="h-full w-full object-contain" loading="lazy"></button>
                             </div>
                         </div>
 
@@ -80,7 +80,7 @@ import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/layouts/AppLayout.vue';
 import api from '@/api';
 import { useCartStore } from '@/stores/cart';
-import { discountPercentage, formatPen, hasValidSale, productPrice, resolveProductImages } from '@/utils/productPresentation';
+import { discountPercentage, formatPen, hasValidSale, productImageDimensions, productImageSrcset, productImageVariants, productPrice, resolveProductGallery, resolveProductImages } from '@/utils/productPresentation';
 
 const route = useRoute();
 const seoConfig = getSiteSeoConfig();
@@ -97,7 +97,18 @@ let controller;
 let requestId = 0;
 
 const catalogPath = computed(() => sessionStorage.getItem('catalog:last-path') || '/catalog');
-const images = computed(() => resolveProductImages(product.value));
+const images = computed(() => resolveProductGallery(product.value));
+const selectedImageDimensions = computed(() => productImageDimensions(selectedImage.value));
+const thumbnailSrcset = image => productImageSrcset(image, ['thumbnail', 'card']);
+const detailImage = value => {
+    const gallery = resolveProductGallery(value);
+    const image = gallery.find(item => item.is_primary) || gallery[0];
+    if (!image) return null;
+    const variants = productImageVariants(image);
+    const preferred = ['detail', 'detail_source', 'zoom', 'medium', 'card', 'thumbnail']
+        .map(key => variants.find(item => item.key === key)?.url).find(Boolean);
+    return { ...image, url: preferred || image.url };
+};
 const isPublicProduct = value => value && typeof value === 'object'
     && (value.is_active === true || value.is_active === 1 || value.is_active === '1')
     && typeof value.name === 'string' && value.name.trim() !== ''
@@ -121,7 +132,7 @@ useSiteSeo(() => {
         robots: 'index,follow',
         canonicalPath,
         type: 'product',
-        image: images.value[0] || undefined,
+        image: images.value.find(item => item.is_primary)?.url || images.value[0]?.url || undefined,
         imageAlt: product.value.name,
         breadcrumbs: [{ name: 'Inicio', path: '/' }, { name: 'Catálogo', path: '/catalog' }, { name: product.value.name, path: canonicalPath }],
         product: {
@@ -129,7 +140,7 @@ useSiteSeo(() => {
             description: product.value.description || '',
             sku: product.value.sku,
             brand: product.value.brand?.name,
-            images: images.value,
+            images: images.value.map(item => item.url),
             price: product.value.price,
             sale_price: product.value.sale_price,
             stock: product.value.stock,
@@ -171,7 +182,7 @@ const loadProduct = async () => {
             return;
         }
         product.value = response.data;
-        const firstImage = resolveProductImages(response.data)[0] || null;
+        const firstImage = detailImage(response.data);
         selectedImage.value = firstImage; failedImages.value = new Set(); qty.value = 1;
     } catch (exception) {
         if (exception?.code === 'ERR_CANCELED' || id !== requestId) return;

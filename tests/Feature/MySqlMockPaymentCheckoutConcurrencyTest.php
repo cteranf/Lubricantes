@@ -10,10 +10,14 @@ use App\Services\PaymentPreferenceService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
+use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
+/** @group mysql */
 class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
 {
+    use RequiresMySqlDriver;
+
     // Retain only safe coordination evidence; never print raw process output.
     private array $workerMetadata = [];
 

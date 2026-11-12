@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { normalizeCartQuantity } from '@/utils/cartQuantity';
+import { productImageDimensions, productImageSrcset, productImageVariants, resolveProductImages } from '@/utils/productPresentation';
 
 export const useCartStore = defineStore('cart', {
     state: () => ({
@@ -20,7 +21,12 @@ export const useCartStore = defineStore('cart', {
                     product_id: product.id,
                     name: product.name,
                     price: product.sale_price || product.price,
-                    image: product.image_path,
+                    image: productImageVariants(product).find(image => image.key === 'thumbnail')?.url
+                        || productImageVariants(product).find(image => image.key === 'card')?.url
+                        || resolveProductImages(product)[0] || null,
+                    image_srcset: productImageSrcset(product, ['thumbnail', 'card']),
+                    image_sizes: '160px',
+                    image_dimensions: productImageDimensions(product, ['thumbnail', 'card']),
                     quantity: 1,
                     product: product
                 };

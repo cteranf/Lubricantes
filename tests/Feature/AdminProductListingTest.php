@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductImage;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -23,6 +25,16 @@ class AdminProductListingTest extends TestCase
         $category = Category::create(['name' => 'Sintética', 'slug' => 'sintetica-listing']);
         $brand = Brand::create(['name' => 'Marca lista', 'slug' => 'marca-lista']);
         $product = $this->product(['category_id' => $category->id, 'brand_id' => $brand->id, 'stock' => 99, 'description' => 'Descripción sintética del producto.']);
+        $variantPath = 'products/optimized/'.$product->id.'/generation-card/card.webp';
+        Storage::disk('public')->put($variantPath, 'public variant fixture');
+        ProductImage::query()->create([
+            'product_id' => $product->id,
+            'image_path' => '/storage/'.$variantPath,
+            'variants' => ['card' => ['path' => $variantPath, 'width' => 360, 'height' => 240]],
+            'processing_status' => 'ready',
+            'is_primary' => true,
+            'sort_order' => 0,
+        ]);
         $productWithoutDescription = $this->product(['description' => null]);
         $warehouse = Warehouse::where('code', Warehouse::INITIAL_CODE)->firstOrFail();
         WarehouseInventory::create(['warehouse_id' => $warehouse->id, 'product_id' => $product->id, 'quantity' => 8]);
@@ -34,12 +46,36 @@ class AdminProductListingTest extends TestCase
             ->assertJsonPath('data.1.physical_stock', 8);
 
         $rows = collect($response->json('data'))->keyBy('id');
-        $this->assertSame(['id', 'name', 'sku', 'description', 'price', 'is_active', 'category', 'brand', 'physical_stock', 'image_url'], array_keys($rows[$product->id]));
+        $this->assertSame([
+            'id', 'name', 'sku', 'description', 'price', 'is_active', 'category', 'brand',
+            'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images',
+        ], array_keys($rows[$product->id]));
+        $this->assertIsArray($rows[$product->id]['image_variants']);
+        $publicVariantUrl = Storage::disk('public')->url($variantPath);
+        $this->assertSame([
+            'card' => ['url' => $publicVariantUrl, 'width' => 360, 'height' => 240],
+        ], $rows[$product->id]['image_variants']);
+        $this->assertSame($publicVariantUrl.' 360w', $rows[$product->id]['image_srcset']);
+        $this->assertSame(['width' => 360, 'height' => 240], $rows[$product->id]['image_dimensions']);
+        $this->assertArrayNotHasKey('image_processing_status', $rows[$product->id]);
+        $this->assertArrayNotHasKey('can_regenerate_image', $rows[$product->id]);
+        $this->assertSame([
+            'id', 'is_primary', 'sort_order', 'url', 'variants', 'srcset', 'width', 'height',
+            'processing_status', 'can_regenerate_image',
+        ], array_keys($rows[$product->id]['images'][0]));
+        $this->assertSame('ready', $rows[$product->id]['images'][0]['processing_status']);
+        $this->assertFalse($rows[$product->id]['images'][0]['can_regenerate_image']);
         $this->assertSame('Descripción sintética del producto.', $rows[$product->id]['description']);
         $this->assertNull($rows[$productWithoutDescription->id]['description']);
         $this->assertArrayNotHasKey('slug', $rows[$product->id]);
         $this->assertArrayNotHasKey('image_path', $rows[$product->id]);
         $this->assertArrayNotHasKey('stock', $rows[$product->id]);
+        foreach ([
+            'original_path', 'variants', 'generation_id', 'pending_original_path',
+            'stage_path', 'exception', 'disk', 'font', 'job',
+        ] as $privateKey) {
+            $this->assertArrayNotHasKey($privateKey, $rows[$product->id]);
+        }
     }
 
     public function test_global_and_specific_filters_are_combined_and_percent_is_literal(): void
@@ -165,8 +201,13 @@ class AdminProductListingTest extends TestCase
         $this->product(['category_id' => $category->id, 'brand_id' => $brand->id]);
         $queries = [];
         DB::listen(function ($query) use (&$queries): void {
-            $normalized = strtolower(ltrim(str_replace(['`', '"', '[', ']'], '', $query->sql)));
-            $queries[] = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+            $normalized = strtolower($query->sql);
+            $normalized = preg_replace_callback(
+                '/`([a-z_][a-z0-9_.]*)`|"([a-z_][a-z0-9_.]*)"|\[([a-z_][a-z0-9_.]*)\]/i',
+                static fn (array $match): string => $match[1] !== '' ? $match[1] : ($match[2] !== '' ? $match[2] : $match[3]),
+                $normalized,
+            ) ?? $normalized;
+            $queries[] = preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
         });
 
         $start = count($queries);
@@ -193,6 +234,8 @@ class AdminProductListingTest extends TestCase
                     $purpose = 'category_relation';
                 } elseif (str_contains($sql, ' from brands')) {
                     $purpose = 'brand_relation';
+                } elseif (str_contains($sql, ' from product_images')) {
+                    $purpose = 'product_images';
                 } else {
                     $purpose = 'other_select';
                 }
@@ -206,20 +249,42 @@ class AdminProductListingTest extends TestCase
         $firstPurposes = $summarize($firstRequestQueries);
         $secondPurposes = $summarize($secondRequestQueries);
         $stockAggregateCount = static fn (array $statements): int => count(array_filter($statements, fn (string $sql): bool => str_contains($sql, ' from products') && str_contains($sql, 'sum(')));
-        $this->assertSame(4, array_sum($firstPurposes), 'Unexpected relevant SELECT count in the first request: '.json_encode($firstPurposes));
-        $this->assertSame(4, array_sum($secondPurposes), 'Unexpected relevant SELECT count in the second request: '.json_encode($secondPurposes));
         $this->assertSame($firstPurposes, $secondPurposes, 'Product listing query purposes changed with row count.');
+        $this->assertSame(array_sum($firstPurposes), array_sum($secondPurposes), 'Relevant query count grew as the number of products increased.');
         $this->assertSame(1, $stockAggregateCount($firstRequestQueries), 'The first product rows query must include the physical stock aggregate.');
         $this->assertSame(1, $stockAggregateCount($secondRequestQueries), 'The second product rows query must include the physical stock aggregate.');
-        $this->assertSame(1, $firstPurposes['products_count'] ?? 0, 'The first request must use one paginator count query.');
-        $this->assertSame(1, $firstPurposes['products_rows'] ?? 0, 'The first request must load product rows once.');
-        $this->assertSame(1, $firstPurposes['category_relation'] ?? 0, 'The first request must eager-load categories in one query.');
-        $this->assertSame(1, $firstPurposes['brand_relation'] ?? 0, 'The first request must eager-load brands in one query.');
+        foreach ([
+            'products_count' => 'one paginator count query',
+            'products_rows' => 'one product rows query',
+            'category_relation' => 'one eager-loaded category query',
+            'brand_relation' => 'one eager-loaded brand query',
+            'product_images' => 'one eager-loaded product_images query',
+        ] as $purpose => $message) {
+            $this->assertSame(1, $firstPurposes[$purpose] ?? 0, 'The first request must use '.$message.'.');
+            $this->assertSame(1, $secondPurposes[$purpose] ?? 0, 'The second request must use '.$message.'.');
+        }
+        $this->assertSame(0, $firstPurposes['other_select'] ?? 0, 'The first request issued an unexpected SELECT: '.json_encode($firstPurposes));
+        $this->assertSame(0, $secondPurposes['other_select'] ?? 0, 'The second request issued an unexpected SELECT: '.json_encode($secondPurposes));
 
-        $this->assertSame(1, $secondPurposes['products_count'] ?? 0, 'The second request must use one paginator count query.');
-        $this->assertSame(1, $secondPurposes['products_rows'] ?? 0, 'The second request must load product rows once.');
-        $this->assertSame(1, $secondPurposes['category_relation'] ?? 0, 'The second request must eager-load categories in one query.');
-        $this->assertSame(1, $secondPurposes['brand_relation'] ?? 0, 'The second request must eager-load brands in one query.');
+        $imageSelects = static fn (array $statements): array => array_values(array_filter(
+            $statements,
+            static fn (string $sql): bool => str_contains($sql, ' from product_images'),
+        ));
+        $firstImageSelects = $imageSelects($firstRequestQueries);
+        $secondImageSelects = $imageSelects($secondRequestQueries);
+        $this->assertCount(1, $firstImageSelects, 'The first request must eager-load product_images once.');
+        $this->assertCount(1, $secondImageSelects, 'The larger request must eager-load product_images once, not once per product.');
+        $productIdColumn = '(?:product_images\s*\.\s*)?product_id';
+        $this->assertMatchesRegularExpression('/\bwhere\s+'.$productIdColumn.'\s+in\s*\(/', $firstImageSelects[0]);
+        $this->assertMatchesRegularExpression('/\bwhere\s+'.$productIdColumn.'\s+in\s*\(\s*[^)]*,/', $secondImageSelects[0], 'The larger request must eager-load multiple product IDs with one IN query.');
+        foreach ([$firstRequestQueries, $secondRequestQueries] as $requestQueries) {
+            $individualImageSelects = array_filter(
+                $requestQueries,
+                static fn (string $sql): bool => str_contains($sql, ' from product_images')
+                    && preg_match('/\bwhere\s+(?:product_images\s*\.\s*)?product_id\s*=/', $sql) === 1,
+            );
+            $this->assertCount(0, $individualImageSelects, 'An individual product_images lookup would indicate N+1 access.');
+        }
     }
 
     private function admin(): User

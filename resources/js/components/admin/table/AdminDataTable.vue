@@ -30,6 +30,7 @@
             :total-records="totalRecords"
             :rows-per-page-options="pageSizeOptions"
             :loading="loading"
+            :row-hover="rowHover"
             :sort-field="sort.column || undefined"
             :sort-order="sort.direction === 'asc' ? 1 : -1"
             sort-mode="single"
@@ -82,7 +83,13 @@
                     <slot :name="`cell-${column.key}`" :row="data" :value="data[column.key]">{{ data[column.key] ?? '—' }}</slot>
                 </template>
             </Column>
-            <Column v-if="$slots.actions" header="Acción" class="whitespace-nowrap">
+            <Column
+                v-if="$slots.actions"
+                header="Acciones"
+                class="actions-column min-w-24 whitespace-nowrap"
+                :frozen="actionsFrozen"
+                :align-frozen="actionsFrozen ? 'right' : undefined"
+            >
                 <template #body="{ data }"><slot name="actions" :row="data" /></template>
             </Column>
         </DataTable>
@@ -107,6 +114,8 @@ const props = defineProps({
     pageSize: { type: Number, required: true },
     totalRecords: { type: Number, required: true },
     loading: Boolean,
+    rowHover: Boolean,
+    actionsFrozen: Boolean,
     error: { type: [Object, String, Boolean], default: null },
     sort: { type: Object, default: () => ({ column: null, direction: 'desc' }) },
     searchPlaceholder: { type: String, default: 'Buscar pedido o cliente' },

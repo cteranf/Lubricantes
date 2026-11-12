@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFu
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
 use App\Http\Controllers\Api\V1\Admin\PaymentReceivingAccountController as AdminPaymentReceivingAccountController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Api\V1\Admin\ProductImageController as AdminProductImageController;
 use App\Http\Controllers\Api\V1\Admin\ProvinceController as AdminProvinceController;
 use App\Http\Controllers\Api\V1\Admin\ShippingRateController as AdminShippingRateController;
 use App\Http\Controllers\Api\V1\Admin\ShippingZoneController as AdminShippingZoneController;
@@ -157,6 +158,16 @@ Route::prefix('v1')->group(function () {
             Route::post('/contact-inquiries/{contactInquiry}/actions/email', [AdminContactInquiryController::class, 'email'])->name('contact-inquiries.actions.email');
             Route::post('/contact-inquiries/{contactInquiry}/actions/whatsapp', [AdminContactInquiryController::class, 'whatsapp'])->name('contact-inquiries.actions.whatsapp');
             Route::patch('/products/{product}/status', [AdminProductController::class, 'status'])->name('products.status');
+            Route::post('/products/{product}/images', [AdminProductImageController::class, 'store'])->middleware('throttle:10,1')->name('products.images.store');
+            Route::post('/products/{product}/images/reorder', [AdminProductImageController::class, 'reorder'])->name('products.images.reorder');
+            Route::post('/products/{product}/images/{image}/replace', [AdminProductImageController::class, 'replace'])->middleware('throttle:10,1')->name('products.images.replace');
+            Route::post('/products/{product}/images/{image}/regenerate', [AdminProductImageController::class, 'regenerate'])->middleware('throttle:5,1')->name('products.images.regenerate');
+            Route::put('/products/{product}/images/{image}/primary', [AdminProductImageController::class, 'primary'])->name('products.images.primary');
+            Route::get('/products/{product}/images/{image}/status', [AdminProductImageController::class, 'status'])->middleware('throttle:30,1')->name('products.images.status');
+            Route::delete('/products/{product}/images/{image}', [AdminProductImageController::class, 'destroy'])->name('products.images.destroy');
+            // Compatibility endpoints operate only on the current primary logical image.
+            Route::post('/products/{product}/image/regenerate', [AdminProductImageController::class, 'regeneratePrimary'])->middleware('throttle:5,1')->name('products.image.regenerate');
+            Route::get('/products/{product}/image/status', [AdminProductImageController::class, 'primaryStatus'])->middleware('throttle:30,1')->name('products.image.status');
             Route::apiResource('products', AdminProductController::class)->only(['index', 'store', 'update', 'destroy']);
             Route::get('/branches/options', [AdminBranchController::class, 'options'])->name('branches.options');
             Route::patch('/branches/{branch}/main', [AdminBranchController::class, 'setMain'])->name('branches.main');

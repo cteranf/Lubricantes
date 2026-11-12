@@ -19,10 +19,14 @@ use App\Models\WarehouseInventory;
 use App\Services\TreasuryPaymentRefundService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
+/** @group mysql */
 class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
 {
+    use RequiresMySqlDriver;
+
     private const DATABASE = 'lubristore_2b4_resolution_certification_test';
 
     public function test_real_mysql_deadlock_retries_the_complete_mark_pending_transaction(): void
