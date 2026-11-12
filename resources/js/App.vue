@@ -13,6 +13,9 @@
 <script setup>
 import Toast from 'primevue/toast';
 import ConfirmDialog from 'primevue/confirmdialog';
+import { useSiteSeoHead } from '@/composables/useSiteSeo';
+
+useSiteSeoHead();
 </script>
 
 <style>

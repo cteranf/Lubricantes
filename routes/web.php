@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\EmailVerificationController;
+use App\Http\Controllers\PublicSeoController;
 use App\Http\Middleware\VerifyCsrfToken;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
@@ -191,6 +192,6 @@ Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'c
     ->withoutMiddleware(VerifyCsrfToken::class)
     ->name('email.verification.confirm');
 
-Route::get('/{any}', function () {
-    return view('welcome');
-})->where('any', '.*');
+Route::get('/robots.txt', [PublicSeoController::class, 'robots'])->name('seo.robots');
+Route::get('/sitemap.xml', [PublicSeoController::class, 'sitemap'])->name('seo.sitemap');
+Route::get('/{any}', [PublicSeoController::class, 'shell'])->where('any', '.*');

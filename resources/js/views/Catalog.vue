@@ -151,6 +151,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
+import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Skeleton from 'primevue/skeleton';
 import api from '@/api';
 import ProductCard from '@/components/ProductCard.vue';
@@ -158,6 +159,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 
 const route = useRoute();
 const router = useRouter();
+const seoConfig = getSiteSeoConfig();
 const products = ref([]);
 const categories = ref([]);
 const brands = ref([]);
@@ -210,6 +212,44 @@ const pageNumbers = computed(() => {
     return Array.from({ length: Math.min(5, last) }, (_, index) => start + index);
 });
 const requestSignature = computed(() => JSON.stringify(filters.value));
+const visibleCategories = computed(() => {
+    const result = [];
+    const visit = (items, ancestorsActive = true) => {
+        for (const item of items) {
+            const active = ancestorsActive && item.is_active !== false && item.is_active !== 0 && item.is_active !== '0';
+            if (active) result.push(item);
+            if (Array.isArray(item.children)) visit(item.children, active);
+        }
+    };
+    visit(categories.value);
+    return result;
+});
+
+useSiteSeo(() => {
+    const queryKeys = Object.keys(route.query);
+    const requestedCategory = route.query.category;
+    const category = typeof requestedCategory === 'string'
+        ? visibleCategories.value.find(item => item.slug === requestedCategory)
+        : null;
+    const categoryOnly = queryKeys.length === 1 && queryKeys[0] === 'category' && category;
+    const unfiltered = queryKeys.length === 0;
+    const title = categoryOnly ? `${category.name} | Catálogo | ${seoConfig.name}` : `Catálogo de productos | ${seoConfig.name}`;
+    const description = categoryOnly
+        ? `Explora productos de ${category.name} disponibles en ${seoConfig.name}.`
+        : `Explora productos automotrices disponibles en ${seoConfig.name}.`;
+    const canonicalPath = categoryOnly ? `/catalog?category=${encodeURIComponent(category.slug)}` : unfiltered ? '/catalog' : null;
+
+    return {
+        title,
+        description,
+        robots: categoryOnly || unfiltered ? 'index,follow' : 'noindex,follow',
+        canonicalPath,
+        type: 'website',
+        breadcrumbs: categoryOnly
+            ? [{ name: 'Inicio', path: '/' }, { name: 'Catálogo', path: '/catalog' }, { name: category.name, path: canonicalPath }]
+            : [{ name: 'Inicio', path: '/' }, { name: 'Catálogo', path: '/catalog' }],
+    };
+});
 
 const cleanQuery = query => Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== ''));
 const updateQuery = (changes, replace = false) => {

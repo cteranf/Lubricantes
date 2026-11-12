@@ -136,11 +136,21 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Carousel from 'primevue/carousel';
 import Skeleton from 'primevue/skeleton';
 import api from '@/api';
 import ProductCard from '@/components/ProductCard.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+
+const seoConfig = getSiteSeoConfig();
+useSiteSeo(() => ({
+    title: `${seoConfig.name} | Productos para tu vehículo`,
+    description: seoConfig.description,
+    robots: 'index,follow',
+    canonicalPath: '/',
+    type: 'website',
+}));
 
 const defaultHero = { title: 'Protección confiable para cada kilómetro', description: 'Encuentra lubricantes y productos para cuidar el rendimiento de tu vehículo.' };
 const benefits = [

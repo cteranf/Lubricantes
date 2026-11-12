@@ -74,6 +74,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Skeleton from 'primevue/skeleton';
 import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -82,6 +83,7 @@ import { useCartStore } from '@/stores/cart';
 import { discountPercentage, formatPen, hasValidSale, productPrice, resolveProductImages } from '@/utils/productPresentation';
 
 const route = useRoute();
+const seoConfig = getSiteSeoConfig();
 const cartStore = useCartStore();
 const toast = useToast();
 const product = ref(null);
@@ -96,6 +98,44 @@ let requestId = 0;
 
 const catalogPath = computed(() => sessionStorage.getItem('catalog:last-path') || '/catalog');
 const images = computed(() => resolveProductImages(product.value));
+const isPublicProduct = value => value && typeof value === 'object'
+    && (value.is_active === true || value.is_active === 1 || value.is_active === '1')
+    && typeof value.name === 'string' && value.name.trim() !== ''
+    && typeof value.slug === 'string' && value.slug.trim() !== '';
+useSiteSeo(() => {
+    if (loading.value || notFound.value || error.value || !isPublicProduct(product.value)) {
+        return {
+            title: `Producto no disponible | ${seoConfig.name}`,
+            description: 'El producto solicitado no está disponible.',
+            robots: 'noindex,nofollow',
+            canonicalPath: null,
+            type: 'website',
+            image: null,
+            breadcrumbs: [],
+        };
+    }
+    const canonicalPath = `/product/${encodeURIComponent(String(product.value.slug || route.params.slug || ''))}`;
+    return {
+        title: `${product.value.name} | ${seoConfig.name}`,
+        description: product.value.description || `Consulta los detalles y la disponibilidad de ${product.value.name} en ${seoConfig.name}.`,
+        robots: 'index,follow',
+        canonicalPath,
+        type: 'product',
+        image: images.value[0] || undefined,
+        imageAlt: product.value.name,
+        breadcrumbs: [{ name: 'Inicio', path: '/' }, { name: 'Catálogo', path: '/catalog' }, { name: product.value.name, path: canonicalPath }],
+        product: {
+            name: product.value.name,
+            description: product.value.description || '',
+            sku: product.value.sku,
+            brand: product.value.brand?.name,
+            images: images.value,
+            price: product.value.price,
+            sale_price: product.value.sale_price,
+            stock: product.value.stock,
+        },
+    };
+});
 const stock = computed(() => Math.max(0, Number(product.value?.stock || 0)));
 const currentInCart = computed(() => cartStore.items.find(item => item.product_id === product.value?.id)?.quantity || 0);
 const remainingStock = computed(() => Math.max(0, stock.value - currentInCart.value));
@@ -126,6 +166,10 @@ const loadProduct = async () => {
     try {
         const response = await api.get(`/products/${encodeURIComponent(slug)}`, { signal: controller.signal });
         if (id !== requestId) return;
+        if (!isPublicProduct(response.data) || response.data.slug !== slug) {
+            notFound.value = true;
+            return;
+        }
         product.value = response.data;
         const firstImage = resolveProductImages(response.data)[0] || null;
         selectedImage.value = firstImage; failedImages.value = new Set(); qty.value = 1;

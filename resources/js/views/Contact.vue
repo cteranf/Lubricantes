@@ -78,8 +78,12 @@
 <script setup>
 import { nextTick, onMounted, reactive, ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
+import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import api from '@/api';
 import AppLayout from '@/layouts/AppLayout.vue';
+
+const seoConfig = getSiteSeoConfig();
+useSiteSeo(() => ({ title: `Contacto | ${seoConfig.name}`, description: `Comunícate con el equipo de ${seoConfig.name} mediante nuestro formulario de contacto.`, robots: 'index,follow', canonicalPath: '/contact' }));
 
 const toast = useToast();
 const emptyForm = () => ({ name: '', email: '', phone: '', subject: '', message: '', website: '' });

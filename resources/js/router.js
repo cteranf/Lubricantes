@@ -23,14 +23,15 @@ const routes = [
     { path: '/', component: Home },
     { path: '/catalog', name: 'Catalog', component: Catalog },
     { path: '/product/:slug', name: 'ProductDetail', component: ProductDetail },
-    { path: '/cart', component: Cart },
-    { path: '/checkout', component: Checkout },
-    { path: '/login', component: Login },
-    { path: '/register', component: Register },
-    { path: '/verificar-correo', name: 'EmailVerification', component: EmailVerification },
-    { path: '/email/verify/:id/:hash', name: 'EmailVerificationLink', component: EmailVerification },
+    { path: '/cart', component: Cart, meta: { noindex: true } },
+    { path: '/checkout', component: Checkout, meta: { noindex: true } },
+    { path: '/login', component: Login, meta: { noindex: true } },
+    { path: '/register', component: Register, meta: { noindex: true } },
+    { path: '/verificar-correo', name: 'EmailVerification', component: EmailVerification, meta: { noindex: true } },
+    { path: '/email/verify/:id/:hash', name: 'EmailVerificationLink', component: EmailVerification, meta: { noindex: true } },
     {
         path: '/email/verification',
+        meta: { noindex: true },
         redirect: (to) => {
             const result = to.query.result;
 
@@ -42,12 +43,12 @@ const routes = [
             };
         },
     },
-    { path: '/profile', component: Profile, meta: { requiresAuth: true } },
-    { path: '/treasury/payments', name: 'treasury-payments', component: () => import('@/views/treasury/TreasuryPayments.vue'), meta: { requiresTreasury: true } },
-    { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true } },
-    { path: '/orders/payment-return', name: 'PaymentReturn', component: PaymentReturn, meta: { requiresAuth: true } },
-    { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess, meta: { requiresAuth: true } },
-    { path: '/orders/:id/tracking', name: 'OrderTracking', component: OrderTracking, meta: { requiresAuth: true } },
+    { path: '/profile', component: Profile, meta: { requiresAuth: true, noindex: true } },
+    { path: '/treasury/payments', name: 'treasury-payments', component: () => import('@/views/treasury/TreasuryPayments.vue'), meta: { requiresTreasury: true, noindex: true } },
+    { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true, noindex: true } },
+    { path: '/orders/payment-return', name: 'PaymentReturn', component: PaymentReturn, meta: { requiresAuth: true, noindex: true } },
+    { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess, meta: { requiresAuth: true, noindex: true } },
+    { path: '/orders/:id/tracking', name: 'OrderTracking', component: OrderTracking, meta: { requiresAuth: true, noindex: true } },
     { path: '/about', name: 'About', component: About },
     { path: '/contact', component: Contact },
 

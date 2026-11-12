@@ -60,5 +60,9 @@
 </template>
 
 <script setup>
+import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import AppLayout from '@/layouts/AppLayout.vue';
+
+const seoConfig = getSiteSeoConfig();
+useSiteSeo(() => ({ title: `Sobre LubriStore | ${seoConfig.name}`, description: 'Conoce LubriStore y nuestro trabajo para ofrecer productos automotrices.', robots: 'index,follow', canonicalPath: '/about' }));
 </script>
