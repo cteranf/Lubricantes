@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\EmailVerificationController;
 use App\Http\Controllers\Api\V1\LocationOptionController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\ProductReviewController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\UserAddressController;
 use Illuminate\Support\Facades\Route;
@@ -60,6 +61,9 @@ Route::prefix('v1')->group(function () {
 
     // Public Catalog
     Route::apiResource('products', ProductController::class)->only(['index', 'show']);
+    Route::get('/products/{slug}/reviews/summary', [ProductReviewController::class, 'summary'])->name('products.reviews.summary');
+    Route::get('/products/{slug}/reviews', [ProductReviewController::class, 'index'])->name('products.reviews.index');
+    Route::get('/products/{slug}/review-eligibility', [ProductReviewController::class, 'eligibility'])->name('products.reviews.eligibility');
     Route::apiResource('categories', CategoryController::class)->only(['index', 'show']);
     Route::apiResource('brands', BrandController::class)->only(['index', 'show']);
     Route::get('/sliders', [App\Http\Controllers\Api\V1\SliderController::class, 'index']);
@@ -79,6 +83,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/profile', [ProfileController::class, 'show']);
         Route::put('/profile', [ProfileController::class, 'update']);
         Route::put('/profile/password', [ProfileController::class, 'password']);
+        Route::post('/products/{slug}/reviews', [ProductReviewController::class, 'store'])->middleware('throttle:product-reviews')->name('products.reviews.store');
+        Route::put('/products/{slug}/reviews/{review}', [ProductReviewController::class, 'update'])->middleware('throttle:product-reviews')->name('products.reviews.update');
 
         // Cart & Checkout
         Route::post('/cart', [CartController::class, 'store']); // Sync cart
@@ -126,6 +132,10 @@ Route::prefix('v1')->group(function () {
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::get('/product-reviews/settings', [App\Http\Controllers\Api\V1\Admin\ProductReviewSettingsController::class, 'show'])->name('product-reviews.settings.show');
+            Route::put('/product-reviews/settings', [App\Http\Controllers\Api\V1\Admin\ProductReviewSettingsController::class, 'update'])->name('product-reviews.settings.update');
+            Route::get('/product-reviews', [App\Http\Controllers\Api\V1\Admin\ProductReviewController::class, 'index'])->name('product-reviews.index');
+            Route::patch('/product-reviews/{review}/moderation', [App\Http\Controllers\Api\V1\Admin\ProductReviewController::class, 'moderate'])->name('product-reviews.moderate');
             Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
             Route::get('/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->name('audit-logs.show');
             Route::patch('/users/{user}/status', [AdminUserController::class, 'status'])->name('users.status');

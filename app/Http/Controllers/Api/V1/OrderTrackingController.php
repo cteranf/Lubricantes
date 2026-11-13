@@ -5,11 +5,12 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\OrderDeliveryService;
+use App\Services\ProductReviewService;
 use Illuminate\Http\Request;
 
 class OrderTrackingController extends Controller
 {
-    public function __construct(private OrderDeliveryService $delivery) {}
+    public function __construct(private OrderDeliveryService $delivery, private ProductReviewService $reviews) {}
 
     /**
      * Get tracking information for a specific order
@@ -24,6 +25,8 @@ class OrderTrackingController extends Controller
         if (! $user->isAdmin() && $user->id !== $order->user_id) {
             abort(404);
         }
+
+        $reviewAccessByProduct = $this->reviews->trackingReviewAccess($order, $user);
 
         return response()->json([
             'order' => [
@@ -69,8 +72,8 @@ class OrderTrackingController extends Controller
                     'picked_up_at' => $this->iso($order->picked_up_at),
                     'deadline_status' => $order->pickupDeadlineStatus(),
                 ] : null,
-                'items' => $order->items->map(function ($item) {
-                    return [
+                'items' => $order->items->map(function ($item) use ($reviewAccessByProduct) {
+                    $itemPayload = [
                         'name' => $item->product?->name ?? 'Producto no disponible',
                         'quantity' => $item->quantity,
                         'price' => $item->price,
@@ -84,6 +87,13 @@ class OrderTrackingController extends Controller
                             'released_at' => $this->iso($item->reservation->released_at),
                         ] : null,
                     ];
+
+                    $productId = (int) $item->product_id;
+                    if (array_key_exists($productId, $reviewAccessByProduct)) {
+                        $itemPayload['review_access'] = $reviewAccessByProduct[$productId];
+                    }
+
+                    return $itemPayload;
                 }),
             ],
             'timeline' => $this->fulfillmentTimeline($order),

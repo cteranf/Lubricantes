@@ -43,11 +43,12 @@ class AdminProductListingTest extends TestCase
             ->assertJsonPath('data.1.id', $product->id)
             ->assertJsonPath('data.1.category', ['id' => $category->id, 'name' => 'Sintética'])
             ->assertJsonPath('data.1.brand', ['id' => $brand->id, 'name' => 'Marca lista'])
+            ->assertJsonPath('data.1.allow_reviews', true)
             ->assertJsonPath('data.1.physical_stock', 8);
 
         $rows = collect($response->json('data'))->keyBy('id');
         $this->assertSame([
-            'id', 'name', 'sku', 'description', 'price', 'is_active', 'category', 'brand',
+            'id', 'name', 'sku', 'description', 'price', 'is_active', 'allow_reviews', 'category', 'brand',
             'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images',
         ], array_keys($rows[$product->id]));
         $this->assertIsArray($rows[$product->id]['image_variants']);

@@ -26,7 +26,7 @@ class ProductController extends Controller
             ->select([
                 'products.id', 'products.category_id', 'products.brand_id', 'products.name',
                 'products.sku', 'products.price', 'products.is_active', 'products.image_path',
-                'products.stock', 'products.created_at', 'products.description',
+                'products.stock', 'products.created_at', 'products.description', 'products.allow_reviews',
             ])
             ->with(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status'])
             ->withSum('inventories as inventory_stock', 'quantity');

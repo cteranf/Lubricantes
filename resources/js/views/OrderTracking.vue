@@ -118,16 +118,20 @@
                             Resumen de Productos
                         </h3>
                         <div class="space-y-4">
-                            <div v-for="(item, index) in order.items" :key="index" class="flex gap-4 items-center">
+                            <div v-for="(item, index) in order.items" :key="item.id || index" class="flex flex-col gap-3 border-b border-slate-100 pb-4 last:border-0 sm:flex-row sm:items-center">
                                 <img v-if="item.image_url && !brokenImages[index]" :src="item.image_url" @error="brokenImages[index] = true" class="w-12 h-12 rounded object-cover border" :alt="item.name">
                                 <div v-else class="w-12 h-12 rounded border bg-gray-100 text-gray-400 flex shrink-0 items-center justify-center" aria-label="Producto sin imagen">
                                     <i class="pi pi-image"></i>
                                 </div>
-                                <div class="flex-1">
+                                <div class="min-w-0 flex-1">
                                     <p class="font-medium text-sm">{{ item.name }}</p>
                                     <p class="text-xs text-gray-500">{{ item.quantity }} unidades x S/ {{ item.price }}</p>
+                                    <div v-if="reviewAction(item)" class="mt-2">
+                                        <Tag v-if="item.review_access.existing_review_status === 'pending'" value="Opinión pendiente de revisión" severity="info" />
+                                        <Button v-else type="button" size="small" outlined icon="pi pi-star" :label="reviewAction(item)" class="w-full sm:w-auto" :aria-label="`${reviewAction(item)}: ${item.name}`" @click="openProductReviews(item)" />
+                                    </div>
                                 </div>
-                                <p class="font-bold">S/ {{ (item.quantity * item.price).toFixed(2) }}</p>
+                                <p class="font-bold sm:ml-auto">S/ {{ (item.quantity * item.price).toFixed(2) }}</p>
                             </div>
                             <div class="space-y-1 border-t pt-4 text-sm"><div class="flex justify-between"><span>Subtotal</span><span>S/ {{ order.subtotal }}</span></div><div class="flex justify-between"><span>Descuentos</span><span>− S/ {{ order.discount_total }}</span></div><div class="flex justify-between"><span>Envío</span><span>S/ {{ order.shipping_amount }}</span></div></div>
                             <div class="border-t pt-4 flex justify-between font-bold text-xl">
@@ -145,12 +149,15 @@
 <script setup>
 import AppLayout from '@/layouts/AppLayout.vue';
 import { ref, onMounted, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import Button from 'primevue/button';
+import Tag from 'primevue/tag';
 import api from '@/api';
 import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
 import CustomerTransferPaymentPanel from '@/components/CustomerTransferPaymentPanel.vue';
 
 const route = useRoute();
+const router = useRouter();
 const order = ref(null);
 const timeline = ref([]);
 const delivery = ref(null);
@@ -160,6 +167,20 @@ const brokenImages = ref({});
 const safeTrackingUrl = computed(() => { try { const url = new URL(delivery.value?.courier?.tracking_url || ''); return ['http:','https:'].includes(url.protocol) ? url.href : null; } catch { return null; } });
 const deliveryMethodLabel = value => ({store_pickup:'Recojo en tienda',own_delivery:'Reparto propio',external_courier:'Courier externo'}[value] || value);
 const deliveryStatusLabel = value => ({pending:'Pendiente',scheduled:'Programado',assigned:'Asignado',dispatched:'Despachado',out_for_delivery:'En camino',awaiting_pickup:'Esperando recojo',failed_attempt:'Intento no completado',rescheduled:'Reprogramado',delivered:'Entregado',canceled:'Cancelado'}[value] || value);
+const reviewAction = item => {
+    const access = item.review_access;
+    if (!access?.enabled) return '';
+    if (access.existing_review_status === 'pending') return 'Opinión pendiente de revisión';
+    if (access.existing_review_status === 'published') return 'Ver o editar mi opinión';
+    if (access.existing_review_status === 'rejected') return 'Revisar mi opinión';
+    if (access.existing_review_status === 'hidden') return 'Editar mi opinión';
+    return access.eligible ? 'Opinar sobre este producto' : '';
+};
+const openProductReviews = item => {
+    const slug = item.review_access?.product_slug;
+    if (typeof slug !== 'string' || !slug) return;
+    return router.push({ path: `/product/${encodeURIComponent(slug)}`, query: { reviews: 'open' } });
+};
 
 const stepCircleClass = (step) => {
     if (step.status === 'canceled') return 'bg-red-600 text-white ring-4 ring-red-100';

@@ -117,6 +117,7 @@ const adminNavigationGroups = [
     ] },
     { id: 'catalog', label: 'Catálogo', icon: 'pi pi-box', children: [
         { label: 'Productos', to: '/admin/products', icon: 'pi pi-box' },
+        { label: 'Opiniones', to: '/admin/product-reviews', icon: 'pi pi-star' },
         { label: 'Categorías', to: '/admin/categories', icon: 'pi pi-tags' },
         { label: 'Marcas', to: '/admin/brands', icon: 'pi pi-bookmark' },
     ] },

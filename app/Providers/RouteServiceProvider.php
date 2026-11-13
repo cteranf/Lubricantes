@@ -54,10 +54,18 @@ class RouteServiceProvider extends ServiceProvider
             $email = mb_strtolower(trim((string) $request->input('email')));
             $ipKey = hash_hmac('sha256', 'contact-ip|'.(string) $request->ip(), $secret);
             $emailKey = hash_hmac('sha256', 'contact-email|'.$email, $secret);
+
             return [
                 Limit::perMinute(5)->by($ipKey),
                 Limit::perHour(10)->by($emailKey),
             ];
+        });
+
+        RateLimiter::for('product-reviews', function (Request $request) {
+            $userKey = hash_hmac('sha256', 'product-review-user|'.(string) ($request->user()?->id ?? 'guest'), (string) config('app.key'));
+            $ipKey = hash_hmac('sha256', 'product-review-ip|'.(string) $request->ip(), (string) config('app.key'));
+
+            return [Limit::perHour(5)->by($userKey), Limit::perHour(30)->by($ipKey)];
         });
     }
 }

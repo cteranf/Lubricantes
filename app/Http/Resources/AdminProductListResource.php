@@ -15,6 +15,7 @@ class AdminProductListResource extends JsonResource
             'description' => $this->description,
             'price' => (string) $this->price,
             'is_active' => (bool) $this->is_active,
+            'allow_reviews' => (bool) $this->allow_reviews,
             'category' => $this->whenLoaded('category', fn () => $this->category ? [
                 'id' => (int) $this->category->id,
                 'name' => (string) $this->category->name,

@@ -49,6 +49,7 @@ class StoreProductRequest extends FormRequest
             ],
             'sku' => ['nullable', 'string', 'max:64', 'unique:products,sku'],
             'description' => ['nullable', 'string'],
+            'allow_reviews' => ['sometimes', 'boolean'],
             'specifications' => ['sometimes', 'array', 'max:30'],
             'specifications.*' => ['required', 'array:name,value'],
             'specifications.*.name' => ['required', 'string', 'max:100'],

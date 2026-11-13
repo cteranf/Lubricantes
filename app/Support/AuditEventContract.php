@@ -36,6 +36,16 @@ final class AuditEventContract
 
     public const EMAIL_VERIFICATION_RESEND_REQUESTED = 'email_verification.resend_requested';
 
+    public const PRODUCT_REVIEW_PUBLISHED = 'product_review.published';
+
+    public const PRODUCT_REVIEW_REJECTED = 'product_review.rejected';
+
+    public const PRODUCT_REVIEW_HIDDEN = 'product_review.hidden';
+
+    public const PRODUCT_REVIEW_SETTINGS_UPDATED = 'product_review.settings_updated';
+
+    public const PRODUCT_REVIEW_REOPENED = 'product_review.reopened';
+
     public const SECURITY_ACCESS_DENIED = 'security.access.denied';
 
     public const SYSTEM_COMMAND_COMPLETED = 'system.command.completed';
@@ -92,6 +102,11 @@ final class AuditEventContract
         self::EMAIL_VERIFICATION_SENT,
         self::EMAIL_VERIFICATION_COMPLETED,
         self::EMAIL_VERIFICATION_RESEND_REQUESTED,
+        self::PRODUCT_REVIEW_PUBLISHED,
+        self::PRODUCT_REVIEW_REJECTED,
+        self::PRODUCT_REVIEW_HIDDEN,
+        self::PRODUCT_REVIEW_SETTINGS_UPDATED,
+        self::PRODUCT_REVIEW_REOPENED,
         self::SECURITY_ACCESS_DENIED,
         self::SYSTEM_COMMAND_COMPLETED,
         self::AUDIT_LOGS_VIEWED,
@@ -104,7 +119,7 @@ final class AuditEventContract
 
     public const FAILURE_CODES = [self::FAILURE_INVALID_CREDENTIALS, self::FAILURE_ACCOUNT_INACTIVE, self::FAILURE_PROTECTED_ACCESS_DENIED, self::FAILURE_EMAIL_VERIFICATION_REQUIRED];
 
-    public const AUDITABLE_TYPES = ['user', 'order', 'product', 'category', 'brand', 'branch', 'warehouse', 'payment_setting', 'payment_receiving_account'];
+    public const AUDITABLE_TYPES = ['user', 'order', 'product', 'category', 'brand', 'branch', 'warehouse', 'payment_setting', 'payment_receiving_account', 'product_review_setting'];
 
     public const SPECIALIZED_LOG_TYPES = [
         'contact_inquiry_histories', 'inventory_movements', 'inventory_reservations',
@@ -123,6 +138,7 @@ final class AuditEventContract
             self::USER_CREATED, self::USER_UPDATED, self::USER_ROLE_CHANGED,
             self::USER_STATUS_CHANGED, self::USER_PASSWORD_CHANGED, self::USER_PASSWORD_RESET => self::CATEGORY_USER_SECURITY,
             self::EMAIL_VERIFICATION_SENT, self::EMAIL_VERIFICATION_COMPLETED, self::EMAIL_VERIFICATION_RESEND_REQUESTED => self::CATEGORY_USER_SECURITY,
+            self::PRODUCT_REVIEW_PUBLISHED, self::PRODUCT_REVIEW_REJECTED, self::PRODUCT_REVIEW_HIDDEN, self::PRODUCT_REVIEW_SETTINGS_UPDATED, self::PRODUCT_REVIEW_REOPENED => self::CATEGORY_SYSTEM,
             self::SYSTEM_COMMAND_COMPLETED => self::CATEGORY_SYSTEM,
             default => throw new InvalidArgumentException('La acción de auditoría no está permitida.'),
         };
@@ -171,6 +187,8 @@ final class AuditEventContract
             self::USER_UPDATED => ['changed_fields'],
             self::AUTH_SESSION_REVOKED => ['reason', 'revoked_count'],
             self::SYSTEM_COMMAND_COMPLETED => ['command_name'],
+            self::PRODUCT_REVIEW_PUBLISHED, self::PRODUCT_REVIEW_REJECTED, self::PRODUCT_REVIEW_HIDDEN, self::PRODUCT_REVIEW_REOPENED => ['review_id', 'from_status', 'to_status'],
+            self::PRODUCT_REVIEW_SETTINGS_UPDATED => ['changed_fields'],
             self::AUDIT_LOGS_VIEWED => ['scope', 'page', 'per_page'],
             self::AUDIT_LOG_VIEWED => ['scope', 'audit_log_id'],
             default => [],

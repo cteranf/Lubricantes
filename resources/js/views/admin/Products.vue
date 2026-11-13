@@ -118,6 +118,10 @@
                         <Field v-if="!isEditing" label="Almacén inicial" :error="fieldError('warehouse_id')"><select v-model="form.warehouse_id" :required="form.cantidad_inicial > 0" class="input"><option value="">Seleccione un almacén</option><option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.name }} — {{ warehouse.branch?.name }}</option></select><small class="text-slate-500">Los cambios posteriores se realizan desde Inventario.</small></Field>
                         <Field label="Categoría" :error="fieldError('category_id')"><select v-model="form.category_id" class="input" :disabled="optionsLoading"><option value="">Sin categoría</option><option v-for="item in categoryOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/categories" class="text-xs text-blue-700">Administrar categorías</router-link></Field>
                         <Field label="Marca" :error="fieldError('brand_id')"><select v-model="form.brand_id" class="input" :disabled="optionsLoading"><option value="">Sin marca</option><option v-for="item in brandOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/brands" class="text-xs text-blue-700">Administrar marcas</router-link></Field>
+                        <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+                            <input v-model="form.allow_reviews" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600">
+                            <span><span class="block font-semibold text-slate-800">Permitir opiniones para este producto</span><span class="mt-1 block text-sm text-slate-600">Al desactivarlo, las opiniones existentes se conservan pero dejan de mostrarse y no se aceptan nuevas.</span></span>
+                        </label>
                         <div v-if="optionsError" class="text-sm text-red-700 md:col-span-2" role="alert">{{ optionsError }} <button type="button" class="underline" :disabled="optionsLoading" @click="retryOptions">Reintentar</button></div>
                         <div class="md:col-span-2">
                             <section aria-labelledby="product-gallery-title" class="space-y-4">
@@ -542,9 +546,9 @@ async function openModal(product = null) {
     if (product) {
         preserveAssignedOption(categoryOptions.value, product.category, product.category_id);
         preserveAssignedOption(brandOptions.value, product.brand, product.brand_id);
-        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', images: [], specifications: undefined };
+        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined };
     } else {
-        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', images: [], specifications: [] };
+        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', allow_reviews: true, images: [], specifications: [] };
     }
     showModal.value = true;
 
@@ -1001,6 +1005,7 @@ async function submitForm() {
         ['name', 'sku', 'price', 'category_id', 'brand_id', 'description'].forEach((key) => {
             if (formState[key] !== '' && formState[key] != null) data.append(key, formState[key]);
         });
+        data.append('allow_reviews', formState.allow_reviews ? '1' : '0');
         if (mode === 'create') {
             data.append('cantidad_inicial', formState.cantidad_inicial);
             if (formState.warehouse_id) data.append('warehouse_id', formState.warehouse_id);

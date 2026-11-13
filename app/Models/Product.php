@@ -15,10 +15,12 @@ class Product extends Model
 
     protected $fillable = [
         'category_id', 'brand_id', 'name', 'slug', 'sku', 'description',
-        'price', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured',
+        'price', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured', 'allow_reviews',
     ];
 
     protected $appends = ['image_url', 'image_variants', 'image_srcset', 'image_dimensions'];
+
+    protected $casts = ['allow_reviews' => 'boolean'];
 
     protected array $cleanupFilesAfterDelete = [];
 
@@ -294,6 +296,11 @@ class Product extends Model
     public function specifications()
     {
         return $this->hasMany(ProductSpecification::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function reviews()
+    {
+        return $this->hasMany(ProductReview::class);
     }
 
     public function primaryImage()

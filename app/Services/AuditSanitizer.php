@@ -63,7 +63,7 @@ class AuditSanitizer
             }
 
             if ($key === 'changed_fields') {
-                if (! is_string($value) || strlen($value) > 160 || preg_match('/\A(?:name|email|phone|can_deliver)(?:,(?:name|email|phone|can_deliver))*\z/D', $value) !== 1) {
+                if (! is_string($value) || strlen($value) > 160 || preg_match('/\A(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation)(?:,(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation))*\z/D', $value) !== 1) {
                     throw new InvalidArgumentException('La lista de campos de auditoría no es válida.');
                 }
             } elseif ($key === 'reason') {
@@ -97,6 +97,14 @@ class AuditSanitizer
             } elseif ($key === 'audit_log_id') {
                 if (! is_string($value) || preg_match('/\A[1-9][0-9]{0,19}\z/D', $value) !== 1) {
                     throw new InvalidArgumentException('La referencia de auditoría no es válida.');
+                }
+            } elseif ($key === 'review_id') {
+                if (! is_string($value) || preg_match('/\A[1-9][0-9]{0,19}\z/D', $value) !== 1) {
+                    throw new InvalidArgumentException('La referencia de auditoría no es válida.');
+                }
+            } elseif (in_array($key, ['from_status', 'to_status'], true)) {
+                if (! is_string($value) || ! in_array($value, ['pending', 'published', 'hidden', 'rejected'], true)) {
+                    throw new InvalidArgumentException('El estado de auditoría no es válido.');
                 }
             } else {
                 throw new InvalidArgumentException('La clave de metadata no es válida.');

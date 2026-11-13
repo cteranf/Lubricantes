@@ -73,6 +73,57 @@
                             </dl>
                         </article>
                     </section>
+
+                    <section v-if="reviewSummary?.enabled" class="mt-10 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7" aria-labelledby="product-reviews-heading" aria-live="polite">
+                        <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <h2 id="product-reviews-heading" class="text-2xl font-black text-slate-950">Opiniones de clientes</h2>
+                                <p class="mt-2 text-slate-700"><span aria-label="Promedio de calificación">{{ Number(reviewSummary.average || 0).toFixed(1) }} de 5 estrellas</span> · {{ reviewSummary.total }} opiniones</p>
+                            </div>
+                            <button type="button" class="min-h-11 rounded-xl border border-blue-700 px-4 py-2 font-bold text-blue-800 hover:bg-blue-50" :aria-expanded="reviewsExpanded" aria-controls="product-reviews-panel" @click="toggleReviews">{{ reviewsExpanded ? 'Ocultar opiniones' : `Mostrar opiniones (${reviewSummary.total})` }}</button>
+                        </div>
+                        <div v-if="reviewsExpanded" id="product-reviews-panel" class="mt-6 space-y-6">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <h3 class="text-lg font-bold">Opiniones publicadas</h3>
+                                <label class="flex items-center gap-2 text-sm font-semibold">Ordenar
+                                    <select v-model="reviewSort" class="rounded-lg border border-slate-300 p-2" aria-label="Ordenar opiniones" @change="loadReviewPage(1)"><option value="newest">Más recientes</option><option value="highest">Mayor calificación</option><option value="lowest">Menor calificación</option></select>
+                                </label>
+                            </div>
+                            <p v-if="reviewError" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">{{ reviewError }} <button type="button" class="ml-2 font-bold underline" @click="loadReviewPage(reviewMeta.current_page)">Reintentar</button></p>
+                            <div v-if="reviewLoading" class="space-y-3" aria-busy="true" aria-label="Cargando opiniones"><Skeleton height="6rem" /><Skeleton height="6rem" /></div>
+                            <div v-else-if="reviews.length" class="space-y-4">
+                                <article v-for="review in reviews" :key="review.id" class="rounded-xl border border-slate-200 p-4">
+                                    <div class="flex flex-wrap items-start justify-between gap-2"><div><h4 v-if="review.title" class="font-bold text-slate-900">{{ review.title }}</h4><p class="text-sm text-slate-600">{{ review.display_name }} <span v-if="review.verified_purchase" class="ml-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">Compra verificada</span></p></div><span :aria-label="`${review.rating} de 5 estrellas`" class="font-bold text-amber-600">{{ '★'.repeat(review.rating) }}<span class="sr-only">{{ review.rating }} de 5 estrellas</span></span></div>
+                                    <p class="mt-3 whitespace-pre-wrap break-words leading-7 text-slate-700">{{ review.comment }}</p>
+                                </article>
+                                <div class="flex items-center justify-between gap-3"><button type="button" class="min-h-10 rounded-lg border px-3 disabled:opacity-50" :disabled="reviewMeta.current_page <= 1 || reviewLoading" @click="loadReviewPage(reviewMeta.current_page - 1)">Anterior</button><span class="text-sm text-slate-600">Página {{ reviewMeta.current_page }} de {{ reviewMeta.last_page }}</span><button type="button" class="min-h-10 rounded-lg border px-3 disabled:opacity-50" :disabled="reviewMeta.current_page >= reviewMeta.last_page || reviewLoading" @click="loadReviewPage(reviewMeta.current_page + 1)">Siguiente</button></div>
+                            </div>
+                            <p v-else-if="!reviewLoading" class="rounded-lg bg-slate-50 p-4 text-slate-600">Aún no hay opiniones publicadas para este producto.</p>
+
+                            <div ref="reviewFocusTarget" tabindex="-1" class="border-t border-slate-200 pt-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700">
+                                <template v-if="eligibility?.existing_review">
+                                    <h3 class="text-lg font-bold">Tu opinión</h3>
+                                    <p class="mt-1 text-sm text-slate-600">Estado: {{ reviewStatusLabel(eligibility.existing_review.status) }}</p>
+                                    <p v-if="eligibility.existing_review.rejection_reason" class="mt-2 rounded bg-amber-50 p-3 text-sm text-amber-900">Motivo: {{ eligibility.existing_review.rejection_reason }}</p>
+                                    <p v-if="!eligibility.module_enabled" class="mt-2 text-sm text-slate-600">No se aceptan cambios en este momento.</p>
+                                </template>
+                                <h3 v-else class="text-lg font-bold">Comparte tu experiencia</h3>
+                                <p v-if="eligibility?.reason === 'login_required'" class="mt-2 text-slate-600">Inicia sesión para consultar si puedes opinar. <router-link to="/login" class="font-bold text-blue-700 underline">Iniciar sesión</router-link></p>
+                                <p v-else-if="eligibility && !eligibility.eligible && !eligibility.existing_review" class="mt-2 text-slate-600">{{ eligibilityMessage(eligibility.reason) }}</p>
+                                <form v-if="eligibility?.eligible || (eligibility?.existing_review && eligibility.module_enabled)" class="mt-4 space-y-4" @submit.prevent="submitReview">
+                                    <fieldset class="min-w-0">
+                                        <legend id="review-rating-label" class="text-sm font-semibold">Calificación</legend>
+                                        <Rating v-model="reviewRating" name="product-review-rating" :stars="5" :cancel="false" aria-labelledby="review-rating-label" />
+                                    </fieldset>
+                                    <label class="block text-sm font-semibold" for="review-title">Título (opcional)<input id="review-title" v-model="reviewForm.title" maxlength="120" class="mt-1 w-full rounded-lg border border-slate-300 p-3" autocomplete="off"><small class="mt-1 block text-slate-500">{{ reviewForm.title.length }} / 120</small></label>
+                                    <label class="block text-sm font-semibold" for="review-comment">Comentario<textarea id="review-comment" v-model="reviewForm.comment" minlength="20" maxlength="1000" rows="5" required class="mt-1 w-full rounded-lg border border-slate-300 p-3" /><small class="mt-1 block text-slate-500">{{ reviewForm.comment.length }} / 1000; mínimo 20 caracteres.</small></label>
+                                    <p v-if="reviewFormError" role="alert" class="text-sm text-red-700">{{ reviewFormError }}</p>
+                                    <button type="submit" class="min-h-11 rounded-xl bg-blue-700 px-5 py-2 font-bold text-white disabled:opacity-50" :disabled="reviewSubmitting || reviewForm.rating < 1 || reviewForm.comment.trim().length < 20">{{ reviewSubmitting ? 'Enviando…' : eligibility.existing_review ? 'Actualizar opinión' : 'Enviar opinión' }}</button>
+                                    <p class="text-xs text-slate-500">Las opiniones se revisan antes de publicarse.</p>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
                 </template>
             </div>
         </main>
@@ -80,19 +131,23 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Skeleton from 'primevue/skeleton';
+import Rating from 'primevue/rating';
 import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/layouts/AppLayout.vue';
 import api from '@/api';
 import { useCartStore } from '@/stores/cart';
+import { useAuthStore } from '@/stores/auth';
 import { discountPercentage, formatPen, hasValidSale, productImageDimensions, productImageSrcset, productImageVariants, productPrice, resolveProductGallery, resolveProductImages } from '@/utils/productPresentation';
 
 const route = useRoute();
+const router = useRouter();
 const seoConfig = getSiteSeoConfig();
 const cartStore = useCartStore();
+const authStore = useAuthStore();
 const toast = useToast();
 const product = ref(null);
 const loading = ref(true);
@@ -103,6 +158,23 @@ const selectedImage = ref(null);
 const failedImages = ref(new Set());
 let controller;
 let requestId = 0;
+const reviewSummary = ref(null), reviewsExpanded = ref(false), reviews = ref([]), reviewLoading = ref(false), reviewError = ref('');
+const reviewMeta = ref({ current_page: 1, last_page: 1, total: 0 });
+const reviewSort = ref('newest'), eligibility = ref(null), reviewSubmitting = ref(false), reviewFormError = ref('');
+const reviewForm = ref({ rating: 0, title: '', comment: '' });
+const reviewRating = computed({
+    get: () => {
+        const rating = Number(reviewForm.value.rating);
+        return Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : 0;
+    },
+    set: value => {
+        const rating = Number(value);
+        reviewForm.value.rating = Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : 0;
+    },
+});
+const reviewFocusTarget = ref(null);
+let reviewSummaryController = null, reviewListController = null, reviewEligibilityController = null, reviewSequence = 0;
+let reviewInitialLoadPromise = null, reviewInitialDataLoaded = false, reviewAutoOpenSequence = null;
 
 const catalogPath = computed(() => sessionStorage.getItem('catalog:last-path') || '/catalog');
 const images = computed(() => resolveProductGallery(product.value));
@@ -178,6 +250,7 @@ const whatsAppUrl = computed(() => {
 const loadProduct = async () => {
     const slug = Array.isArray(route.params.slug) ? route.params.slug[0] : route.params.slug;
     controller?.abort();
+    resetProductReviews();
     const id = ++requestId;
     product.value = null; error.value = ''; notFound.value = false; loading.value = true;
     if (typeof slug !== 'string' || !slug.trim() || slug === 'undefined') { notFound.value = true; loading.value = false; return; }
@@ -190,6 +263,7 @@ const loadProduct = async () => {
             return;
         }
         product.value = response.data;
+        void loadReviewSummary(id, slug);
         const firstImage = detailImage(response.data);
         selectedImage.value = firstImage; failedImages.value = new Set(); qty.value = 1;
     } catch (exception) {
@@ -198,6 +272,112 @@ const loadProduct = async () => {
         else error.value = 'Ocurrió un problema al consultar el producto. Inténtalo nuevamente.';
     } finally { if (id === requestId) loading.value = false; }
 };
+
+function resetProductReviews() {
+    reviewSequence++;
+    reviewSummaryController?.abort(); reviewListController?.abort(); reviewEligibilityController?.abort();
+    reviewSummaryController = reviewListController = reviewEligibilityController = null;
+    reviewInitialLoadPromise = null; reviewInitialDataLoaded = false; reviewAutoOpenSequence = null;
+    reviewSummary.value = null; reviewsExpanded.value = false; reviews.value = []; eligibility.value = null;
+    reviewMeta.value = { current_page: 1, last_page: 1, total: 0 }; reviewError.value = ''; reviewFormError.value = '';
+    reviewForm.value = { rating: 0, title: '', comment: '' }; reviewLoading.value = false; reviewSubmitting.value = false;
+}
+async function loadReviewSummary(sequence, slug) {
+    const controller = new AbortController(); reviewSummaryController = controller;
+    try {
+        const { data } = await api.get(`/products/${encodeURIComponent(slug)}/reviews/summary`, { signal: controller.signal });
+        if (sequence === requestId && product.value?.slug === slug) {
+            reviewSummary.value = data;
+            await consumeReviewOpen(sequence, slug);
+        }
+    } catch {
+        if (!controller.signal.aborted && sequence === requestId) {
+            reviewSummary.value = { enabled: false };
+            await consumeReviewOpen(sequence, slug);
+        }
+    }
+}
+async function toggleReviews() {
+    if (reviewsExpanded.value) { reviewsExpanded.value = false; return; }
+    reviewsExpanded.value = true;
+    await loadInitialReviewData();
+}
+async function loadInitialReviewData() {
+    if (reviewInitialDataLoaded) return;
+    if (reviewInitialLoadPromise) return reviewInitialLoadPromise;
+    const sequence = reviewSequence;
+    reviewInitialLoadPromise = Promise.all([loadReviewEligibility(), loadReviewPage(1)]);
+    try {
+        await reviewInitialLoadPromise;
+        if (sequence === reviewSequence) reviewInitialDataLoaded = !reviewFormError.value && !reviewError.value;
+    } finally {
+        if (sequence === reviewSequence) reviewInitialLoadPromise = null;
+    }
+}
+async function consumeReviewOpen(sequence, slug) {
+    if (route.query.reviews !== 'open' || reviewAutoOpenSequence === sequence) return;
+    reviewAutoOpenSequence = sequence;
+    const query = { ...route.query };
+    delete query.reviews;
+    void router.replace({ name: route.name, params: route.params, query, hash: route.hash }).catch(() => {});
+    if (!reviewSummary.value?.enabled || sequence !== requestId || product.value?.slug !== slug) return;
+    reviewsExpanded.value = true;
+    await loadInitialReviewData();
+    if (sequence === requestId && product.value?.slug === slug && reviewsExpanded.value) {
+        await nextTick();
+        reviewFocusTarget.value?.focus();
+    }
+}
+async function loadReviewEligibility() {
+    const slug = product.value?.slug; if (!slug) return;
+    const sequence = reviewSequence; reviewEligibilityController?.abort();
+    const current = new AbortController(); reviewEligibilityController = current;
+    try {
+        const { data } = await api.get(`/products/${encodeURIComponent(slug)}/review-eligibility`, { signal: current.signal });
+        if (sequence !== reviewSequence || !reviewsExpanded.value) return;
+        eligibility.value = data;
+        if (data?.existing_review) reviewForm.value = { rating: Number(data.existing_review.rating), title: data.existing_review.title || '', comment: data.existing_review.comment || '' };
+    } catch {
+        if (!current.signal.aborted && sequence === reviewSequence) reviewFormError.value = 'No se pudo consultar la elegibilidad. Inténtalo nuevamente.';
+    }
+}
+async function loadReviewPage(page = 1) {
+    const slug = product.value?.slug; if (!slug) return;
+    const sequence = reviewSequence; reviewListController?.abort();
+    const current = new AbortController(); reviewListController = current; reviewLoading.value = true; reviewError.value = '';
+    try {
+        const { data } = await api.get(`/products/${encodeURIComponent(slug)}/reviews`, { params: { page, per_page: 10, sort: reviewSort.value }, signal: current.signal });
+        if (sequence !== reviewSequence || !reviewsExpanded.value) return;
+        reviews.value = Array.isArray(data?.data) ? data.data : [];
+        reviewMeta.value = data?.meta || { current_page: 1, last_page: 1, total: 0 };
+    } catch {
+        if (!current.signal.aborted && sequence === reviewSequence) reviewError.value = 'No se pudieron cargar las opiniones. Inténtalo nuevamente.';
+    } finally { if (sequence === reviewSequence) reviewLoading.value = false; }
+}
+async function submitReview() {
+    if (reviewSubmitting.value || !eligibility.value || (!eligibility.value.eligible && !eligibility.value.existing_review)) return;
+    reviewSubmitting.value = true; reviewFormError.value = '';
+    const slug = product.value?.slug, existingId = eligibility.value.existing_review?.id;
+    const sequence = reviewSequence;
+    try {
+        const payload = { rating: Number(reviewForm.value.rating), title: reviewForm.value.title.trim() || null, comment: reviewForm.value.comment.trim() };
+        const response = existingId
+            ? await api.put(`/products/${encodeURIComponent(slug)}/reviews/${existingId}`, payload)
+            : await api.post(`/products/${encodeURIComponent(slug)}/reviews`, payload);
+        if (sequence !== reviewSequence) return;
+        const saved = response.data?.data;
+        if (saved) eligibility.value = { ...eligibility.value, eligible: false, existing_review: saved };
+        reviewFormError.value = '';
+        toast.add({ severity: 'success', summary: saved?.status === 'published' ? 'Opinión publicada' : 'Opinión enviada a moderación', life: 3000 });
+        await loadReviewEligibility();
+    } catch {
+        if (sequence === reviewSequence) reviewFormError.value = 'No se pudo enviar la opinión. Revisa los datos e inténtalo nuevamente.';
+    } finally { if (sequence === reviewSequence) reviewSubmitting.value = false; }
+}
+function eligibilityMessage(reason) {
+    return ({ module_closed: 'El módulo no acepta nuevas opiniones en este momento.', product_disabled: 'Este producto no acepta opiniones.', purchase_not_delivered: 'Necesitas una compra entregada de este producto para opinar.', already_reviewed: 'Ya enviaste una opinión para este producto.' })[reason] || 'No puedes enviar una opinión en este momento.';
+}
+function reviewStatusLabel(status) { return ({ pending: 'Pendiente de revisión', published: 'Publicada', hidden: 'Oculta', rejected: 'Rechazada' })[status] || 'En revisión'; }
 
 const markImageFailed = url => { failedImages.value = new Set([...failedImages.value, url]); };
 const addToCart = () => {
@@ -210,5 +390,5 @@ const addToCart = () => {
 
 watch(() => route.params.slug, loadProduct, { immediate: true });
 watch(remainingStock, value => { if (value > 0 && qty.value > value) qty.value = value; });
-onBeforeUnmount(() => controller?.abort());
+onBeforeUnmount(() => { controller?.abort(); resetProductReviews(); });
 </script>

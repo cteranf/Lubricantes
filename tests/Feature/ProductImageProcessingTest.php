@@ -500,8 +500,9 @@ class ProductImageProcessingTest extends TestCase
         $this->assertIsArray($payload);
         $this->assertArrayNotHasKey('data', $payload, 'Product updates intentionally return an unwrapped administrative Resource.');
         $this->assertArrayNotHasKey('image_processing_status', $payload);
+        $this->assertTrue($payload['allow_reviews']);
         $this->assertSame([
-            'id', 'name', 'sku', 'description', 'price', 'is_active', 'category', 'brand',
+            'id', 'name', 'sku', 'description', 'price', 'is_active', 'allow_reviews', 'category', 'brand',
             'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images', 'specifications',
         ], array_keys($payload));
         $this->assertSame([], $payload['specifications']);

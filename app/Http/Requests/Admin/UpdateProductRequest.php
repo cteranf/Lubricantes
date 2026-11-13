@@ -80,6 +80,7 @@ class UpdateProductRequest extends FormRequest
                 }
             }],
             'description' => ['nullable', 'string'], 'viscosity' => ['nullable', 'string'],
+            'allow_reviews' => ['sometimes', 'boolean'],
             'specifications' => ['sometimes', 'array', 'max:30'],
             'specifications.*' => ['required', 'array:name,value'],
             'specifications.*.name' => ['required', 'string', 'max:100'],
