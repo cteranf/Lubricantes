@@ -5,10 +5,14 @@ namespace Tests\Feature;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\ProductImage;
 use App\Models\User;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\CreatesShippingCoverage;
@@ -61,6 +65,69 @@ class OrderStabilizationTest extends TestCase
         Sanctum::actingAs($otherCustomer);
 
         $this->getJson("/api/v1/orders/{$order->id}/tracking")->assertNotFound();
+    }
+
+    public function test_customer_order_history_is_owner_scoped_compact_and_uses_one_image_query(): void
+    {
+        Storage::fake('public');
+        $owner = $this->customer();
+        $otherCustomer = $this->customer();
+        $orders = collect(range(1, 3))->map(fn () => $this->orderFor($owner));
+        $foreignOrder = $this->orderFor($otherCustomer);
+        $firstOrder = $orders->first();
+        $firstItem = $firstOrder->items()->firstOrFail();
+        $publicImagePath = 'products/optimized/customer-order.webp';
+        Storage::disk('public')->put($publicImagePath, 'public test image');
+        ProductImage::create([
+            'product_id' => $firstItem->product_id,
+            'image_path' => $publicImagePath,
+            'sort_order' => 0,
+            'is_primary' => true,
+            'processing_status' => 'ready',
+            'variants' => [],
+        ]);
+        $originalUpdatedAt = $orders->mapWithKeys(fn (Order $order) => [$order->id => $order->fresh()->updated_at?->format('c')]);
+        $imageQueries = [];
+        DB::listen(function (QueryExecuted $query) use (&$imageQueries): void {
+            if (str_contains(strtolower($query->sql), 'product_images')) {
+                $imageQueries[] = $query->sql;
+            }
+        });
+
+        Sanctum::actingAs($owner);
+        $response = $this->getJson('/api/v1/orders')->assertOk()->assertJsonCount(3)->assertJsonMissingPath('data');
+        $rows = collect($response->json())->keyBy('id');
+        $orderPayload = $rows->get($firstOrder->id);
+
+        $this->assertNotNull($orderPayload);
+        $this->assertSame([
+            'id', 'created_at', 'status', 'tracking_status', 'fulfillment_status', 'delivery_type',
+            'pickup_branch_name_snapshot', 'pickup_district_snapshot', 'pickup_deadline_at', 'pickup_deadline_status',
+            'shipping_district_snapshot', 'shipping_zone_name_snapshot', 'shipping_amount', 'total', 'items',
+        ], array_keys($orderPayload));
+        $this->assertSame([
+            'quantity', 'price', 'subtotal', 'product',
+        ], array_keys($orderPayload['items'][0]));
+        $this->assertSame(['name', 'image_url'], array_keys($orderPayload['items'][0]['product']));
+        $this->assertSame('10.00', $orderPayload['items'][0]['price']);
+        $this->assertSame('10.00', $orderPayload['items'][0]['subtotal']);
+        $this->assertSame(Storage::disk('public')->url($publicImagePath), $orderPayload['items'][0]['product']['image_url']);
+        $this->assertArrayNotHasKey($foreignOrder->id, $rows->all());
+        $this->assertCount(1, $imageQueries, 'Product images must be eager-loaded once for the full customer history.');
+        $this->assertStringContainsString(' in ', strtolower($imageQueries[0]));
+        $this->assertStringContainsString('product_id', strtolower($imageQueries[0]));
+
+        $serialized = json_encode($response->json(), JSON_THROW_ON_ERROR);
+        foreach ([
+            'checkout_token', 'shipping_info', 'payment_data', 'payment_id', 'user_id',
+            'warehouse_id', 'reservation', 'original_path', 'pending_original_path', 'generation_id',
+        ] as $privateField) {
+            $this->assertStringNotContainsString($privateField, $serialized);
+        }
+
+        foreach ($orders as $order) {
+            $this->assertSame($originalUpdatedAt[$order->id], $order->fresh()->updated_at?->format('c'));
+        }
     }
 
     public function test_admin_can_view_customer_tracking(): void

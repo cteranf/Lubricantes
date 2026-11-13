@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\InventoryException;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\CustomerOrderHistoryResource;
 use App\Models\Branch;
 use App\Models\Order;
 use App\Models\Product;
@@ -32,8 +33,18 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        return $request->user()->orders()->with(['items.product', 'items.warehouse', 'items.reservation'])->latest()->get()
-            ->each(fn (Order $order) => $this->appendPickupPresentation($order));
+        $orders = $request->user()->orders()
+            ->with([
+                'items:id,order_id,product_id,quantity,price,subtotal',
+                'items.product:id,name,image_path',
+                'items.product.images:id,product_id,image_path,variants,is_primary,sort_order,processing_status',
+            ])
+            ->latest()
+            ->get();
+
+        return response()->json($orders
+            ->map(fn (Order $order) => (new CustomerOrderHistoryResource($order))->resolve($request))
+            ->values());
     }
 
     public function store(Request $request)
