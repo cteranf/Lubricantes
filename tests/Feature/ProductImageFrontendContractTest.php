@@ -56,8 +56,10 @@ class ProductImageFrontendContractTest extends TestCase
             $this->assertStringContainsString(':width="item.image_dimensions?.width"', $view);
             $this->assertStringContainsString(':height="item.image_dimensions?.height"', $view);
             $this->assertStringContainsString('loading="lazy"', $view);
-            $this->assertStringContainsString('v-if="item.image"', $view);
         }
+        $this->assertStringContainsString('v-if="item.image && !failedImages.has(item.product_id)"', $cart);
+        $this->assertStringContainsString('Imagen no disponible para ${item.name}', $cart);
+        $this->assertStringContainsString('v-if="item.image"', $checkout);
 
         // The cart stores a public primary-image snapshot; it does not flatten
         // image variants into separate logical photos.
