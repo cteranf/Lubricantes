@@ -95,18 +95,22 @@
             <div class="site-container">
                 <div class="section-heading text-center"><p class="eyebrow">Encuentra lo que necesitas</p><h2 id="categories-heading">Compra por categoría</h2><p>Explora las líneas disponibles para el cuidado y mantenimiento de tu vehículo.</p></div>
                 <div v-if="categoriesState.loading" class="category-grid mt-9" aria-busy="true">
-                    <div v-for="index in 5" :key="index" class="category-card surface-card items-center text-center"><Skeleton shape="circle" size="5rem" class="mb-4" /><Skeleton width="70%" height="1.25rem" /></div>
+                    <div v-for="index in 8" :key="index" class="category-card surface-card"><Skeleton width="100%" height="10rem" /><div class="space-y-3 p-4"><Skeleton width="80%" height="1.25rem" /><Skeleton width="35%" /></div></div>
                 </div>
                 <div v-else-if="categoriesState.error" class="state-panel mt-9" role="alert">
                     <i class="pi pi-exclamation-circle" aria-hidden="true"></i><h3>No pudimos cargar las categorías</h3><p>Puedes reintentar o continuar directamente al catálogo.</p><div class="flex flex-wrap justify-center gap-3"><button type="button" class="btn-outline" @click="loadCategories">Reintentar</button><router-link to="/catalog" class="btn-primary">Ver catálogo</router-link></div>
                 </div>
-                <div v-else-if="categories.length" class="category-grid mt-9">
-                    <router-link v-for="category in categories" :key="category.id" :to="{ path: '/catalog', query: { category: category.slug } }" class="category-card surface-card group">
-                        <span class="mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 sm:h-24 sm:w-24"><img v-if="category.image" :src="category.image" :alt="category.name" class="h-full w-full object-cover" loading="lazy"><i v-else class="pi pi-box text-3xl text-slate-400 transition-colors group-hover:text-blue-700" aria-hidden="true"></i></span>
-                        <h3 class="text-base font-bold leading-snug text-slate-900 sm:text-lg">{{ category.name }}</h3><span class="mt-2 text-sm font-semibold text-blue-700">Explorar <i class="pi pi-arrow-right ml-1 text-xs" aria-hidden="true"></i></span>
+                <div v-else-if="visibleCategories.length" class="category-grid mt-9">
+                    <router-link v-for="category in visibleCategories" :key="category.id" :to="{ path: '/catalog', query: { category: category.slug } }" class="category-card surface-card group" :aria-label="`Explorar la categoría ${category.name}`">
+                        <span class="category-image-frame">
+                            <img v-if="category.image_url && !failedCategoryImages[category.id]" :src="category.image_url" :alt="category.name" class="category-image" loading="lazy" decoding="async" width="640" height="400" @error="markCategoryImageFailed(category.id)">
+                            <span v-else class="category-image-fallback" aria-hidden="true"><i :class="categoryIcon(category.name)"></i><span>{{ category.name }}</span></span>
+                        </span>
+                        <span class="category-card-body"><span class="category-name">{{ category.name }}</span><span class="category-explore">Explorar <i class="pi pi-arrow-right" aria-hidden="true"></i></span></span>
                     </router-link>
                 </div>
                 <div v-else class="state-panel mt-9"><i class="pi pi-folder-open" aria-hidden="true"></i><h3>Aún no hay categorías disponibles</h3><p>Mientras tanto, puedes revisar todos los productos del catálogo.</p><router-link to="/catalog" class="btn-primary">Ver catálogo</router-link></div>
+                <div v-if="visibleCategories.length && categories.length > visibleCategories.length" class="mt-7 text-center"><router-link to="/catalog" class="btn-outline inline-flex min-h-11 items-center justify-center gap-2">Ver todas las categorías <i class="pi pi-arrow-right" aria-hidden="true"></i></router-link></div>
             </div>
         </section>
 
@@ -145,7 +149,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Carousel from 'primevue/carousel';
@@ -172,10 +176,12 @@ const benefits = [
 ];
 const slides = ref([]);
 const categories = ref([]);
+const visibleCategories = computed(() => categories.value.slice(0, 8));
 const featuredProducts = ref([]);
 const newsList = ref([]);
 const activeSlide = ref(0);
 const failedSlideImages = reactive({});
+const failedCategoryImages = reactive({});
 const prefersReducedMotion = ref(false);
 let motionQuery;
 const sectionState = () => reactive({ loading: true, error: false });
@@ -220,6 +226,16 @@ const loadNews = () => runLoad(newsState, async () => {
     newsList.value = Array.isArray(response.data) ? response.data : [];
 });
 const markSlideImageFailed = image => { if (image) failedSlideImages[image] = true; };
+const markCategoryImageFailed = id => { if (id !== null && id !== undefined) failedCategoryImages[id] = true; };
+const categoryIcon = name => {
+    const value = String(name || '').toLocaleLowerCase('es');
+    if (value.includes('aceite') || value.includes('lubric')) return 'pi pi-cog';
+    if (value.includes('filtro')) return 'pi pi-filter';
+    if (value.includes('limpieza')) return 'pi pi-sun';
+    if (value.includes('accesorio')) return 'pi pi-wrench';
+    if (value.includes('refriger') || value.includes('refrigerante')) return 'pi pi-gauge';
+    return 'pi pi-tag';
+};
 const syncMotionPreference = event => { prefersReducedMotion.value = event.matches; };
 onMounted(() => {
     motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -236,8 +252,21 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.('change', syncMotionPre
 .hero-technical-bg { background-color: #081a38; background-image: radial-gradient(circle at 78% 35%, rgba(37, 99, 235, .55), transparent 24%), radial-gradient(circle at 85% 70%, rgba(245, 158, 11, .25), transparent 18%), linear-gradient(135deg, transparent 0 48%, rgba(255,255,255,.045) 48% 50%, transparent 50% 100%); background-size: auto, auto, 52px 52px; }
 .hero-title { font-size: clamp(2.1rem, 6vw, 4.5rem); line-height: 1.02; text-wrap: balance; }
 .hero-slide-container:focus-visible { outline: 3px solid #fbbf24; outline-offset: 4px; }
-.category-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: .9rem; }
-.category-card { display: flex; min-height: 12rem; flex: 0 1 calc(50% - .45rem); flex-direction: column; align-items: center; justify-content: center; padding: 1.1rem .75rem; text-align: center; }
+.category-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.category-card { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid #dbe4f0; border-radius: 1rem; background: #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, .05); color: inherit; text-decoration: none; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.category-card:hover { transform: translateY(-3px); border-color: #60a5fa; box-shadow: 0 12px 26px rgba(30, 64, 175, .12); }
+.category-card:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.category-image-frame { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: linear-gradient(135deg, #e8f1ff, #f1f5f9 62%, #dbeafe); }
+.category-image { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .25s ease; }
+.category-card:hover .category-image { transform: scale(1.025); }
+.category-image-fallback { display: flex; width: 100%; height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: .65rem; padding: 1rem; color: #1e40af; text-align: center; }
+.category-image-fallback i { font-size: 2rem; }
+.category-image-fallback span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: .9rem; font-weight: 700; line-height: 1.3; }
+.category-card-body { display: flex; min-height: 5.5rem; flex: 1; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .9rem 1rem 1rem; }
+.category-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: #0f172a; font-size: .98rem; font-weight: 750; line-height: 1.35; }
+.category-explore { display: inline-flex; min-height: 2rem; align-items: center; gap: .45rem; color: #1d4ed8; font-size: .875rem; font-weight: 700; }
+.category-explore i { transition: transform .18s ease; }
+.category-card:hover .category-explore i { transform: translateX(3px); }
 .product-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
 .advice-panel { display: flex; flex-direction: column; gap: 2rem; align-items: flex-start; justify-content: space-between; border: 1px solid rgba(148, 163, 184, .22); border-radius: 1.5rem; background: linear-gradient(135deg, rgba(30, 64, 175, .28), rgba(15, 23, 42, .4)); padding: clamp(1.5rem, 5vw, 3.5rem); }
 :deep(.hero-carousel .p-carousel-content) { position: relative; }
@@ -248,11 +277,13 @@ onBeforeUnmount(() => motionQuery?.removeEventListener?.('change', syncMotionPre
 :deep(.hero-carousel .p-carousel-indicator-button) { min-width: 2.25rem; height: .35rem; background: rgba(255,255,255,.55); }
 :deep(.hero-carousel .p-carousel-indicator-active .p-carousel-indicator-button) { background: #fbbf24; }
 @media (min-width: 480px) { .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 640px) { .category-card { flex-basis: calc(33.333% - .6rem); padding: 1.4rem 1rem; } }
+@media (min-width: 420px) { .category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; } }
+@media (min-width: 640px) { .category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; } }
 @media (min-width: 768px) { .hero-panel { height: 28rem; } .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; } }
-@media (min-width: 1024px) { .category-card { flex-basis: calc(20% - .75rem); } }
-@media (min-width: 1280px) { .category-card { flex-basis: calc(20% - .75rem); } .product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .advice-panel { flex-direction: row; align-items: center; } }
+@media (min-width: 1024px) { .category-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .advice-panel { flex-direction: row; align-items: center; } }
 @media (min-width: 1280px) { .hero-panel { height: 30rem; } }
 @media (max-width: 639px) { .hero-overlay { background: linear-gradient(90deg, rgba(3, 12, 31, .92), rgba(6, 25, 55, .7)); } :deep(.hero-carousel .p-carousel-prev) { left: .25rem; } :deep(.hero-carousel .p-carousel-next) { right: .25rem; } }
+@media (prefers-reduced-motion: reduce) { .category-card, .category-image, .category-explore i { transition: none; } .category-card:hover { transform: none; } }
 @media (prefers-reduced-motion: reduce) { :deep(.hero-carousel *) { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
 </style>

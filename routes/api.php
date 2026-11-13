@@ -238,6 +238,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders/{order}/delivery/evidence/{type}', [AdminOrderDeliveryController::class, 'evidence'])->name('orders.delivery.evidence');
             Route::apiResource('sliders', App\Http\Controllers\Api\V1\Admin\SliderController::class)->only(['index', 'store', 'update', 'destroy']);
             Route::get('/categories/options', [AdminCategoryController::class, 'options'])->name('categories.options');
+            Route::delete('/categories/{category}/image', [AdminCategoryController::class, 'removeImage'])->name('categories.image.destroy');
             Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');
             Route::apiResource('categories', AdminCategoryController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');

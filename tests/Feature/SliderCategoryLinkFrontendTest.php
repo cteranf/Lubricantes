@@ -62,4 +62,44 @@ class SliderCategoryLinkFrontendTest extends TestCase
         $this->assertStringNotContainsString('response?.data?.message', $admin);
         $this->assertStringContainsString('if (processing.value) return', $admin);
     }
+
+    public function test_home_category_cards_are_accessible_responsive_image_links_with_safe_fallback_and_limit(): void
+    {
+        $home = file_get_contents(resource_path('js/views/Home.vue'));
+
+        $this->assertStringContainsString('visibleCategories = computed(() => categories.value.slice(0, 8))', $home);
+        $this->assertStringContainsString(":to=\"{ path: '/catalog', query: { category: category.slug } }\"", $home);
+        $this->assertStringContainsString('Ver todas las categorías', $home);
+        $this->assertStringContainsString('to="/catalog"', $home);
+        $this->assertStringContainsString('category.image_url && !failedCategoryImages[category.id]', $home);
+        $this->assertStringContainsString('loading="lazy" decoding="async"', $home);
+        $this->assertStringContainsString(':alt="category.name"', $home);
+        $this->assertStringContainsString('markCategoryImageFailed(category.id)', $home);
+        $this->assertStringContainsString('category-image-fallback', $home);
+        $this->assertStringContainsString('aspect-ratio: 16 / 10', $home);
+        $this->assertStringContainsString('.category-card:focus-visible', $home);
+        $this->assertStringContainsString('prefers-reduced-motion: reduce', $home);
+        $this->assertStringContainsString('repeat(4, minmax(0, 1fr))', $home);
+        $this->assertStringNotContainsString('window.location', $home);
+    }
+
+    public function test_category_admin_enables_image_management_without_changing_other_catalog_managers(): void
+    {
+        $categories = file_get_contents(resource_path('js/views/admin/Categories.vue'));
+        $manager = file_get_contents(resource_path('js/components/admin/CatalogEntityManager.vue'));
+
+        $this->assertStringContainsString('image-enabled', $categories);
+        $this->assertStringContainsString("imageEnabled:{type:Boolean,default:false}", str_replace(' ', '', $manager));
+        $this->assertStringContainsString('accept="image/jpeg,image/png,image/webp"', $manager);
+        $this->assertStringContainsString('URL.createObjectURL(file)', $manager);
+        $this->assertStringContainsString('URL.revokeObjectURL(previewUrl.value)', $manager);
+        $this->assertStringContainsString('selectedFile.value = null', $manager);
+        $this->assertStringContainsString('if (processing.value || imageProcessing.value) return', $manager);
+        $this->assertStringContainsString('api.delete(`${props.endpoint}/${form.value.id}/image`)', $manager);
+        $this->assertStringContainsString("_method', 'PUT'", $manager);
+        $this->assertStringContainsString('La imagen existente se conserva si guardas sin elegir otra.', $manager);
+        $this->assertStringContainsString('confirm.require(', $manager);
+        $this->assertStringNotContainsString('response?.data?.message', $manager);
+        $this->assertStringNotContainsString('v-html', $manager);
+    }
 }
