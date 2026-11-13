@@ -75,25 +75,35 @@
                             </div>
 
                             <div class="flex-1 space-y-7 p-5">
-                                <fieldset>
-                                    <legend class="mb-3 text-sm font-black uppercase tracking-wider text-slate-900">Categorías</legend>
+                                <details open class="filter-section">
+                                    <summary class="filter-section-heading">Categorías</summary>
                                     <div v-if="optionsState.categoriesLoading" class="space-y-2" aria-busy="true"><Skeleton v-for="index in 4" :key="index" width="100%" height="2.75rem" /></div>
                                     <div v-else-if="optionsState.categoriesError" class="rounded-xl bg-red-50 p-3 text-sm text-red-800"><p>No se pudieron cargar.</p><button type="button" class="mt-2 font-bold underline" @click="loadCategories">Reintentar</button></div>
-                                    <div v-else class="space-y-1">
+                                    <div v-else>
+                                        <label class="filter-search" for="category-filter-search"><i class="pi pi-search" aria-hidden="true"></i><input id="category-filter-search" v-model="categorySearch" type="search" aria-label="Buscar categoría" placeholder="Buscar categoría" autocomplete="off"></label>
                                         <button type="button" class="filter-option" :class="!filters.category && 'filter-option-active'" :aria-pressed="!filters.category" @click="setFilter('category', undefined)">Todas las categorías</button>
-                                        <button v-for="category in categories" :key="category.id" type="button" class="filter-option" :class="filters.category === category.slug && 'filter-option-active'" :aria-pressed="filters.category === category.slug" @click="setFilter('category', category.slug)">{{ category.name }}</button>
+                                        <button v-if="selectedCategoryHidden" type="button" class="filter-option filter-option-active" :aria-pressed="true" @click="setFilter('category', filters.category)">{{ categoryName(filters.category) }} <span class="ml-auto text-xs">Seleccionada</span></button>
+                                        <div v-if="!filteredCategories.length && categorySearch.trim()" class="filter-empty" role="status">No se encontraron categorías</div>
+                                        <div class="filter-options-scroll" role="group" aria-label="Opciones de categoría" tabindex="0">
+                                            <button v-for="category in filteredCategories" :key="category.id" type="button" class="filter-option" :class="filters.category === category.slug && 'filter-option-active'" :aria-pressed="filters.category === category.slug" @click="setFilter('category', category.slug)">{{ category.name }}</button>
+                                        </div>
                                     </div>
-                                </fieldset>
+                                </details>
 
-                                <fieldset>
-                                    <legend class="mb-3 text-sm font-black uppercase tracking-wider text-slate-900">Marcas</legend>
+                                <details open class="filter-section">
+                                    <summary class="filter-section-heading">Marcas</summary>
                                     <div v-if="optionsState.brandsLoading" class="space-y-2" aria-busy="true"><Skeleton v-for="index in 4" :key="index" width="100%" height="2.75rem" /></div>
                                     <div v-else-if="optionsState.brandsError" class="rounded-xl bg-red-50 p-3 text-sm text-red-800"><p>No se pudieron cargar.</p><button type="button" class="mt-2 font-bold underline" @click="loadBrands">Reintentar</button></div>
-                                    <div v-else class="space-y-1">
+                                    <div v-else>
+                                        <label class="filter-search" for="brand-filter-search"><i class="pi pi-search" aria-hidden="true"></i><input id="brand-filter-search" v-model="brandSearch" type="search" aria-label="Buscar marca" placeholder="Buscar marca" autocomplete="off"></label>
                                         <button type="button" class="filter-option" :class="!filters.brand && 'filter-option-active'" :aria-pressed="!filters.brand" @click="setFilter('brand', undefined)">Todas las marcas</button>
-                                        <button v-for="brand in brands" :key="brand.id" type="button" class="filter-option" :class="filters.brand === brand.slug && 'filter-option-active'" :aria-pressed="filters.brand === brand.slug" @click="setFilter('brand', brand.slug)">{{ brand.name }}</button>
+                                        <button v-if="selectedBrandHidden" type="button" class="filter-option filter-option-active" :aria-pressed="true" @click="setFilter('brand', filters.brand)">{{ brandName(filters.brand) }} <span class="ml-auto text-xs">Seleccionada</span></button>
+                                        <div v-if="!filteredBrands.length && brandSearch.trim()" class="filter-empty" role="status">No se encontraron marcas</div>
+                                        <div class="filter-options-scroll" role="group" aria-label="Opciones de marca" tabindex="0">
+                                            <button v-for="brand in filteredBrands" :key="brand.id" type="button" class="filter-option" :class="filters.brand === brand.slug && 'filter-option-active'" :aria-pressed="filters.brand === brand.slug" @click="setFilter('brand', brand.slug)">{{ brand.name }}</button>
+                                        </div>
                                     </div>
-                                </fieldset>
+                                </details>
 
                                 <div v-if="filters.viscosity || filters.type" class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
                                     <p class="font-bold">Filtros recibidos por URL</p>
@@ -167,6 +177,8 @@ const meta = ref({ current_page: 1, last_page: 1, from: 0, to: 0, total: 0 });
 const loading = ref(true);
 const loadError = ref('');
 const searchDraft = ref('');
+const categorySearch = ref('');
+const brandSearch = ref('');
 const mobileFiltersOpen = ref(false);
 const filterPanel = ref(null);
 const closeFiltersButton = ref(null);
@@ -194,6 +206,17 @@ const filters = computed(() => {
 const activeFilterCount = computed(() => ['search', 'category', 'brand', 'viscosity', 'type'].filter(key => filters.value[key]).length);
 const categoryName = slug => categories.value.find(item => item.slug === slug)?.name || slug;
 const brandName = slug => brands.value.find(item => item.slug === slug)?.name || slug;
+const normalizeOptionText = value => String(value ?? '').toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+const filteredCategories = computed(() => {
+    const query = normalizeOptionText(categorySearch.value);
+    return query ? categories.value.filter(category => normalizeOptionText(category.name).includes(query)) : categories.value;
+});
+const filteredBrands = computed(() => {
+    const query = normalizeOptionText(brandSearch.value);
+    return query ? brands.value.filter(brand => normalizeOptionText(brand.name).includes(query)) : brands.value;
+});
+const selectedCategoryHidden = computed(() => filters.value.category && !filteredCategories.value.some(category => category.slug === filters.value.category));
+const selectedBrandHidden = computed(() => filters.value.brand && !filteredBrands.value.some(brand => brand.slug === filters.value.brand));
 const activeFilters = computed(() => [
     filters.value.search && { key: 'search', label: `Búsqueda: ${filters.value.search}` },
     filters.value.category && { key: 'category', label: `Categoría: ${categoryName(filters.value.category)}` },
@@ -202,9 +225,14 @@ const activeFilters = computed(() => [
     filters.value.type && { key: 'type', label: `Tipo: ${filters.value.type}` },
 ].filter(Boolean));
 const resultsSummary = computed(() => {
-    if (loading.value && !meta.value.total) return 'Buscando productos…';
-    if (!meta.value.total) return '0 productos';
-    return `${meta.value.total} productos · ${meta.value.from}-${meta.value.to}`;
+    if (loading.value) return 'Buscando productos…';
+    if (loadError.value) return 'Resultados no disponibles';
+    const total = Number(meta.value.total);
+    if (!Number.isFinite(total) || total <= 0) return '0 productos';
+    const countLabel = `${total} ${total === 1 ? 'producto' : 'productos'}`;
+    return meta.value.from !== null && meta.value.from !== undefined && meta.value.to !== null && meta.value.to !== undefined
+        ? `${countLabel} · ${meta.value.from}-${meta.value.to}`
+        : countLabel;
 });
 const pageNumbers = computed(() => {
     const last = Number(meta.value.last_page || 1);
@@ -302,8 +330,18 @@ const loadProducts = async () => {
     try {
         const response = await api.get('/products', { params: cleanQuery(filters.value), signal: controller.signal });
         if (requestId !== productRequestId) return;
+        const pagination = response.data?.meta;
+        if (!pagination || !Number.isFinite(Number(pagination.total))) {
+            throw new Error('Unexpected product pagination response.');
+        }
         products.value = Array.isArray(response.data?.data) ? response.data.data : [];
-        meta.value = response.data;
+        meta.value = {
+            current_page: Number(pagination.current_page) || 1,
+            last_page: Number(pagination.last_page) || 1,
+            from: pagination.from == null ? null : Number(pagination.from),
+            to: pagination.to == null ? null : Number(pagination.to),
+            total: Math.max(0, Number(pagination.total)),
+        };
     } catch (error) {
         if (error.code === 'ERR_CANCELED' || requestId !== productRequestId) return;
         loadError.value = 'Revisa tu conexión e inténtalo nuevamente.';
@@ -370,7 +408,22 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .catalog-product-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
-.filter-option { display: flex; min-height: 44px; width: 100%; align-items: center; border-radius: .75rem; padding: .55rem .75rem; text-align: left; font-size: .875rem; font-weight: 600; color: #475569; transition: background-color .15s ease, color .15s ease; }
+.filter-section { min-width: 0; }
+.filter-section-heading { display: flex; min-height: 2.75rem; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .75rem; cursor: pointer; list-style: none; color: #0f172a; font-size: .875rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.filter-section-heading::-webkit-details-marker { display: none; }
+.filter-section-heading::after { content: '\e902'; font-family: 'primeicons'; font-size: .75rem; transition: transform .15s ease; }
+.filter-section[open] > .filter-section-heading::after { transform: rotate(180deg); }
+.filter-section-heading:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; border-radius: .35rem; }
+.filter-search { display: flex; min-height: 2.75rem; align-items: center; gap: .55rem; margin-bottom: .5rem; border: 1px solid #cbd5e1; border-radius: .75rem; background: #fff; padding: 0 .7rem; color: #64748b; }
+.filter-search:focus-within { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .18); }
+.filter-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #0f172a; font-size: .875rem; }
+.filter-search input::placeholder { color: #64748b; }
+.filter-options-scroll { max-height: 13rem; overflow-y: auto; overscroll-behavior: contain; padding: .15rem .2rem .15rem 0; scrollbar-color: #94a3b8 #f1f5f9; scrollbar-width: thin; }
+.filter-options-scroll::-webkit-scrollbar { width: .5rem; }
+.filter-options-scroll::-webkit-scrollbar-track { border-radius: 999px; background: #f1f5f9; }
+.filter-options-scroll::-webkit-scrollbar-thumb { border: 2px solid #f1f5f9; border-radius: 999px; background: #94a3b8; }
+.filter-empty { padding: .7rem .75rem; color: #64748b; font-size: .875rem; }
+.filter-option { display: flex; min-height: 44px; width: 100%; align-items: center; overflow-wrap: anywhere; border-radius: .75rem; padding: .55rem .75rem; text-align: left; font-size: .875rem; font-weight: 600; color: #475569; transition: background-color .15s ease, color .15s ease; }
 .filter-option:hover { background: #f1f5f9; color: #1d4ed8; }
 .filter-option:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
 .filter-option-active { background: #eff6ff; color: #1e40af; font-weight: 800; }
@@ -381,5 +434,5 @@ onBeforeUnmount(() => {
 .pagination-page-active { border-color: #1d4ed8; background: #1d4ed8; color: white; }
 @media (min-width: 640px) { .catalog-product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; } }
 @media (min-width: 1024px) { .catalog-product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (prefers-reduced-motion: reduce) { .filter-option, .pagination-button, .pagination-page { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .filter-section-heading::after, .filter-option, .pagination-button, .pagination-page { transition: none; } }
 </style>
