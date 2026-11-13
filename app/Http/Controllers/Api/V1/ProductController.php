@@ -16,7 +16,10 @@ class ProductController extends Controller
 
     public function index(Request $request)
     {
-        $query = Product::query()->with(['category', 'brand', 'images'])->where('is_active', true);
+        $query = Product::query()->with([
+            'category', 'brand', 'images',
+            'specifications:id,product_id,name,value,sort_order',
+        ])->where('is_active', true);
 
         // Filters
         if ($request->has('category')) {
@@ -80,7 +83,10 @@ class ProductController extends Controller
 
     public function show($slug)
     {
-        $product = Product::with(['category', 'brand', 'images'])
+        $product = Product::with([
+            'category', 'brand', 'images',
+            'specifications:id,product_id,name,value,sort_order',
+        ])
             ->where('slug', $slug)
             ->where('is_active', true)
             ->firstOrFail();

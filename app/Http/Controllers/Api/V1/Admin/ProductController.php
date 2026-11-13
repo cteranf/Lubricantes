@@ -68,23 +68,37 @@ class ProductController extends Controller
         return AdminProductListResource::collection($query->paginate($request->pageSize(), ['*'], 'page', $request->pageNumber()));
     }
 
+    public function show(Request $request, Product $product)
+    {
+        $product->load([
+            'category:id,name',
+            'brand:id,name',
+            'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status',
+            'specifications:id,product_id,name,value,sort_order',
+        ]);
+
+        return response()->json((new AdminProductListResource($product))->resolve($request));
+    }
+
     public function store(StoreProductRequest $request)
     {
         $validated = $request->validated();
         $uploads = $validated['images'] ?? [];
+        $specifications = $validated['specifications'] ?? [];
         if ($uploads === [] && isset($validated['image'])) {
             $uploads = [$validated['image']];
         }
-        unset($validated['image'], $validated['images']);
+        unset($validated['image'], $validated['images'], $validated['specifications']);
         $validated['slug'] = Str::slug($validated['name']).'-'.Str::random(5);
         $initialQuantity = (int) $validated['cantidad_inicial'];
         $warehouse = $initialQuantity > 0 ? Warehouse::findOrFail($validated['warehouse_id']) : null;
         unset($validated['cantidad_inicial'], $validated['warehouse_id']);
         $validated['sku'] = Product::normalizeSku($validated['sku'] ?? null);
 
-        $product = DB::transaction(function () use ($validated, $initialQuantity, $warehouse, $request) {
+        $product = DB::transaction(function () use ($validated, $initialQuantity, $warehouse, $request, $specifications) {
             $product = Product::create($validated);
             $this->inventory->initializeProduct($product, $initialQuantity, $warehouse, $request->user());
+            $this->replaceSpecifications($product, $specifications);
 
             return $product;
         });
@@ -92,7 +106,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data, 201);
@@ -102,15 +116,20 @@ class ProductController extends Controller
     {
         $validated = $request->validated();
         $uploads = $validated['images'] ?? [];
+        $syncSpecifications = array_key_exists('specifications', $validated);
+        $specifications = $validated['specifications'] ?? [];
         $legacyUpload = $validated['image'] ?? null;
-        unset($validated['image'], $validated['images'], $validated['stock']);
+        unset($validated['image'], $validated['images'], $validated['stock'], $validated['specifications']);
         if (array_key_exists('sku', $validated)) {
             $validated['sku'] = Product::normalizeSku($validated['sku']);
         }
 
-        DB::transaction(function () use ($validated, $product) {
+        DB::transaction(function () use ($validated, $product, $syncSpecifications, $specifications) {
             $locked = Product::query()->whereKey($product->id)->lockForUpdate()->firstOrFail();
             $locked->fill($validated)->save();
+            if ($syncSpecifications) {
+                $this->replaceSpecifications($locked, $specifications);
+            }
         });
 
         if ($legacyUpload) {
@@ -124,7 +143,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data);
@@ -142,5 +161,17 @@ class ProductController extends Controller
         $product->update(['is_active' => false]);
 
         return response()->json(['message' => 'Producto desactivado; se conservó su historial.']);
+    }
+
+    private function replaceSpecifications(Product $product, array $specifications): void
+    {
+        $product->specifications()->delete();
+        foreach (array_values($specifications) as $sortOrder => $specification) {
+            $product->specifications()->create([
+                'name' => $specification['name'],
+                'value' => $specification['value'],
+                'sort_order' => $sortOrder,
+            ]);
+        }
     }
 }

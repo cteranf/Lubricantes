@@ -61,9 +61,17 @@
                         </div>
                     </section>
 
-                    <section class="mt-10 grid gap-5 lg:grid-cols-2" aria-label="Información del producto">
+                    <section class="mt-10 grid gap-5" :class="product.specifications?.length ? 'lg:grid-cols-2' : 'lg:grid-cols-1'" aria-label="Información del producto">
                         <article class="rounded-2xl border border-slate-200 bg-white p-6"><h2 class="text-xl font-black text-slate-950">Descripción</h2><p class="mt-4 whitespace-pre-line leading-7 text-slate-600">{{ product.description || 'Este producto no tiene una descripción disponible.' }}</p></article>
-                        <article class="rounded-2xl border border-slate-200 bg-white p-6"><h2 class="text-xl font-black text-slate-950">Especificaciones técnicas</h2><p class="mt-4 whitespace-pre-line leading-7 text-slate-600">{{ product.specifications || 'No se registraron especificaciones técnicas para este producto.' }}</p></article>
+                        <article v-if="product.specifications?.length" class="rounded-2xl border border-slate-200 bg-white p-6" aria-labelledby="product-specifications-heading">
+                            <h2 id="product-specifications-heading" class="text-xl font-black text-slate-950">Especificaciones técnicas</h2>
+                            <dl class="mt-4 divide-y divide-slate-200">
+                                <div v-for="(specification, index) in product.specifications" :key="`${specification.name}-${index}`" class="grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] sm:gap-4">
+                                    <dt class="font-semibold text-slate-700">{{ specification.name }}</dt>
+                                    <dd class="whitespace-pre-line break-words text-slate-600">{{ specification.value }}</dd>
+                                </div>
+                            </dl>
+                        </article>
                     </section>
                 </template>
             </div>

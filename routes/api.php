@@ -168,7 +168,7 @@ Route::prefix('v1')->group(function () {
             // Compatibility endpoints operate only on the current primary logical image.
             Route::post('/products/{product}/image/regenerate', [AdminProductImageController::class, 'regeneratePrimary'])->middleware('throttle:5,1')->name('products.image.regenerate');
             Route::get('/products/{product}/image/status', [AdminProductImageController::class, 'primaryStatus'])->middleware('throttle:30,1')->name('products.image.status');
-            Route::apiResource('products', AdminProductController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::apiResource('products', AdminProductController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/branches/options', [AdminBranchController::class, 'options'])->name('branches.options');
             Route::patch('/branches/{branch}/main', [AdminBranchController::class, 'setMain'])->name('branches.main');
             Route::patch('/branches/{branch}/status', [AdminBranchController::class, 'status'])->name('branches.status');

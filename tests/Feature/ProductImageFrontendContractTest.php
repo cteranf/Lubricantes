@@ -189,7 +189,7 @@ PHP, $adminImageResource);
         $imageModel = file_get_contents(app_path('Models/ProductImage.php'));
         $this->assertStringContainsString("'image_url' => \$this->image_url", $resource);
         $this->assertStringContainsString("'image_variants' => \$this->image_variants", $resource);
-        $this->assertStringContainsString("with(['category', 'brand', 'images'])", $publicController);
+        $this->assertSame(2, preg_match_all("/with\\(\\[\\s*'category',\\s*'brand',\\s*'images',\\s*'specifications:id,product_id,name,value,sort_order',?\\s*\\]\\)/s", $publicController));
         $this->assertStringNotContainsString("with(['category', 'brand', 'images', 'primaryImage'])", $publicController);
         $this->assertStringContainsString(<<<'PHP'
 $published->first(fn (ProductImage $image) => $image->is_primary) ?? $published->first()

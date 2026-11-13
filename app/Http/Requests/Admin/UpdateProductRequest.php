@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Exceptions\InvalidProductImage;
+use App\Http\Requests\Admin\Concerns\NormalizesProductSpecifications;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
@@ -12,9 +13,12 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateProductRequest extends FormRequest
 {
+    use NormalizesProductSpecifications;
+
     public function authorize(): bool
     {
         return $this->user()?->isAdmin() === true;
@@ -25,6 +29,12 @@ class UpdateProductRequest extends FormRequest
         if ($this->filled('sku')) {
             $this->merge(['sku' => Product::normalizeSku($this->input('sku'))]);
         }
+        $this->normalizeProductSpecifications();
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $this->validateUniqueProductSpecificationNames($validator);
     }
 
     public function rules(): array
@@ -70,6 +80,10 @@ class UpdateProductRequest extends FormRequest
                 }
             }],
             'description' => ['nullable', 'string'], 'viscosity' => ['nullable', 'string'],
+            'specifications' => ['sometimes', 'array', 'max:30'],
+            'specifications.*' => ['required', 'array:name,value'],
+            'specifications.*.name' => ['required', 'string', 'max:100'],
+            'specifications.*.value' => ['required', 'string', 'max:500'],
             'images' => ['sometimes', 'array', 'max:'.(int) config('product_images.max_images', 6), function ($attribute, $value, $fail) use ($product) {
                 if (! is_array($value)) {
                     return;

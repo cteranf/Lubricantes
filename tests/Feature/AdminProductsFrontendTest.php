@@ -95,7 +95,7 @@ class AdminProductsFrontendTest extends TestCase
         $this->assertStringContainsString('statusBusy.add(product.id);', $statusRequest);
         $this->assertStringContainsString('statusBusy.delete(product.id);', $statusRequest);
         $this->assertStringContainsString('api.patch(`/admin/products/${product.id}/status`', $statusRequest);
-        $this->assertStringContainsString("command: () => openModal(product)", $mobileActions);
+        $this->assertStringContainsString('command: () => openModal(product)', $mobileActions);
         $this->assertStringContainsString('command: () => confirmStatus(product)', $mobileActions);
         $this->assertStringContainsString("label: product.is_active ? 'Desactivar' : 'Reactivar'", $mobileActions);
         $this->assertStringContainsString('disabled: busy', $mobileActions);
@@ -253,8 +253,9 @@ class AdminProductsFrontendTest extends TestCase
 
         $submit = $this->sourceBetween($view, 'async function submitForm() {', 'function confirmStatus(');
         $submitBody = substr($submit, strpos($submit, '{') + 1);
-        $guard = strpos($submitBody, 'if (processing.value || imageSaved.value) return;');
-        $this->assertSame(0, strpos(ltrim($submitBody), 'if (processing.value || imageSaved.value) return;'), 'Submit re-entry and active image-operation guards must be the first operation.');
+        $guardCondition = 'if (processing.value || imageSaved.value || specificationsLoading.value || specificationsError.value) return;';
+        $guard = strpos($submitBody, $guardCondition);
+        $this->assertSame(0, strpos(ltrim($submitBody), $guardCondition), 'Submit re-entry, active image-operation, and specification-loading guards must be the first operation.');
         $this->assertLessThan(strpos($submitBody, 'new FormData()'), $guard);
         $this->assertLessThan(strpos($submitBody, 'toast.add('), $guard);
         $this->assertLessThan(strpos($submitBody, 'await api.post('), $guard);
@@ -275,7 +276,7 @@ class AdminProductsFrontendTest extends TestCase
         $this->assertStringContainsString('const submission = ++submissionSequence;', $submit);
         $this->assertStringContainsString('const opening = openingSequence;', $submit);
         $this->assertStringContainsString('if (isCurrentOpening(opening, productId, mode)) {', $submit);
-        $this->assertSame(1, preg_match('/:\s*disabled\s*=\s*[\'\"]\s*processing\s*\|\|\s*optionsLoading\s*\|\|\s*imageSaved\s*[\'\"]/s', $view));
+        $this->assertSame(1, preg_match('/:\s*disabled\s*=\s*[\'\"]\s*processing\s*\|\|\s*optionsLoading\s*\|\|\s*imageSaved\s*\|\|\s*specificationsLoading\s*\|\|\s*Boolean\(specificationsError\)\s*[\'\"]/s', $view));
         $this->assertStringContainsString('imageSaved.value = true;', $submit);
         $this->assertStringContainsString('imageSaved.value = false;', $submit);
         $this->assertStringContainsString('safeRequestMessage(error)', $submit);

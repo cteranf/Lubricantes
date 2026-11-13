@@ -23,7 +23,7 @@ class ProductResource extends JsonResource
             'slug' => $product->slug,
             'sku' => $product->sku,
             'description' => $product->description,
-            'specifications' => $product->specifications,
+            'specifications' => $this->when($product->relationLoaded('specifications'), fn () => ProductSpecificationResource::collection($product->getRelation('specifications'))->resolve($request)),
             'price' => $product->price,
             'sale_price' => $product->sale_price,
             'stock' => (int) $product->stock,

@@ -502,8 +502,9 @@ class ProductImageProcessingTest extends TestCase
         $this->assertArrayNotHasKey('image_processing_status', $payload);
         $this->assertSame([
             'id', 'name', 'sku', 'description', 'price', 'is_active', 'category', 'brand',
-            'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images',
+            'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images', 'specifications',
         ], array_keys($payload));
+        $this->assertSame([], $payload['specifications']);
         $affectedImage = collect($payload['images'])->firstWhere('id', $imageId);
         $this->assertIsArray($affectedImage);
         $this->assertSame([

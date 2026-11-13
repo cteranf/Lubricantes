@@ -208,7 +208,42 @@
                             <p v-if="fieldError('image')" role="alert" class="mt-1 text-xs text-red-700">{{ fieldError('image') }}</p>
                         </div>
                         <Field label="Descripción" :error="fieldError('description')" class="md:col-span-2"><textarea v-model="form.description" class="input" /></Field>
-                        <div class="flex justify-end gap-3 md:col-span-2"><button type="button" class="rounded bg-slate-200 px-4 py-2" @click="closeModal">Cancelar</button><button type="submit" class="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50" :disabled="processing || optionsLoading || imageSaved">{{ processing ? 'Guardando…' : imageSaved ? 'Imagen en procesamiento…' : 'Guardar' }}</button></div>
+                        <section class="space-y-3 md:col-span-2" aria-labelledby="product-specifications-title">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                    <h3 id="product-specifications-title" class="font-semibold text-slate-800">Especificaciones técnicas</h3>
+                                    <p class="text-sm text-slate-600">Agrega hasta 30 datos técnicos. Los nombres deben ser únicos.</p>
+                                </div>
+                                <span class="text-sm font-semibold text-slate-600" aria-live="polite">{{ form.specifications?.length || 0 }} de 30</span>
+                            </div>
+                            <p v-if="specificationsLoading" class="text-sm text-slate-600" role="status" aria-live="polite">Cargando especificaciones…</p>
+                            <div v-if="specificationsError" class="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                                <p>{{ specificationsError }}</p>
+                                <Button type="button" label="Reintentar" severity="secondary" text size="small" class="mt-1" @click="retryProductSpecifications" />
+                            </div>
+                            <div v-else class="space-y-3">
+                                <article v-for="(specification, index) in form.specifications || []" :key="specification.clientKey" class="grid min-w-0 grid-cols-1 items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+                                    <div class="min-w-0">
+                                        <label :for="`product-spec-name-${specification.clientKey}`" class="mb-1 block text-sm font-semibold">Nombre</label>
+                                        <InputText :id="`product-spec-name-${specification.clientKey}`" v-model="specification.name" required maxlength="100" class="w-full" :disabled="processing || specificationsLoading" :aria-invalid="Boolean(fieldError(`specifications.${index}.name`))" :aria-describedby="`product-spec-name-error-${specification.clientKey}`" @input="clearSpecificationError(index, 'name')" />
+                                        <small :id="`product-spec-name-error-${specification.clientKey}`" class="text-red-700" role="alert">{{ fieldError(`specifications.${index}.name`) }}</small>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <label :for="`product-spec-value-${specification.clientKey}`" class="mb-1 block text-sm font-semibold">Valor</label>
+                                        <Textarea :id="`product-spec-value-${specification.clientKey}`" v-model="specification.value" required maxlength="500" rows="2" auto-resize class="w-full" :disabled="processing || specificationsLoading" :aria-invalid="Boolean(fieldError(`specifications.${index}.value`))" :aria-describedby="`product-spec-value-error-${specification.clientKey}`" @input="clearSpecificationError(index, 'value')" />
+                                        <small :id="`product-spec-value-error-${specification.clientKey}`" class="text-red-700" role="alert">{{ fieldError(`specifications.${index}.value`) }}</small>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-1 sm:justify-end" :aria-label="`Orden de especificación ${index + 1}`">
+                                        <Button type="button" icon="pi pi-arrow-up" text rounded severity="secondary" :aria-label="`Mover especificación ${index + 1} arriba`" v-tooltip.top="'Mover arriba'" :disabled="index === 0 || processing || specificationsLoading" @click="moveSpecification(index, -1)" />
+                                        <Button type="button" icon="pi pi-arrow-down" text rounded severity="secondary" :aria-label="`Mover especificación ${index + 1} abajo`" v-tooltip.top="'Mover abajo'" :disabled="index === (form.specifications?.length || 0) - 1 || processing || specificationsLoading" @click="moveSpecification(index, 1)" />
+                                        <Button type="button" icon="pi pi-trash" label="Eliminar" severity="secondary" text size="small" :aria-label="`Eliminar especificación ${index + 1}`" :disabled="processing || specificationsLoading" @click="removeSpecification(index)" />
+                                    </div>
+                                </article>
+                                <Button type="button" label="Agregar especificación" icon="pi pi-plus" severity="secondary" outlined size="small" :disabled="(form.specifications?.length || 0) >= 30 || processing || specificationsLoading || Boolean(specificationsError)" @click="addSpecification" />
+                                <p v-if="specificationsFormError" class="text-sm text-red-700" role="alert" aria-live="polite">{{ specificationsFormError }}</p>
+                            </div>
+                        </section>
+                        <div class="flex justify-end gap-3 md:col-span-2"><button type="button" class="rounded bg-slate-200 px-4 py-2" @click="closeModal">Cancelar</button><button type="submit" class="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50" :disabled="processing || optionsLoading || imageSaved || specificationsLoading || Boolean(specificationsError)">{{ processing ? 'Guardando…' : imageSaved ? 'Imagen en procesamiento…' : 'Guardar' }}</button></div>
                     </form>
                 </div>
             </div>
@@ -223,6 +258,8 @@ import { nextTick } from 'vue';
 import { useConfirm } from 'primevue/useconfirm';
 import { useToast } from 'primevue/usetoast';
 import Button from 'primevue/button';
+import InputText from 'primevue/inputtext';
+import Textarea from 'primevue/textarea';
 import FileUpload from 'primevue/fileupload';
 import Image from 'primevue/image';
 import Tag from 'primevue/tag';
@@ -292,6 +329,9 @@ const imageStatusMessage = ref('');
 const imageStatusBusy = ref(false);
 const imageFollowupNeeded = ref(false);
 const imageSaved = ref(false);
+const specificationsLoading = ref(false);
+const specificationsError = ref('');
+const specificationsFormError = ref('');
 const currentImageUrl = computed(() => selectedProduct.value?.image_url || null);
 const galleryImageCount = computed(() => (selectedProduct.value?.images?.length || 0) + (form.value?.images?.length || 0));
 let openingSequence = 0;
@@ -308,6 +348,7 @@ let imageStatusImageId = null;
 let imageOperation = 'upload';
 let clearingGalleryUpload = false;
 let imagePreviewSequence = 0;
+let specificationRowSequence = 0;
 const ownedImageObjectUrls = new Set();
 const hasActiveFilters = computed(() => filterKeys.some((key) => list.filters[key] !== ''));
 const activeFilterCount = computed(() => filterKeys.filter((key) => list.filters[key] !== '').length);
@@ -377,6 +418,48 @@ function safeRequestMessage(error) {
 
 function fieldError(key) {
     return errors.value[key] ? 'Revisa este campo e inténtalo nuevamente.' : '';
+}
+
+function clearSpecificationErrors() {
+    errors.value = Object.fromEntries(Object.entries(errors.value).filter(([key]) => !key.startsWith('specifications.')));
+    specificationsFormError.value = '';
+}
+
+function clearSpecificationError(index, field) {
+    delete errors.value[`specifications.${index}.${field}`];
+    specificationsFormError.value = '';
+}
+
+function specificationRow(name = '', value = '') {
+    return { clientKey: `product-specification-${++specificationRowSequence}`, name, value };
+}
+
+function specificationRows(values) {
+    return Array.isArray(values)
+        ? values.map(item => specificationRow(typeof item?.name === 'string' ? item.name : '', typeof item?.value === 'string' ? item.value : ''))
+        : [];
+}
+
+function addSpecification() {
+    const specifications = form.value.specifications;
+    if (!Array.isArray(specifications) || specifications.length >= 30 || processing.value || specificationsLoading.value) return;
+    clearSpecificationErrors();
+    specifications.push(specificationRow());
+}
+
+function removeSpecification(index) {
+    if (processing.value || specificationsLoading.value || !Array.isArray(form.value.specifications)) return;
+    clearSpecificationErrors();
+    form.value.specifications.splice(index, 1);
+}
+
+function moveSpecification(index, offset) {
+    const specifications = form.value.specifications;
+    const destination = index + offset;
+    if (!Array.isArray(specifications) || processing.value || specificationsLoading.value
+        || index < 0 || destination < 0 || destination >= specifications.length) return;
+    clearSpecificationErrors();
+    [specifications[index], specifications[destination]] = [specifications[destination], specifications[index]];
 }
 
 function validId(value) {
@@ -450,15 +533,18 @@ async function openModal(product = null) {
     imageOperation = 'upload';
 
     errors.value = {};
+    specificationsLoading.value = Boolean(product);
+    specificationsError.value = '';
+    specificationsFormError.value = '';
     isEditing.value = Boolean(product);
     selectedProduct.value = product;
 
     if (product) {
         preserveAssignedOption(categoryOptions.value, product.category, product.category_id);
         preserveAssignedOption(brandOptions.value, product.brand, product.brand_id);
-        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', images: [] };
+        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', images: [], specifications: undefined };
     } else {
-        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', images: [] };
+        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', images: [], specifications: [] };
     }
     showModal.value = true;
 
@@ -466,6 +552,39 @@ async function openModal(product = null) {
     if (!isCurrentOpening(sequence, productId, mode)) return;
 
     optionsError.value = optionsResult.ok ? '' : optionsResult.message;
+
+    if (product) await loadProductSpecifications(sequence, productId);
+}
+
+async function loadProductSpecifications(sequence = openingSequence, productId = selectedProduct.value?.id) {
+    const mode = 'edit';
+    if (!isCurrentOpening(sequence, productId, mode)) return;
+    specificationsLoading.value = true;
+    specificationsError.value = '';
+    try {
+        const { data } = await api.get(`/admin/products/${productId}`);
+        if (!isCurrentOpening(sequence, productId, mode)) return;
+        if (!data || Number(data.id) !== Number(productId) || !Array.isArray(data.specifications)) {
+            specificationsError.value = 'No se pudieron cargar las especificaciones del producto.';
+            form.value.specifications = undefined;
+            return;
+        }
+
+        selectedProduct.value = data;
+        form.value.specifications = specificationRows(data.specifications);
+    } catch {
+        if (isCurrentOpening(sequence, productId, mode)) {
+            specificationsError.value = 'No se pudieron cargar las especificaciones del producto.';
+            form.value.specifications = undefined;
+        }
+    } finally {
+        if (isCurrentOpening(sequence, productId, mode)) specificationsLoading.value = false;
+    }
+}
+
+function retryProductSpecifications() {
+    clearSpecificationErrors();
+    return loadProductSpecifications(openingSequence, selectedProduct.value?.id);
 }
 
 function isCurrentOpening(sequence, productId, mode) {
@@ -494,6 +613,9 @@ function closeModal() {
     stopImageStatusPolling();
     clearImagePreview();
     showModal.value = false;
+    specificationsLoading.value = false;
+    specificationsError.value = '';
+    specificationsFormError.value = '';
     selectedProduct.value = null;
     errors.value = {};
     imageSaved.value = false;
@@ -858,7 +980,7 @@ async function replaceImageFile(image, file) {
 }
 
 async function submitForm() {
-    if (processing.value || imageSaved.value) return;
+    if (processing.value || imageSaved.value || specificationsLoading.value || specificationsError.value) return;
 
     if (isEditing.value && !validId(form.value.id)) {
         toast.add({ severity: 'error', summary: 'Producto inválido', detail: 'No se envió la solicitud.', life: 3000 });
@@ -885,6 +1007,9 @@ async function submitForm() {
         }
         const selectedFiles = Array.isArray(formState.images) ? formState.images : [];
         selectedFiles.forEach((file, index) => data.append(`images[${index}]`, file));
+        if (Array.isArray(formState.specifications)) {
+            data.append('specifications', JSON.stringify(formState.specifications.map(({ name, value }) => ({ name, value }))));
+        }
         let response;
         if (mode === 'edit') {
             data.append('_method', 'PUT');
@@ -926,6 +1051,8 @@ async function submitForm() {
     } catch (error) {
         if (isCurrentOpening(opening, productId, mode)) {
             errors.value = statusOf(error) === 422 && error?.response?.data?.errors && typeof error.response.data.errors === 'object' ? error.response.data.errors : {};
+            specificationsFormError.value = Object.keys(errors.value).some(key => key.startsWith('specifications.'))
+                ? 'Revisa los nombres y valores de las especificaciones técnicas.' : '';
             toast.add({ severity: 'error', summary: 'No se pudo guardar', detail: safeRequestMessage(error), life: 4000 });
         }
     } finally {

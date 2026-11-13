@@ -61,14 +61,14 @@ class DatabaseSeeder extends Seeder
             $visc = $viscosities[array_rand($viscosities)];
 
             $stock = rand(5, 50);
+            $legacySpecifications = "Viscosidad: {$visc}\nTipo: {$type}\nAPI SN/CF";
             $product = Product::create([
                 'category_id' => $cat->id,
                 'brand_id' => $brand->id,
                 'name' => "Aceite {$brand->name} {$type} {$visc}",
-                'slug' => Str::slug("Aceite {$brand->name} {$type} {$visc} " . Str::random(5)),
-                'sku' => 'SKU-' . Str::upper(Str::random(8)),
+                'slug' => Str::slug("Aceite {$brand->name} {$type} {$visc} ".Str::random(5)),
+                'sku' => 'SKU-'.Str::upper(Str::random(8)),
                 'description' => 'Aceite de alta calidad diseñado para proteger su motor en condiciones extremas.',
-                'specifications' => "Viscosidad: {$visc}\nTipo: {$type}\nAPI SN/CF",
                 'price' => rand(80, 250) + (rand(0, 99) / 100),
                 'viscosity' => $visc,
                 'type' => $type,
@@ -76,6 +76,11 @@ class DatabaseSeeder extends Seeder
                 'image_path' => null, // Placeholder handled in frontend
                 'is_active' => true,
                 'is_featured' => rand(0, 1) == 1,
+            ]);
+            $product->specifications()->create([
+                'name' => 'Información técnica',
+                'value' => $legacySpecifications,
+                'sort_order' => 0,
             ]);
             $inventory = app(InventoryService::class);
             $inventory->initializeProduct($product, $stock, $inventory->defaultWarehouse());

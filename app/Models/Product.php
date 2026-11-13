@@ -14,7 +14,7 @@ class Product extends Model
     use HasFactory;
 
     protected $fillable = [
-        'category_id', 'brand_id', 'name', 'slug', 'sku', 'description', 'specifications',
+        'category_id', 'brand_id', 'name', 'slug', 'sku', 'description',
         'price', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured',
     ];
 
@@ -289,6 +289,11 @@ class Product extends Model
     public function images()
     {
         return $this->hasMany(ProductImage::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function specifications()
+    {
+        return $this->hasMany(ProductSpecification::class)->orderBy('sort_order')->orderBy('id');
     }
 
     public function primaryImage()

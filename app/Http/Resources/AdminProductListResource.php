@@ -29,6 +29,7 @@ class AdminProductListResource extends JsonResource
             'image_srcset' => $this->image_srcset,
             'image_dimensions' => $this->image_dimensions,
             'images' => $this->whenLoaded('images', fn () => AdminProductImageResource::collection($this->images)->resolve($request)),
+            'specifications' => $this->when($this->resource->relationLoaded('specifications'), fn () => ProductSpecificationResource::collection($this->resource->getRelation('specifications'))->resolve($request)),
         ];
     }
 }

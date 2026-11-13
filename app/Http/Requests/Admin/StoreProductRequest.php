@@ -3,15 +3,19 @@
 namespace App\Http\Requests\Admin;
 
 use App\Exceptions\InvalidProductImage;
+use App\Http\Requests\Admin\Concerns\NormalizesProductSpecifications;
 use App\Models\Product;
 use App\Services\ProductImageProcessor;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreProductRequest extends FormRequest
 {
+    use NormalizesProductSpecifications;
+
     public function authorize(): bool
     {
         return $this->user()?->isAdmin() === true;
@@ -22,6 +26,12 @@ class StoreProductRequest extends FormRequest
         if ($this->filled('sku')) {
             $this->merge(['sku' => Product::normalizeSku($this->input('sku'))]);
         }
+        $this->normalizeProductSpecifications();
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $this->validateUniqueProductSpecificationNames($validator);
     }
 
     public function rules(): array
@@ -39,6 +49,10 @@ class StoreProductRequest extends FormRequest
             ],
             'sku' => ['nullable', 'string', 'max:64', 'unique:products,sku'],
             'description' => ['nullable', 'string'],
+            'specifications' => ['sometimes', 'array', 'max:30'],
+            'specifications.*' => ['required', 'array:name,value'],
+            'specifications.*.name' => ['required', 'string', 'max:100'],
+            'specifications.*.value' => ['required', 'string', 'max:500'],
             'viscosity' => ['nullable', 'string'],
             'image' => ['nullable', 'file', 'max:10240', function ($attribute, $value, $fail) {
                 if ($value === null || ! $value instanceof UploadedFile) {
