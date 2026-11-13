@@ -118,6 +118,27 @@ class CheckoutPickupBranchTest extends TestCase
         $this->assertDatabaseCount('inventory_reservations', 1);
     }
 
+    public function test_checkout_snapshots_product_name_for_tracking(): void
+    {
+        $branch = $this->branch('NAME-SNAPSHOT', true, true, true);
+        $product = $this->product(3);
+        $purchasedName = $product->name;
+        $customer = $this->customer();
+        Sanctum::actingAs($customer);
+
+        $orderId = $this->postJson('/api/v1/orders', $this->payload($product, $branch->id))
+            ->assertCreated()
+            ->json('id');
+
+        $item = Order::findOrFail($orderId)->items()->firstOrFail();
+        $this->assertSame($purchasedName, $item->product_name);
+        $product->update(['name' => 'Nombre cambiado después de la compra']);
+
+        $this->getJson("/api/v1/orders/{$orderId}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.items.0.name', $purchasedName);
+    }
+
     public function test_delivery_rejects_pickup_data_and_keeps_existing_address_flow(): void
     {
         $branch = $this->branch('DELIVERY', true, true, true);

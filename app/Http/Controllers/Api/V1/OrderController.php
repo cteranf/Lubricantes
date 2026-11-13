@@ -217,6 +217,7 @@ class OrderController extends Controller
                 foreach ($itemsToCreate as $itemData) {
                     $item = $order->items()->create([
                         'product_id' => $itemData['product']->id, 'warehouse_id' => $warehouse->id,
+                        'product_name' => $itemData['product']->name,
                         'quantity' => $itemData['quantity'], 'price' => $itemData['price'], 'subtotal' => $itemData['subtotal'],
                     ]);
                     $item->setRelation('product', $itemData['product']);

@@ -8,8 +8,8 @@ use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\User;
 use App\Services\InventoryService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -130,14 +130,92 @@ class OrderStabilizationTest extends TestCase
         }
     }
 
-    public function test_admin_can_view_customer_tracking(): void
+    public function test_admin_can_view_only_their_own_order_tracking(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
-        $order = $this->orderFor($this->customer());
+        $ownOrder = $this->orderFor($admin);
+        $otherOrder = $this->orderFor($this->customer());
 
         Sanctum::actingAs($admin);
 
-        $this->getJson("/api/v1/orders/{$order->id}/tracking")->assertOk();
+        $this->getJson("/api/v1/orders/{$ownOrder->id}/tracking")->assertOk();
+        $this->getJson("/api/v1/orders/{$otherOrder->id}/tracking")->assertNotFound();
+    }
+
+    public function test_tracking_uses_product_name_snapshot_then_legacy_fallback(): void
+    {
+        $owner = $this->customer();
+        $order = $this->orderFor($owner);
+        $item = $order->items()->firstOrFail();
+        $product = $item->product;
+        $item->update(['product_name' => 'Nombre al comprar']);
+        $product->update(['name' => 'Nombre actual']);
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/orders/{$order->id}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.items.0.name', 'Nombre al comprar');
+
+        $item->update(['product_name' => null]);
+        $this->getJson("/api/v1/orders/{$order->id}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.items.0.name', 'Nombre actual');
+    }
+
+    public function test_tracking_uses_neutral_name_when_product_and_snapshot_are_missing(): void
+    {
+        $owner = $this->customer();
+        $order = $this->orderFor($owner);
+        $order->items()->firstOrFail()->update(['product_id' => null, 'product_name' => null]);
+        Sanctum::actingAs($owner);
+
+        $this->getJson("/api/v1/orders/{$order->id}/tracking")
+            ->assertOk()
+            ->assertJsonPath('order.items.0.name', 'Producto no disponible')
+            ->assertJsonMissingPath('order.items.0.product_id');
+    }
+
+    public function test_tracking_eager_loads_product_data_once_for_multiple_items(): void
+    {
+        $owner = $this->customer();
+        $order = $this->orderFor($owner);
+        foreach (range(1, 4) as $index) {
+            $product = $this->product(['name' => 'Producto adicional '.$index]);
+            OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'warehouse_id' => app(InventoryService::class)->defaultWarehouse()->id,
+                'quantity' => 1,
+                'price' => 10,
+                'subtotal' => 10,
+            ]);
+        }
+        $productQueries = [];
+        $imageQueries = [];
+        DB::listen(function (QueryExecuted $query) use (&$productQueries, &$imageQueries): void {
+            $sql = strtolower($query->sql);
+            if (str_contains($sql, ' from "products"') || str_contains($sql, ' from `products`') || str_contains($sql, ' from products')) {
+                $productQueries[] = $query->sql;
+            }
+            if (str_contains($sql, 'product_images')) {
+                $imageQueries[] = $query->sql;
+            }
+        });
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson("/api/v1/orders/{$order->id}/tracking")->assertOk();
+
+        $this->assertCount(1, $productQueries);
+        $this->assertCount(1, $imageQueries);
+        $this->assertStringContainsString(' in ', strtolower($productQueries[0]));
+        $response->assertJsonCount(5, 'order.items');
+        $items = $response->json('order.items');
+        $this->assertIsArray($items);
+        foreach ($items as $item) {
+            $this->assertIsArray($item);
+            $this->assertArrayNotHasKey('product_id', $item);
+        }
     }
 
     public function test_unauthenticated_user_receives_unauthorized_for_tracking(): void

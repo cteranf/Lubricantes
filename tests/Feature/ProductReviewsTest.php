@@ -262,7 +262,7 @@ class ProductReviewsTest extends TestCase
         $this->assertSame(ProductReview::PENDING, $review->status);
     }
 
-    public function test_admin_cannot_review_or_receive_review_access_for_another_users_purchase(): void
+    public function test_admin_cannot_access_tracking_or_review_another_users_purchase(): void
     {
         $this->enableReviews();
         $owner = $this->customer();
@@ -280,8 +280,7 @@ class ProductReviewsTest extends TestCase
         ]);
 
         Sanctum::actingAs($admin);
-        $tracking = $this->getJson('/api/v1/orders/'.$item->order_id.'/tracking')->assertOk();
-        $this->assertArrayNotHasKey('review_access', $tracking->json('order.items.0'));
+        $this->getJson('/api/v1/orders/'.$item->order_id.'/tracking')->assertNotFound();
         $this->postJson('/api/v1/products/'.$product->slug.'/reviews', $this->payload())
             ->assertForbidden()
             ->assertExactJson(['message' => 'Se requiere una compra entregada para opinar.']);

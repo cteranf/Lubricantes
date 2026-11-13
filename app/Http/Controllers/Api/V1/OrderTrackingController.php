@@ -21,12 +21,14 @@ class OrderTrackingController extends Controller
 
         $user = $request->user();
 
-        // Hide the existence of another customer's order while allowing admins.
-        if (! $user->isAdmin() && $user->id !== $order->user_id) {
+        // Tracking is a customer-owned surface; administrative order management
+        // remains available through the separate admin endpoints.
+        if ((int) $user->getKey() !== (int) $order->user_id) {
             abort(404);
         }
 
         $reviewAccessByProduct = $this->reviews->trackingReviewAccess($order, $user);
+        $delivery = $order->isPickup() ? null : $this->delivery->getCustomerTracking($order);
 
         return response()->json([
             'order' => [
@@ -74,9 +76,10 @@ class OrderTrackingController extends Controller
                 ] : null,
                 'items' => $order->items->map(function ($item) use ($reviewAccessByProduct) {
                     $itemPayload = [
-                        'name' => $item->product?->name ?? 'Producto no disponible',
+                        'name' => $item->product_name ?? $item->product?->name ?? 'Producto no disponible',
                         'quantity' => $item->quantity,
                         'price' => $item->price,
+                        'subtotal' => $item->subtotal,
                         'image_url' => $item->product?->image_url,
                         'warehouse' => $item->warehouse ? ['id' => $item->warehouse->id, 'name' => $item->warehouse->name] : null,
                         'reservation' => $item->reservation ? [
@@ -96,12 +99,12 @@ class OrderTrackingController extends Controller
                     return $itemPayload;
                 }),
             ],
-            'timeline' => $this->fulfillmentTimeline($order),
-            'delivery' => $order->isPickup() ? null : $this->delivery->getCustomerTracking($order),
+            'timeline' => $this->fulfillmentTimeline($order, $delivery),
+            'delivery' => $delivery,
         ]);
     }
 
-    private function fulfillmentTimeline(Order $order): array
+    private function fulfillmentTimeline(Order $order, ?array $delivery): array
     {
         $state = $order->effectiveFulfillmentStatus();
         if ($state === Order::FULFILLMENT_CANCELED) {
@@ -118,7 +121,6 @@ class OrderTrackingController extends Controller
         }
         $steps[] = ['status' => 'preparing', 'label' => 'En preparación', 'rank' => 1, 'icon' => 'pi pi-cog', 'date' => $this->iso($order->preparing_at)];
         $steps[] = ['status' => 'ready', 'label' => $order->isPickup() ? 'Listo para recoger' : 'Listo para entrega', 'rank' => 2, 'icon' => 'pi pi-box', 'date' => $this->iso($order->ready_at)];
-        $delivery = $order->isPickup() ? null : $this->delivery->getCustomerTracking($order);
         if ($delivery) {
             $deliverySteps = $this->deliverySteps($delivery);
             foreach ($deliverySteps as $step) {
