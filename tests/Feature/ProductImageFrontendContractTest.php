@@ -24,8 +24,8 @@ class ProductImageFrontendContractTest extends TestCase
 
         $mainImage = $this->sourceBetween($detail, '<img v-if="selectedImage', '</div>');
         $galleryTemplate = $this->sourceBetween($detail, '<button v-for="(image, index) in images"', '</button>');
-        $detailSelection = $this->sourceBetween($detail, 'const detailImage = value => {', "\nconst isPublicProduct");
-        $loadProduct = $this->sourceBetween($normalizedDetail, 'const loadProduct = async () => {', "\n};\n\nfunction resetProductReviews");
+        $detailSelection = $this->sourceBetween($normalizedDetail, 'const detailImage = value => {', 'const isPublicProduct');
+        $loadProduct = $this->sourceBetween($normalizedDetail, 'const loadProduct = async () => {', 'async function loadRelatedProducts');
 
         $this->assertStringContainsString(':src="selectedImage.url"', $mainImage);
         $this->assertStringContainsString("productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])", $mainImage);

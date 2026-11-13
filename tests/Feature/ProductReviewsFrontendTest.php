@@ -43,7 +43,7 @@ class ProductReviewsFrontendTest extends TestCase
         $this->assertStringContainsString('if (reviewInitialLoadPromise) return reviewInitialLoadPromise;', $detail);
         $this->assertStringContainsString('/reviews/summary', $detail);
         $this->assertStringContainsString('/reviews`, { params', $detail);
-        $this->assertStringContainsString('onBeforeUnmount(() => { controller?.abort(); resetProductReviews(); })', $detail);
+        $this->assertStringContainsString('onBeforeUnmount(() => { controller?.abort(); relatedController?.abort(); resetProductReviews(); })', $detail);
         $this->assertStringContainsString('sequence !== reviewSequence', $detail);
         $this->assertStringNotContainsString('v-html', $detail);
         $this->assertStringNotContainsString('user_id', $detail);

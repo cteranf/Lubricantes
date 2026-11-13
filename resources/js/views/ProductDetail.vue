@@ -22,30 +22,37 @@
                 </section>
 
                 <template v-else-if="product">
-                    <section class="grid gap-8 lg:grid-cols-2 lg:gap-14">
-                        <div class="min-w-0">
-                            <div class="flex aspect-square items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                                <img v-if="selectedImage && !failedImages.has(selectedImage.url)" :src="selectedImage.url" :srcset="productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])" sizes="(max-width: 1024px) 100vw, 50vw" :width="selectedImageDimensions?.width" :height="selectedImageDimensions?.height" :alt="`${product.name}, imagen ${images.findIndex(item => item.id === selectedImage.id) + 1}`" class="h-full w-full object-contain p-5 sm:p-8" @error="markImageFailed(selectedImage.url)">
+                    <section class="grid items-start gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)] lg:gap-12">
+                        <div class="min-w-0 lg:sticky lg:top-24">
+                            <div class="group relative flex aspect-square items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                                <button v-if="selectedImage && !failedImages.has(selectedImage.url)" ref="galleryTrigger" type="button" class="flex h-full w-full items-center justify-center rounded-3xl focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-blue-600" :aria-label="`Ampliar imagen ${selectedImageIndex + 1} de ${images.length} de ${product.name}`" @click="openLightbox" @keydown.left.prevent="selectAdjacentImage(-1)" @keydown.right.prevent="selectAdjacentImage(1)">
+                                    <img v-if="selectedImage && !failedImages.has(selectedImage.url)" :src="selectedImage.url" :srcset="productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])" sizes="(max-width: 1024px) 100vw, 50vw" :width="selectedImageDimensions?.width" :height="selectedImageDimensions?.height" :alt="`${product.name}, imagen ${images.findIndex(item => item.id === selectedImage.id) + 1}`" class="h-full w-full object-contain p-5 sm:p-10" @error="markImageFailed(selectedImage.url)">
+                                </button>
                                 <div v-else class="flex flex-col items-center gap-3 text-slate-400"><i class="pi pi-image text-6xl" aria-hidden="true"></i><span class="text-sm font-semibold">Imagen no disponible</span></div>
+                                <span v-if="images.length" class="pointer-events-none absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-3 py-1.5 text-xs font-bold text-white" aria-live="polite">{{ selectedImageIndex + 1 }} / {{ images.length }}</span>
+                                <button v-if="images.length > 1" type="button" class="absolute left-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-md transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" aria-label="Imagen anterior" @click="selectAdjacentImage(-1)"><i class="pi pi-angle-left text-xl" aria-hidden="true"></i></button>
+                                <button v-if="images.length > 1" type="button" class="absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-md transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" aria-label="Imagen siguiente" @click="selectAdjacentImage(1)"><i class="pi pi-angle-right text-xl" aria-hidden="true"></i></button>
                             </div>
                             <div v-if="images.length > 1" class="mt-4 flex gap-3 overflow-x-auto pb-2" aria-label="Imágenes del producto">
-                                <button v-for="(image, index) in images" :key="image.id || image.url" type="button" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 transition" :class="selectedImage?.id === image.id ? 'border-blue-700' : 'border-slate-200 hover:border-slate-400'" :aria-label="`Ver imagen ${index + 1}`" :aria-pressed="selectedImage?.id === image.id" @click="selectedImage = image"><img :src="image.url" :srcset="thumbnailSrcset(image)" sizes="80px" :width="productImageDimensions(image)?.width" :height="productImageDimensions(image)?.height" :alt="`Vista ${index + 1} de ${product.name}`" class="h-full w-full object-contain" loading="lazy"></button>
+                                <button v-for="(image, index) in images" :key="image.id || image.url" type="button" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" :class="selectedImage?.id === image.id ? 'border-blue-700' : 'border-slate-200 hover:border-slate-400'" :aria-label="`Ver imagen ${index + 1}`" :aria-pressed="selectedImage?.id === image.id" @click="selectedImage = image"><img :src="image.url" :srcset="thumbnailSrcset(image)" sizes="80px" :width="productImageDimensions(image)?.width" :height="productImageDimensions(image)?.height" :alt="`Vista ${index + 1} de ${product.name}`" class="h-full w-full object-contain" loading="lazy"></button>
                             </div>
                         </div>
 
-                        <div class="min-w-0 lg:py-2">
-                            <p v-if="product.brand?.name" class="text-sm font-black uppercase tracking-widest text-blue-700">{{ product.brand.name }}</p>
-                            <h1 class="mt-2 text-3xl font-black leading-tight text-slate-950 sm:text-4xl">{{ product.name }}</h1>
-                            <p v-if="product.sku" class="mt-3 text-sm font-medium text-slate-500">SKU: {{ product.sku }}</p>
-                            <div class="mt-6 flex flex-wrap items-baseline gap-3"><span v-if="hasDiscount" class="text-lg text-slate-500 line-through">{{ formatPen(product.price) }}</span><span class="text-3xl font-black text-slate-950">{{ formatPen(currentPrice) }}</span><span v-if="hasDiscount" class="rounded-full bg-amber-300 px-3 py-1 text-sm font-black text-slate-950">-{{ discount }}%</span></div>
+                        <div class="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7 lg:p-8">
+                            <p v-if="product.brand?.name" class="text-xs font-black uppercase tracking-[0.18em] text-blue-700">{{ product.brand.name }}</p>
+                            <h1 class="mt-2 text-3xl font-black leading-tight tracking-tight text-slate-950 sm:text-4xl">{{ product.name }}</h1>
+                            <p v-if="product.sku" class="mt-3 font-mono text-xs font-medium tracking-wide text-slate-500">SKU: {{ product.sku }}</p>
+                            <button v-if="reviewSummary?.enabled" type="button" class="mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg text-left text-sm text-slate-700 underline-offset-4 hover:text-blue-800 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" aria-label="Ver opiniones de clientes" @click="openReviewsFromSummary"><span class="tracking-wide text-amber-500" aria-hidden="true">{{ reviewStars }}</span><span class="font-bold">{{ Number(reviewSummary.average || 0).toFixed(1) }}</span><span>({{ reviewSummary.total }} {{ reviewSummary.total === 1 ? 'opinión' : 'opiniones' }})</span></button>
+                            <div class="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1"><span v-if="hasDiscount" class="text-base text-slate-500 line-through">{{ formatPen(product.price) }}</span><span class="text-3xl font-black tracking-tight text-slate-950">{{ formatPen(currentPrice) }}</span><span v-if="hasDiscount" class="rounded-full bg-amber-300 px-3 py-1 text-sm font-black text-slate-950">-{{ discount }}%</span></div>
 
-                            <div class="mt-6 rounded-xl border p-4" :class="stock > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-100'">
-                                <p class="font-bold" :class="stock > 0 ? 'text-emerald-800' : 'text-slate-700'"><i :class="stock > 0 ? 'pi pi-check-circle' : 'pi pi-times-circle'" class="mr-2" aria-hidden="true"></i>{{ stock > 0 ? `${stock} unidades disponibles` : 'Producto agotado' }}</p><p v-if="currentInCart" class="mt-1 text-sm text-slate-600">Ya tienes {{ currentInCart }} en el carrito.</p>
+                            <div class="mt-5 flex items-start gap-3 rounded-2xl border p-4" :class="stock > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-100'">
+                                <i class="mt-0.5 text-lg" :class="stock > 0 ? 'pi pi-check-circle text-emerald-700' : 'pi pi-times-circle text-slate-500'" aria-hidden="true"></i>
+                                <div><p class="font-bold" :class="stock > 0 ? 'text-emerald-800' : 'text-slate-700'">{{ stock > 0 ? `${stock} unidades disponibles` : 'Producto agotado' }}</p><p v-if="currentInCart" class="mt-1 text-sm text-slate-600">Ya tienes {{ currentInCart }} en el carrito.</p></div>
                             </div>
 
-                            <dl v-if="attributes.length" class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3"><div v-for="attribute in attributes" :key="attribute.label" class="rounded-xl bg-white p-3 ring-1 ring-slate-200"><dt class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ attribute.label }}</dt><dd class="mt-1 font-semibold text-slate-900">{{ attribute.value }}</dd></div></dl>
+                            <dl v-if="attributes.length" class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3"><div v-for="attribute in attributes" :key="attribute.label" class="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200"><dt class="text-[11px] font-bold uppercase tracking-wide text-slate-500">{{ attribute.label }}</dt><dd class="mt-1 break-words text-sm font-semibold text-slate-900">{{ attribute.value }}</dd></div></dl>
 
-                            <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+                            <div class="mt-7 flex flex-col gap-3 sm:flex-row">
                                 <div class="flex min-h-12 items-center justify-between rounded-xl border border-slate-300 bg-white sm:w-36" aria-label="Cantidad">
                                     <button type="button" class="min-h-12 min-w-11 rounded-l-xl hover:bg-slate-100 disabled:text-slate-300" :disabled="qty <= 1 || remainingStock <= 0" aria-label="Reducir cantidad" @click="qty--"><i class="pi pi-minus" aria-hidden="true"></i></button><output class="min-w-8 text-center font-black">{{ qty }}</output><button type="button" class="min-h-12 min-w-11 rounded-r-xl hover:bg-slate-100 disabled:text-slate-300" :disabled="qty >= remainingStock" aria-label="Aumentar cantidad" @click="qty++"><i class="pi pi-plus" aria-hidden="true"></i></button>
                                 </div>
@@ -59,6 +66,11 @@
                                 <div class="rounded-xl border border-slate-200 bg-white p-4"><i class="pi pi-comments text-xl text-blue-700" aria-hidden="true"></i><h2 class="mt-2 text-sm font-black text-slate-900">Asesoría</h2><p class="mt-1 text-xs leading-5 text-slate-600">Resuelve tus dudas del producto por WhatsApp.</p></div>
                             </div>
                         </div>
+                    </section>
+
+                    <section v-if="relatedProducts.length" class="mt-12" aria-labelledby="related-products-heading">
+                        <div class="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p class="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">También te puede interesar</p><h2 id="related-products-heading" class="mt-1 text-2xl font-black text-slate-950 sm:text-3xl">Más de esta categoría</h2></div><router-link :to="relatedCategoryPath" class="min-h-10 rounded-lg px-3 py-2 text-sm font-bold text-blue-800 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700">Ver categoría <i class="pi pi-arrow-right ml-1" aria-hidden="true"></i></router-link></div>
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5"><ProductCard v-for="related in relatedProducts" :key="related.id" :product="related" variant="catalog" /></div>
                     </section>
 
                     <section class="mt-10 grid gap-5" :class="product.specifications?.length ? 'lg:grid-cols-2' : 'lg:grid-cols-1'" aria-label="Información del producto">
@@ -126,6 +138,15 @@
                     </section>
                 </template>
             </div>
+            <Dialog v-model:visible="lightboxVisible" modal :block-scroll="true" :dismissable-mask="true" :close-on-escape="true" :draggable="false" :breakpoints="{ '960px': '95vw' }" :style="{ width: 'min(72rem, 96vw)' }" :close-button-props="{ 'aria-label': 'Cerrar imagen ampliada' }" :pt="lightboxPassThrough" aria-label="Imagen ampliada del producto">
+                <div v-if="selectedImage" tabindex="0" class="relative flex min-h-[45vh] max-h-[78vh] w-full items-center justify-center bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700 sm:min-h-[60vh]" @keydown.left.prevent="selectAdjacentImage(-1)" @keydown.right.prevent="selectAdjacentImage(1)">
+                    <img v-if="!failedImages.has(selectedImage.url)" :src="selectedImage.url" :srcset="productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])" sizes="(max-width: 768px) 94vw, 72rem" :width="selectedImageDimensions?.width" :height="selectedImageDimensions?.height" :alt="`${product?.name || 'Producto'}, imagen ${selectedImageIndex + 1}`" class="max-h-[78vh] max-w-full object-contain" @error="markImageFailed(selectedImage.url)">
+                    <div v-else class="flex flex-col items-center gap-3 text-slate-500" role="status"><i class="pi pi-image text-5xl" aria-hidden="true"></i><span>Imagen no disponible</span></div>
+                    <button v-if="images.length > 1" type="button" class="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700" aria-label="Imagen anterior" @click="selectAdjacentImage(-1)"><i class="pi pi-angle-left text-xl" aria-hidden="true"></i></button>
+                    <button v-if="images.length > 1" type="button" class="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700" aria-label="Imagen siguiente" @click="selectAdjacentImage(1)"><i class="pi pi-angle-right text-xl" aria-hidden="true"></i></button>
+                    <span class="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-3 py-1.5 text-xs font-bold text-white">{{ selectedImageIndex + 1 }} / {{ images.length }}</span>
+                </div>
+            </Dialog>
         </main>
     </AppLayout>
 </template>
@@ -136,8 +157,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { getSiteSeoConfig, useSiteSeo } from '@/composables/useSiteSeo';
 import Skeleton from 'primevue/skeleton';
 import Rating from 'primevue/rating';
+import Dialog from 'primevue/dialog';
 import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/layouts/AppLayout.vue';
+import ProductCard from '@/components/ProductCard.vue';
 import api from '@/api';
 import { useCartStore } from '@/stores/cart';
 import { useAuthStore } from '@/stores/auth';
@@ -156,7 +179,11 @@ const notFound = ref(false);
 const qty = ref(1);
 const selectedImage = ref(null);
 const failedImages = ref(new Set());
+const relatedProducts = ref([]);
+const lightboxVisible = ref(false);
+const lightboxPassThrough = { root: { class: 'w-[min(96vw,72rem)]' }, content: { class: 'p-2 sm:p-4' } };
 let controller;
+let relatedController;
 let requestId = 0;
 const reviewSummary = ref(null), reviewsExpanded = ref(false), reviews = ref([]), reviewLoading = ref(false), reviewError = ref('');
 const reviewMeta = ref({ current_page: 1, last_page: 1, total: 0 });
@@ -180,6 +207,12 @@ let reviewInitialLoadPromise = null, reviewInitialDataLoaded = false, reviewAuto
 const catalogPath = computed(() => sessionStorage.getItem('catalog:last-path') || '/catalog');
 const images = computed(() => resolveProductGallery(product.value));
 const selectedImageDimensions = computed(() => productImageDimensions(selectedImage.value));
+const selectedImageIndex = computed(() => Math.max(0, images.value.findIndex(image => image.id === selectedImage.value?.id)));
+const reviewStars = computed(() => {
+    const fullStars = Math.max(0, Math.min(5, Math.round(Number(reviewSummary.value?.average || 0))));
+    return `${'★'.repeat(fullStars)}${'☆'.repeat(5 - fullStars)}`;
+});
+const relatedCategoryPath = computed(() => product.value?.category?.slug ? `/catalog?category=${encodeURIComponent(product.value.category.slug)}` : '/catalog');
 const thumbnailSrcset = image => productImageSrcset(image, ['thumbnail', 'card']);
 const detailImage = value => {
     const gallery = resolveProductGallery(value);
@@ -238,8 +271,7 @@ const attributes = computed(() => [
     { label: 'Presentación', value: product.value?.presentation },
     { label: 'Viscosidad', value: product.value?.viscosity },
     { label: 'Tipo', value: product.value?.type },
-    { label: 'Categoría', value: product.value?.category?.name },
-].filter(item => item.value));
+].filter(item => typeof item.value === 'string' && item.value.trim()).filter((item, index, list) => list.findIndex(candidate => candidate.value.trim().toLocaleLowerCase() === item.value.trim().toLocaleLowerCase()) === index).slice(0, 3));
 const whatsAppUrl = computed(() => {
     const phone = import.meta.env.VITE_WHATSAPP_PHONE || '51999999999';
     const parts = [`Hola, quisiera consultar por ${product.value?.name || 'este producto'}.`];
@@ -251,6 +283,10 @@ const whatsAppUrl = computed(() => {
 const loadProduct = async () => {
     const slug = Array.isArray(route.params.slug) ? route.params.slug[0] : route.params.slug;
     controller?.abort();
+    relatedController?.abort();
+    relatedController = null;
+    relatedProducts.value = [];
+    lightboxVisible.value = false;
     resetProductReviews();
     const id = ++requestId;
     product.value = null; error.value = ''; notFound.value = false; loading.value = true;
@@ -265,6 +301,7 @@ const loadProduct = async () => {
         }
         product.value = response.data;
         void loadReviewSummary(id, slug);
+        void loadRelatedProducts(id, slug, response.data);
         const firstImage = detailImage(response.data);
         selectedImage.value = firstImage; failedImages.value = new Set(); qty.value = 1;
     } catch (exception) {
@@ -273,6 +310,58 @@ const loadProduct = async () => {
         else error.value = 'Ocurrió un problema al consultar el producto. Inténtalo nuevamente.';
     } finally { if (id === requestId) loading.value = false; }
 };
+
+async function loadRelatedProducts(sequence, slug, currentProduct) {
+    const categorySlug = currentProduct?.category?.slug;
+    if (typeof categorySlug !== 'string' || !categorySlug.trim()) return;
+
+    const current = new AbortController();
+    relatedController = current;
+    try {
+        const { data } = await api.get('/products', {
+            params: { category: categorySlug, page: 1, sort: 'newest' },
+            signal: current.signal,
+        });
+        if (current.signal.aborted || sequence !== requestId || product.value?.slug !== slug) return;
+
+        const seen = new Set([String(currentProduct.id)]);
+        relatedProducts.value = (Array.isArray(data?.data) ? data.data : [])
+            .filter(candidate => {
+                const id = String(candidate?.id ?? '');
+                const publicCategory = candidate?.category?.slug === categorySlug;
+                const publicActive = candidate?.is_active === true || candidate?.is_active === 1 || candidate?.is_active === '1';
+                if (!id || seen.has(id) || !publicCategory || !publicActive) return false;
+                seen.add(id);
+                return true;
+            })
+            .slice(0, 4);
+    } catch {
+        if (!current.signal.aborted && sequence === requestId && product.value?.slug === slug) relatedProducts.value = [];
+    } finally {
+        if (relatedController === current) relatedController = null;
+    }
+}
+
+function selectAdjacentImage(offset) {
+    if (images.value.length < 2) return;
+    const currentIndex = selectedImageIndex.value;
+    const nextIndex = (currentIndex + offset + images.value.length) % images.value.length;
+    selectedImage.value = images.value[nextIndex];
+}
+
+function openLightbox() {
+    if (selectedImage.value && !failedImages.value.has(selectedImage.value.url)) lightboxVisible.value = true;
+}
+
+async function openReviewsFromSummary() {
+    if (!reviewSummary.value?.enabled) return;
+    if (!reviewsExpanded.value) {
+        reviewsExpanded.value = true;
+        await loadInitialReviewData();
+    }
+    await nextTick();
+    reviewFocusTarget.value?.focus();
+}
 
 function resetProductReviews() {
     reviewSequence++;
@@ -403,5 +492,5 @@ const addToCart = async event => {
 
 watch(() => route.params.slug, loadProduct, { immediate: true });
 watch(remainingStock, value => { if (value > 0 && qty.value > value) qty.value = value; });
-onBeforeUnmount(() => { controller?.abort(); resetProductReviews(); });
+onBeforeUnmount(() => { controller?.abort(); relatedController?.abort(); resetProductReviews(); });
 </script>
