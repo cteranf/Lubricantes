@@ -4,6 +4,7 @@
         <main id="main-content" class="flex-grow" tabindex="-1">
             <slot />
         </main>
+        <CartDrawer />
         <Footer />
         <WhatsAppBtn />
     </div>
@@ -11,6 +12,7 @@
 
 <script setup>
 import Navbar from '@/components/Navbar.vue';
+import CartDrawer from '@/components/cart/CartDrawer.vue';
 import Footer from '@/components/Footer.vue';
 import WhatsAppBtn from '@/components/WhatsAppBtn.vue';
 </script>

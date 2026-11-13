@@ -1,7 +1,10 @@
 <template>
     <AppLayout>
         <div class="container mx-auto px-4 py-8">
-            <h1 class="text-3xl font-bold mb-8">Tu Carrito</h1>
+            <header class="mb-8">
+                <h1 class="text-3xl font-bold">Tu carrito</h1>
+                <p class="mt-2 text-sm text-slate-600" aria-live="polite">{{ cartStore.count }} {{ cartStore.count === 1 ? 'unidad' : 'unidades' }} en {{ cartStore.items.length }} {{ cartStore.items.length === 1 ? 'producto' : 'productos' }}</p>
+            </header>
             
             <div v-if="cartStore.items.length > 0" class="flex flex-col md:flex-row gap-8">
                 <!-- Cart Items -->

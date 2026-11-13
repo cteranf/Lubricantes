@@ -17,10 +17,10 @@
 
                 <div class="ml-auto flex shrink-0 items-center gap-1 sm:gap-2 xl:ml-0">
                     <button type="button" class="icon-button xl:hidden" :aria-expanded="mobileMenuOpen" aria-controls="mobile-navigation" :aria-label="mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'" @click="mobileMenuOpen = !mobileMenuOpen"><i :class="mobileMenuOpen ? 'pi pi-times' : 'pi pi-bars'" aria-hidden="true"></i></button>
-                    <router-link to="/cart" class="icon-button relative" aria-label="Ver carrito">
+                    <button type="button" class="icon-button relative" aria-label="Abrir carrito" :aria-expanded="cartStore.drawerOpen" aria-controls="cart-drawer" @click="cartStore.openDrawer($event.currentTarget)">
                         <i class="pi pi-shopping-cart text-lg" aria-hidden="true"></i>
-                        <span v-if="cartStore.count > 0" class="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white" aria-label="Productos en el carrito">{{ cartCountLabel }}</span>
-                    </router-link>
+                        <span v-if="cartStore.count > 0" class="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white" :aria-label="`${cartStore.count} unidades en el carrito`">{{ cartCountLabel }}</span>
+                    </button>
 
                     <div v-if="authStore.isAuthenticated" class="relative">
                         <button type="button" class="account-button" :aria-expanded="accountMenuOpen" aria-controls="account-menu" @click="accountMenuOpen = !accountMenuOpen"><i class="pi pi-user" aria-hidden="true"></i><span class="hidden max-w-32 truncate md:inline">{{ authStore.user?.name || 'Mi cuenta' }}</span><i class="pi pi-chevron-down hidden text-xs md:inline" aria-hidden="true"></i></button>

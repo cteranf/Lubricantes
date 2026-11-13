@@ -49,7 +49,7 @@
                                 <div class="flex min-h-12 items-center justify-between rounded-xl border border-slate-300 bg-white sm:w-36" aria-label="Cantidad">
                                     <button type="button" class="min-h-12 min-w-11 rounded-l-xl hover:bg-slate-100 disabled:text-slate-300" :disabled="qty <= 1 || remainingStock <= 0" aria-label="Reducir cantidad" @click="qty--"><i class="pi pi-minus" aria-hidden="true"></i></button><output class="min-w-8 text-center font-black">{{ qty }}</output><button type="button" class="min-h-12 min-w-11 rounded-r-xl hover:bg-slate-100 disabled:text-slate-300" :disabled="qty >= remainingStock" aria-label="Aumentar cantidad" @click="qty++"><i class="pi pi-plus" aria-hidden="true"></i></button>
                                 </div>
-                                <button type="button" class="min-h-12 flex-1 rounded-xl bg-blue-700 px-6 py-3 font-black text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600" :disabled="remainingStock <= 0" @click="addToCart"><i class="pi pi-cart-plus mr-2" aria-hidden="true"></i>{{ remainingStock > 0 ? 'Agregar al carrito' : 'No disponible' }}</button>
+                                <button type="button" class="min-h-12 flex-1 rounded-xl bg-blue-700 px-6 py-3 font-black text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600" :disabled="remainingStock <= 0 || addingToCart" @click="addToCart($event)"><i :class="addingToCart ? 'pi pi-spin pi-spinner' : 'pi pi-cart-plus'" class="mr-2" aria-hidden="true"></i>{{ addingToCart ? 'Agregando…' : remainingStock > 0 ? 'Agregar al carrito' : 'No disponible' }}</button>
                             </div>
                             <a :href="whatsAppUrl" target="_blank" rel="noopener noreferrer" class="mt-3 flex min-h-12 w-full items-center justify-center rounded-xl border border-emerald-600 px-5 py-3 font-bold text-emerald-700 transition hover:bg-emerald-50"><i class="pi pi-whatsapp mr-2 text-lg" aria-hidden="true"></i>Consultar por WhatsApp</a>
 
@@ -162,6 +162,7 @@ const reviewSummary = ref(null), reviewsExpanded = ref(false), reviews = ref([])
 const reviewMeta = ref({ current_page: 1, last_page: 1, total: 0 });
 const reviewSort = ref('newest'), eligibility = ref(null), reviewSubmitting = ref(false), reviewFormError = ref('');
 const reviewForm = ref({ rating: 0, title: '', comment: '' });
+const addingToCart = ref(false);
 const reviewRating = computed({
     get: () => {
         const rating = Number(reviewForm.value.rating);
@@ -380,12 +381,24 @@ function eligibilityMessage(reason) {
 function reviewStatusLabel(status) { return ({ pending: 'Pendiente de revisión', published: 'Publicada', hidden: 'Oculta', rejected: 'Rechazada' })[status] || 'En revisión'; }
 
 const markImageFailed = url => { failedImages.value = new Set([...failedImages.value, url]); };
-const addToCart = () => {
-    if (!product.value || remainingStock.value <= 0) return;
+const addToCart = async event => {
+    if (!product.value || remainingStock.value <= 0 || addingToCart.value) return;
     const amount = Math.min(qty.value, remainingStock.value);
-    for (let index = 0; index < amount; index++) cartStore.addItem(product.value);
-    toast.add({ severity: 'success', summary: 'Producto agregado', detail: `${amount} unidad(es) de “${product.value.name}” agregadas al carrito.`, life: 3000 });
-    qty.value = 1;
+    const trigger = event?.currentTarget || null;
+    addingToCart.value = true;
+    try {
+        await nextTick();
+        const added = cartStore.addItem(product.value, amount, trigger);
+        if (!added) {
+            toast.add({ severity: 'warn', summary: 'Stock limitado', detail: 'No se pudo agregar la cantidad solicitada. Revisa el stock disponible.', life: 3500 });
+            return;
+        }
+        qty.value = 1;
+    } catch {
+        toast.add({ severity: 'error', summary: 'No se pudo agregar', detail: 'No se pudo actualizar el carrito. Inténtalo nuevamente.', life: 3500 });
+    } finally {
+        addingToCart.value = false;
+    }
 };
 
 watch(() => route.params.slug, loadProduct, { immediate: true });

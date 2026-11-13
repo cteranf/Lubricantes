@@ -10,6 +10,7 @@ class ProductImageFrontendContractTest extends TestCase
     {
         $card = file_get_contents(resource_path('js/components/ProductCard.vue'));
         $detail = file_get_contents(resource_path('js/views/ProductDetail.vue'));
+        $normalizedDetail = str_replace("\r\n", "\n", $detail);
         $cart = file_get_contents(resource_path('js/views/Cart.vue'));
         $checkout = file_get_contents(resource_path('js/views/Checkout.vue'));
         $store = file_get_contents(resource_path('js/stores/cart.js'));
@@ -24,7 +25,7 @@ class ProductImageFrontendContractTest extends TestCase
         $mainImage = $this->sourceBetween($detail, '<img v-if="selectedImage', '</div>');
         $galleryTemplate = $this->sourceBetween($detail, '<button v-for="(image, index) in images"', '</button>');
         $detailSelection = $this->sourceBetween($detail, 'const detailImage = value => {', "\nconst isPublicProduct");
-        $loadProduct = $this->sourceBetween($detail, 'const loadProduct = async () => {', "\n};\n\nfunction resetProductReviews");
+        $loadProduct = $this->sourceBetween($normalizedDetail, 'const loadProduct = async () => {', "\n};\n\nfunction resetProductReviews");
 
         $this->assertStringContainsString(':src="selectedImage.url"', $mainImage);
         $this->assertStringContainsString("productImageSrcset(selectedImage, ['medium', 'detail', 'detail_source', 'zoom'])", $mainImage);
