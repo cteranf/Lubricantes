@@ -46,6 +46,7 @@ class OrderTrackingController extends Controller
                 'total' => $order->total,
                 'payment_method' => $order->payment_method,
                 'payment_status' => $order->payment_status,
+                'paid_at' => $this->iso($order->paid_at),
                 'shipping_info' => $order->shipping_info,
                 'subtotal' => $order->subtotal ?? $order->total,
                 'discount_total' => $order->discount_total ?? '0.00',

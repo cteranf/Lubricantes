@@ -61,7 +61,11 @@ class CustomerTransferPaymentFrontendTest extends TestCase
         $this->assertStringContainsString("submission.status === 'approved'", $panel);
         $this->assertStringContainsString('Pago validado por Tesorería.', $resource);
         $this->assertStringContainsString('submission.validated_at', $panel);
-        $this->assertStringContainsString('Tu pedido continuará con preparación y entrega.', $panel);
+        $this->assertStringNotContainsString('Tu pedido continuará con preparación y entrega.', $panel);
+        $this->assertStringContainsString('showExpectedAmount: { type: Boolean, default: true }', $panel);
+        $this->assertStringContainsString('v-if="props.showExpectedAmount"', $panel);
+        $this->assertStringContainsString('{{ submission.expected_amount }}', $panel);
+        $this->assertStringContainsString(':show-expected-amount="false"', $tracking);
         $this->assertStringNotContainsString("submission.value.status === 'approved'", $panel);
     }
 }

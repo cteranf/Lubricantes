@@ -8,10 +8,13 @@ class OrderTrackingFrontendContractTest extends TestCase
 {
     private string $source;
 
+    private string $transferPanel;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->source = file_get_contents(resource_path('js/views/OrderTracking.vue'));
+        $this->transferPanel = file_get_contents(resource_path('js/components/CustomerTransferPaymentPanel.vue'));
     }
 
     public function test_tracking_view_presents_real_timeline_accessibly_and_responsively(): void
@@ -40,20 +43,57 @@ class OrderTrackingFrontendContractTest extends TestCase
         foreach ([
             'Transferencia bancaria',
             'Pago con tarjeta',
-            'Pago contra entrega',
+            'Pago contraentrega',
             'Pago en sede',
             'Pago confirmado',
             'Pendiente de confirmación',
             'Pago pendiente al recibir o recoger',
             'Pedido cancelado antes del pago',
-            'Total del pedido',
-            'Total pagado',
+            'Importe del pedido',
+            'Importe confirmado',
+            'order.paid_at',
+            'Información del pago',
             'CustomerTransferPaymentPanel',
         ] as $visibleContract) {
             $this->assertStringContainsString($visibleContract, $this->source);
         }
+        $this->assertSame(1, substr_count($this->source, 'Información del pago'));
+        $this->assertStringNotContainsString('Pago por transferencia', $this->transferPanel);
+        $this->assertStringNotContainsString('{{ submission.channel }}', $this->transferPanel);
+        $this->assertSame(1, substr_count($this->transferPanel, '{{ submission.expected_amount }}'));
+        $this->assertStringContainsString('<template v-if="props.showExpectedAmount"> · S/ {{ submission.expected_amount }} {{ submission.currency }}</template>', $this->transferPanel);
+        $this->assertStringContainsString(':show-expected-amount="false"', $this->source);
+        $paymentSectionStart = strpos($this->source, 'aria-labelledby="payment-title"');
+        $this->assertNotFalse($paymentSectionStart);
+        $paymentSectionEnd = strpos($this->source, '</section>', $paymentSectionStart);
+        $this->assertNotFalse($paymentSectionEnd);
+        $paymentSection = substr($this->source, $paymentSectionStart, $paymentSectionEnd - $paymentSectionStart);
+        $this->assertStringContainsString('Información del pago', $paymentSection);
+        $this->assertStringContainsString('{{ formatMoney(order.total) }}', $paymentSection);
+        $this->assertStringContainsString(':show-expected-amount="false"', $paymentSection);
+        $this->assertStringContainsString("bank_transfer: 'Transferencia bancaria'", $this->transferPanel);
+        $this->assertStringContainsString("labels[submission.channel] || 'Pago digital'", $this->transferPanel);
         $this->assertStringNotContainsString('{{ order.payment_method }}', $this->source);
         $this->assertStringNotContainsString('{{ order.payment_status }}', $this->source);
+        $this->assertStringNotContainsString('{{ submission.id }}', $this->transferPanel);
+        $this->assertStringNotContainsString('{{ submission.operation_number }}', $this->transferPanel);
+        $this->assertStringContainsString('submission.operation_number_masked', $this->transferPanel);
+    }
+
+    public function test_payment_messages_follow_pending_operational_final_and_canceled_states(): void
+    {
+        $message = substr($this->source, strpos($this->source, 'const paymentProgressMessage = computed(() => {'));
+        $message = substr($message, 0, strpos($message, 'const reviewAction'));
+        $finished = strpos($message, 'if (finished) return \'Pago confirmado correctamente.\'');
+        $operational = strpos($message, "if (['reserved', 'preparing'].includes(fulfillment))");
+
+        $this->assertStringContainsString("return status === 'pending' ? 'Tu pago está pendiente de validación.' : ''", $message);
+        $this->assertStringContainsString("if (canceled) return ''", $message);
+        $this->assertStringContainsString("if (status === 'refunded') return 'Pago reembolsado.'", $message);
+        $this->assertNotFalse($finished);
+        $this->assertNotFalse($operational);
+        $this->assertLessThan($operational, $finished, 'Completed and collected orders must be handled before operational preparation messaging.');
+        $this->assertStringNotContainsString('Tu pedido continuará con preparación y entrega.', $this->source.$this->transferPanel);
     }
 
     public function test_pickup_and_delivery_render_only_available_real_details(): void

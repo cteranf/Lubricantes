@@ -1,21 +1,19 @@
 <template>
-  <section v-if="isTransferOrder" class="rounded-xl border border-blue-200 bg-white p-5 shadow-sm" aria-live="polite">
-    <h2 class="text-xl font-bold">Pago por transferencia</h2>
-    <p class="mt-1 text-sm text-slate-600">Pedido #{{ order.id }} · S/ {{ order.total }} PEN</p>
+  <div v-if="isTransferOrder" class="mt-5 border-t border-slate-100 pt-5 text-sm" aria-live="polite">
     <div v-if="recoveringSubmission" class="py-6 text-sm">Recuperando tu presentación de pago…</div>
     <div v-else-if="submission" class="mt-4 rounded border p-4 text-sm" :class="submissionTone">
-      <b>{{ submission.message }}</b><p>{{ submission.channel }} · S/ {{ submission.expected_amount }} {{ submission.currency }}</p>
+      <b v-if="submission.status !== 'approved'">{{ submission.message }}</b>
+      <p v-if="submission.channel !== 'bank_transfer'">Canal: {{ labels[submission.channel] || 'Pago digital' }}</p>
       <p>Operación {{ submission.operation_number_masked }}</p><p v-if="submission.status === 'observed' && submission.reason" class="mt-2 font-medium">Motivo: {{ submission.reason }}</p><p v-if="submission.reservation_status === 'active' && submission.reservation_expires_at">Reserva vigente hasta {{ format(submission.reservation_expires_at) }}</p><p v-else-if="submission.reservation_status === 'consumed'">Stock confirmado para tu pedido</p><p v-else-if="submission.reservation_status === 'expired'">La reserva de stock venció</p><p v-else-if="submission.reservation_status === 'released'">La reserva de stock fue liberada</p><p v-else-if="submission.reservation_status === 'mixed'">El stock del pedido se encuentra en actualización</p>
       <template v-if="submission.status === 'approved'">
-        <p v-if="submission.validated_at" class="mt-2">Validado el {{ format(submission.validated_at) }}</p>
-        <p class="mt-3 font-medium">Tu pedido continuará con preparación y entrega.</p>
+        <p v-if="submission.validated_at" class="mt-2">Validado por Tesorería.</p>
       </template>
       <template v-if="manualReviewRequired">
         <div class="mt-4 rounded-lg border border-amber-300 bg-amber-100 p-4 text-amber-950" role="status">
           <p class="font-bold">Revisión manual requerida</p>
           <h3 class="mt-1 font-bold">Tu reserva venció, pero tu pago seguirá siendo revisado</h3>
           <p class="mt-2">Si ya realizaste la transferencia, no vuelvas a pagar ni crees otro pedido. Tesorería debe verificar el pago y confirmar la disponibilidad del producto. Conserva tu número de pedido y de operación.</p>
-          <p class="mt-2">Pedido #{{ order.id }} · Operación {{ submission.operation_number_masked }} · S/ {{ submission.expected_amount }} {{ submission.currency }}</p>
+          <p class="mt-2">Pedido #{{ order.id }} · Operación {{ submission.operation_number_masked }}<template v-if="props.showExpectedAmount"> · S/ {{ submission.expected_amount }} {{ submission.currency }}</template></p>
           <a v-if="supportUrl" :href="supportUrl" target="_blank" rel="noopener noreferrer" class="mt-3 inline-flex font-bold underline">Contactar soporte por WhatsApp</a>
           <p v-else class="mt-3 font-medium">Comunícate con atención al cliente indicando el pedido #{{ order.id }}.</p>
         </div>
@@ -51,7 +49,7 @@
       </template>
     </template>
     <p v-else class="mt-4 rounded bg-slate-50 p-3 text-sm text-slate-700">Este pedido ya no permite una nueva presentación de pago.</p>
-  </section>
+  </div>
 </template>
 
 <script setup>
@@ -59,7 +57,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import api from '@/api'
 import { useToast } from 'primevue/usetoast'
 
-const props = defineProps({ order: { type: Object, required: true } })
+const props = defineProps({
+  order: { type: Object, required: true },
+  showExpectedAmount: { type: Boolean, default: true },
+})
 const toast = useToast()
 const options = ref([])
 const selected = ref(null)

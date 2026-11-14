@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\User;
 use App\Services\InventoryService;
+use Carbon\Carbon;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -173,6 +174,27 @@ class OrderStabilizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('order.items.0.name', 'Producto no disponible')
             ->assertJsonMissingPath('order.items.0.product_id');
+    }
+
+    public function test_tracking_projects_the_stored_payment_confirmation_instant(): void
+    {
+        $owner = $this->customer();
+        $confirmedAt = Carbon::create(2026, 11, 14, 3, 37, 2, config('app.timezone'));
+        $order = $this->orderFor($owner, [
+            'payment_status' => 'approved',
+            'paid_at' => $confirmedAt,
+        ]);
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson("/api/v1/orders/{$order->id}/tracking")->assertOk();
+        $persistedConfirmation = $order->fresh()->paid_at;
+        $returnedConfirmation = Carbon::parse($response->json('order.paid_at'));
+
+        $this->assertNotNull($persistedConfirmation);
+        $this->assertTrue(
+            $returnedConfirmation->equalTo($persistedConfirmation),
+            'El seguimiento debe proyectar el mismo instante de confirmación persistido.'
+        );
     }
 
     public function test_tracking_eager_loads_product_data_once_for_multiple_items(): void

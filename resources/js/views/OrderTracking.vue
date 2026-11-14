@@ -60,22 +60,22 @@
                 </section>
 
                 <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-                    <section class="space-y-4" aria-label="Información de pago">
-                        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="payment-title" aria-live="polite">
                             <div class="flex items-start gap-3">
                                 <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-800"><i class="pi pi-wallet" aria-hidden="true"></i></span>
                                 <div class="min-w-0 flex-1">
-                                    <h2 class="font-bold text-slate-950">Pago</h2>
+                                    <h2 id="payment-title" class="font-bold text-slate-950">Información del pago</h2>
                                     <p class="mt-1 text-sm text-slate-600">{{ paymentMethodLabel }}</p>
                                     <p class="mt-2 text-sm font-semibold" :class="paymentStatusClass">{{ paymentStatusLabel }}</p>
                                 </div>
                             </div>
                             <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-                                <span class="text-sm text-slate-600">{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total del pedido' }}</span>
+                                <span class="text-sm text-slate-600">{{ amountLabel }}</span>
                                 <span class="text-lg font-extrabold tabular-nums text-slate-950">{{ formatMoney(order.total) }}</span>
                             </div>
-                        </div>
-                        <CustomerTransferPaymentPanel v-if="order.payment_method === 'transferencia'" :key="order.id" :order="order" />
+                            <p v-if="order.payment_status === 'approved' && order.paid_at" class="mt-3 text-sm text-slate-600">Confirmado el <time :datetime="order.paid_at">{{ formatDateTime(order.paid_at) }}</time></p>
+                            <p v-if="paymentProgressMessage" class="mt-3 text-sm text-slate-700">{{ paymentProgressMessage }}</p>
+                            <CustomerTransferPaymentPanel v-if="order.payment_method === 'transferencia'" :key="order.id" :order="order" :show-expected-amount="false" />
                     </section>
 
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="destination-title">
@@ -181,10 +181,12 @@ const currentStatusLabel = computed(() => activeStep.value?.label || 'Estado en 
 const currentStatusSeverity = computed(() => activeStep.value?.status === 'canceled' ? 'danger' : activeStep.value?.status === 'delivered' ? 'success' : 'info');
 const paymentMethodLabel = computed(() => ({
     transferencia: 'Transferencia bancaria',
+    bank_transfer: 'Transferencia bancaria',
     card: 'Pago con tarjeta',
-    contra_entrega: 'Pago contra entrega',
+    contra_entrega: 'Pago contraentrega',
     pago_en_sede: 'Pago en sede',
 }[order.value?.payment_method] || 'Método de pago registrado'));
+const amountLabel = computed(() => order.value?.payment_status === 'approved' ? 'Importe confirmado' : 'Importe del pedido');
 const paymentStatusLabel = computed(() => {
     if (order.value?.payment_status === 'approved') return 'Pago confirmado';
     if (['contra_entrega', 'pago_en_sede'].includes(order.value?.payment_method) && order.value?.status === 'canceled') return 'Pedido cancelado antes del pago';
@@ -197,6 +199,26 @@ const paymentStatusLabel = computed(() => {
     }[order.value?.payment_status] || 'Estado de pago en actualización');
 });
 const paymentStatusClass = computed(() => order.value?.payment_status === 'approved' ? 'text-emerald-800' : 'text-amber-800');
+const paymentProgressMessage = computed(() => {
+    const status = order.value?.payment_status;
+    const fulfillment = order.value?.fulfillment_status;
+    const canceled = order.value?.status === 'canceled' || fulfillment === 'canceled';
+    const finished = fulfillment === 'delivered'
+        || ['delivered', 'picked_up'].includes(order.value?.tracking_status)
+        || Boolean(order.value?.delivered_at || order.value?.pickup?.picked_up_at);
+
+    if (status === 'refunded') return 'Pago reembolsado.';
+    if (status === 'refund_pending') return 'Reembolso en proceso.';
+    if (canceled) return '';
+    if (status !== 'approved') {
+        if (['contra_entrega', 'pago_en_sede'].includes(order.value?.payment_method)) return 'El pago queda pendiente al recibir o recoger.';
+        return status === 'pending' ? 'Tu pago está pendiente de validación.' : '';
+    }
+    if (finished) return 'Pago confirmado correctamente.';
+    if (['reserved', 'preparing'].includes(fulfillment)) return 'Pago confirmado. Tu pedido continuará con la preparación.';
+
+    return 'Pago confirmado correctamente.';
+});
 
 const reviewAction = item => {
     const access = item.review_access;
