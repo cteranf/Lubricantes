@@ -142,7 +142,7 @@
                 <div class="section-heading text-center"><p class="eyebrow">Consejos y novedades</p><h2 id="news-heading">Noticias y guías</h2></div>
                 <div v-if="newsState.loading" class="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3" aria-busy="true"><div v-for="index in 3" :key="index" class="surface-card overflow-hidden"><Skeleton width="100%" height="12rem" /><div class="space-y-3 p-5"><Skeleton width="80%" height="1.5rem" /><Skeleton width="100%" /><Skeleton width="70%" /></div></div></div>
                 <div v-else-if="newsState.error" class="state-panel mt-9" role="alert"><i class="pi pi-exclamation-circle" aria-hidden="true"></i><h3>No pudimos cargar las noticias</h3><p>El resto de la tienda continúa disponible.</p><button type="button" class="btn-outline" @click="loadNews">Reintentar</button></div>
-                <div v-else class="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3"><article v-for="news in newsList" :key="news.id" class="surface-card overflow-hidden"><div class="flex aspect-[16/9] items-center justify-center overflow-hidden bg-slate-200"><img v-if="news.image_path" :src="news.image_path" :alt="news.title" class="h-full w-full object-cover" loading="lazy"><i v-else class="pi pi-book text-4xl text-slate-400" aria-hidden="true"></i></div><div class="p-5"><h3 class="text-xl font-bold text-slate-900">{{ news.title }}</h3><p v-if="news.summary" class="mt-3 line-clamp-3 leading-relaxed text-slate-600">{{ news.summary }}</p></div></article></div>
+                <div v-else class="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3"><article v-for="news in newsList" :key="news.slug" class="surface-card overflow-hidden"><div class="flex aspect-[16/9] items-center justify-center overflow-hidden bg-slate-200"><img v-if="news.image_url" :src="news.image_url" :alt="news.title" class="h-full w-full object-cover" loading="lazy"><i v-else class="pi pi-book text-4xl text-slate-400" aria-hidden="true"></i></div><div class="p-5"><h3 class="text-xl font-bold text-slate-900">{{ news.title }}</h3><p v-if="news.summary" class="mt-3 line-clamp-3 leading-relaxed text-slate-600">{{ news.summary }}</p></div></article></div>
             </div>
         </section>
     </AppLayout>
@@ -222,8 +222,8 @@ const loadProducts = () => runLoad(productsState, async () => {
     featuredProducts.value = (Array.isArray(response.data?.data) ? response.data.data : []).slice(0, 4);
 });
 const loadNews = () => runLoad(newsState, async () => {
-    const response = await api.get('/news');
-    newsList.value = Array.isArray(response.data) ? response.data : [];
+    const response = await api.get('/news', { params: { per_page: 3 } });
+    newsList.value = Array.isArray(response.data?.data) ? response.data.data : [];
 });
 const markSlideImageFailed = image => { if (image) failedSlideImages[image] = true; };
 const markCategoryImageFailed = id => { if (id !== null && id !== undefined) failedCategoryImages[id] = true; };

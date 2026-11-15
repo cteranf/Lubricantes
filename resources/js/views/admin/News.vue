@@ -21,7 +21,8 @@
                     <tbody>
                         <tr v-for="item in newsList" :key="item.id">
                             <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                                <img :src="item.image_path || 'https://via.placeholder.com/150'" class="h-16 w-16 object-cover rounded">
+                                <img v-if="item.image_url" :src="item.image_url" class="h-16 w-16 object-cover rounded" :alt="`Imagen de ${item.title}`">
+                                <div v-else class="flex h-16 w-16 items-center justify-center rounded bg-slate-100 text-slate-400" aria-label="Sin imagen"><i class="pi pi-book" aria-hidden="true"></i></div>
                             </td>
                             <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
                                 <p class="text-gray-900 whitespace-no-wrap font-bold">{{ item.title }}</p>
@@ -70,6 +71,10 @@
                             <label class="block text-gray-700 text-sm font-bold mb-2">Imagen Destacada</label>
                             <input type="file" @change="handleFileUpload" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
                              <p v-if="isEditing && !form.image" class="text-xs text-gray-500 mt-1">Deja vacío para mantener la actual.</p>
+                             <label v-if="isEditing && form.image_path && !form.image" class="mt-2 flex items-center gap-2 text-sm text-gray-700">
+                                <input v-model="form.remove_image" type="checkbox">
+                                Retirar imagen actual
+                             </label>
                         </div>
                         
                         <div class="flex justify-end space-x-3">
@@ -104,8 +109,9 @@ const form = ref({
     title: '',
     summary: '',
     content: '',
-    is_active: true,
-    image: null
+    is_active: false,
+    image: null,
+    remove_image: false
 });
 
 const fetchNews = async () => {
@@ -120,15 +126,16 @@ const fetchNews = async () => {
 const openModal = (item = null) => {
     isEditing.value = !!item;
     if (item) {
-        form.value = { ...item, image: null, is_active: !!item.is_active };
+        form.value = { ...item, image: null, remove_image: false, is_active: !!item.is_active };
     } else {
-        form.value = { id: null, title: '', summary: '', content: '', is_active: true, image: null };
+        form.value = { id: null, title: '', summary: '', content: '', is_active: false, image: null, remove_image: false };
     }
     showModal.value = true;
 };
 
 const handleFileUpload = (event) => {
     form.value.image = event.target.files[0];
+    if (form.value.image) form.value.remove_image = false;
 };
 
 const submitForm = async () => {
@@ -142,6 +149,9 @@ const submitForm = async () => {
         
         if (form.value.image) {
             formData.append('image', form.value.image);
+        }
+        if (form.value.remove_image) {
+            formData.append('remove_image', '1');
         }
 
         if (isEditing.value) {
