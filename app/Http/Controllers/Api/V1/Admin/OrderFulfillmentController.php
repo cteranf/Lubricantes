@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\AdminOrderFulfillmentResource;
 use App\Models\Order;
 use App\Services\OrderFulfillmentService;
 use Illuminate\Http\Request;
@@ -11,9 +12,26 @@ class OrderFulfillmentController extends Controller
 {
     public function __construct(private OrderFulfillmentService $fulfillment) {}
 
-    public function show(Order $order)
+    public function show(Request $request, Order $order)
     {
-        return response()->json($this->fulfillment->history($order));
+        $presentation = $this->fulfillment->history($order);
+        $presentation['order']->load([
+            'user:id,name',
+            'items' => fn ($items) => $items->select([
+                'order_items.id',
+                'order_items.order_id',
+                'order_items.product_id',
+                'order_items.product_name',
+                'order_items.warehouse_id',
+                'order_items.quantity',
+                'order_items.price',
+            ]),
+            'items.product:id,name',
+            'items.warehouse:id,name',
+            'items.reservation:inventory_reservations.id,inventory_reservations.order_item_id,inventory_reservations.status',
+        ]);
+
+        return response()->json(AdminOrderFulfillmentResource::make($presentation)->resolve($request));
     }
 
     public function approveTransfer(Request $request, Order $order)

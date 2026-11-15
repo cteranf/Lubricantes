@@ -243,6 +243,107 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk()->assertJsonStructure(['order' => ['items'], 'fulfillment' => ['status', 'label', 'actions', 'payment_status', 'reservation_status', 'warehouse', 'expires_at', 'history']]);
     }
 
+    public function test_admin_fulfillment_detail_projects_only_the_operational_order_allowlist(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 1, 'contra_entrega');
+        $order->update([
+            'checkout_token' => 'checkout-token-private-sentinel',
+            'payment_data' => [
+                'provider_payload' => 'provider-payload-private-sentinel',
+                'credential' => 'provider-credential-private-sentinel',
+            ],
+        ]);
+        Sanctum::actingAs($this->admin());
+
+        $response = $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk();
+        $json = $response->json();
+
+        $this->assertSame([
+            'id', 'user', 'items', 'payment_method', 'payment_status', 'delivery_type',
+            'has_payment_submission', 'payment_submission_status', 'pickup_branch_name_snapshot',
+            'pickup_address_snapshot', 'pickup_district_snapshot', 'pickup_business_hours_snapshot',
+            'pickup_instructions_snapshot', 'shipping_info', 'shipping_district_snapshot',
+            'shipping_zone_name_snapshot', 'shipping_amount', 'shipping_estimated_days_min_snapshot',
+            'shipping_estimated_days_max_snapshot',
+        ], array_keys($json['order']));
+        $this->assertSame(['name'], array_keys($json['order']['user']));
+        $this->assertSame([
+            'id', 'product', 'warehouse', 'reservation', 'quantity', 'price',
+        ], array_keys($json['order']['items'][0]));
+        $this->assertSame(['name'], array_keys($json['order']['items'][0]['product']));
+        $this->assertSame($product->name, $json['order']['items'][0]['product']['name']);
+        $this->assertSame(['name'], array_keys($json['order']['items'][0]['warehouse']));
+        $this->assertSame(['status'], array_keys($json['order']['items'][0]['reservation']));
+        $this->assertSame('reserved', $json['fulfillment']['status']);
+        $this->assertArrayHasKey('start_preparation', $json['fulfillment']['actions']);
+        $this->assertTrue($json['fulfillment']['actions']['start_preparation']);
+        $this->assertTrue($json['fulfillment']['picking_packing']['available']);
+        $this->assertSame('pending', $json['fulfillment']['picking_packing']['picking']['status']);
+        $this->assertArrayHasKey('start_picking', $json['fulfillment']['picking_packing']['actions']);
+        $this->assertArrayNotHasKey('checkout_token', $json['order']);
+        $this->assertArrayNotHasKey('payment_data', $json['order']);
+        $this->assertArrayNotHasKey('paymentSubmission', $json['order']);
+
+        $this->assertNoPrivateOrderFields($json);
+        $this->assertStringNotContainsString('checkout-token-private-sentinel', $response->getContent());
+        $this->assertStringNotContainsString('provider-payload-private-sentinel', $response->getContent());
+        $this->assertStringNotContainsString('provider-credential-private-sentinel', $response->getContent());
+    }
+
+    public function test_admin_fulfillment_detail_eager_loads_products_for_multiple_items_without_n_plus_one(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 1, 'contra_entrega');
+        Sanctum::actingAs($this->admin());
+        $captureQueries = true;
+        $queriesByRequest = [];
+        DB::listen(static function ($query) use (&$captureQueries, &$queriesByRequest): void {
+            if ($captureQueries && preg_match('/\\bfrom\\s+[`"]?products[`"]?(?:\\s|$)/i', $query->sql) === 1) {
+                $queriesByRequest[count($queriesByRequest)] = strtolower(preg_replace('/\\s+/', ' ', str_replace(['`', '"', '[', ']'], '', trim($query->sql))));
+            }
+        });
+
+        $smallResponse = $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk();
+        $smallQueryCount = count($queriesByRequest);
+        $captureQueries = false;
+
+        $products = collect([$product]);
+        foreach (range(1, 3) as $index) {
+            $additionalProduct = $this->product(5);
+            $products->push($additionalProduct);
+            OrderItem::query()->create([
+                'order_id' => $order->id,
+                'product_id' => $additionalProduct->id,
+                'product_name' => $additionalProduct->name,
+                'quantity' => 1,
+                'price' => '10.00',
+                'subtotal' => '10.00',
+            ]);
+        }
+
+        $queriesBeforeLargeRequest = count($queriesByRequest);
+        $captureQueries = true;
+        $largeResponse = $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk();
+        $captureQueries = false;
+        $largeQueries = array_slice($queriesByRequest, $queriesBeforeLargeRequest);
+
+        $this->assertCount(1, $smallResponse->json('order.items'));
+        $this->assertCount(4, $largeResponse->json('order.items'));
+        $this->assertLessThanOrEqual(4, $smallQueryCount, 'Product lookups must stay within a fixed bounded query count for one item.');
+        $this->assertLessThanOrEqual(4, count($largeQueries), 'Product lookups must stay within the same fixed bound as item count grows.');
+        $this->assertNotEmpty($largeQueries);
+        $boundedQueries = array_values(array_filter($largeQueries, fn (string $query) => preg_match('/\\bwhere\\b.*\\bid\\s+in\\s*\\(/', $query) === 1));
+        $this->assertNotEmpty($boundedQueries, 'The endpoint must fetch products for multiple items using a set query.');
+        $this->assertMatchesRegularExpression('/\\bid\\s+in\\s*\\([^)]*,/', implode(' ', $boundedQueries));
+        foreach ($largeQueries as $query) {
+            $this->assertDoesNotMatchRegularExpression('/\\bwhere\\b.*\\bproducts?\\.id\\s*=\\s*\\?/', $query);
+        }
+        foreach ($products as $product) {
+            $this->assertContains($product->name, collect($largeResponse->json('order.items'))->pluck('product.name')->all());
+        }
+    }
+
     public function test_legacy_order_preparation_never_duplicates_existing_sale(): void
     {
         $admin = $this->admin();
@@ -266,6 +367,16 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $id = $this->postJson('/api/v1/orders', $this->withShippingCoverage(['shipping_info' => ['address' => 'Av. Operativa', 'city' => 'Lima', 'phone' => '999'], 'payment_method' => $method, 'delivery_type' => 'delivery', 'items' => [['product_id' => $product->id, 'quantity' => $quantity]]]))->assertCreated()->json('id');
 
         return Order::with('items.reservation')->findOrFail($id);
+    }
+
+    private function assertNoPrivateOrderFields(array $value): void
+    {
+        foreach ($value as $key => $child) {
+            $this->assertNotContains($key, ['checkout_token', 'payment_data', 'paymentSubmission', 'provider_payload', 'credential']);
+            if (is_array($child)) {
+                $this->assertNoPrivateOrderFields($child);
+            }
+        }
     }
 
     private function product(int $stock): Product
