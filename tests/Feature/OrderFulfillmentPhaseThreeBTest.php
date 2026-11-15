@@ -6,6 +6,8 @@ use App\Models\InventoryMovement;
 use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
+use App\Models\OrderHandlingItem;
+use App\Models\OrderHandlingProcess;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\User;
@@ -344,6 +346,129 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         }
     }
 
+    public function test_fulfillment_detail_get_for_reserved_order_is_read_only_and_returns_initial_projection(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 2, 'contra_entrega');
+        $before = $order->fresh()->only(['status', 'fulfillment_status', 'tracking_status', 'updated_at']);
+        $before['updated_at'] = $order->fresh()->updated_at?->toISOString();
+        Sanctum::actingAs($this->admin());
+
+        [$firstResponse, $firstWrites] = $this->captureDatabaseWrites(fn () => $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk());
+        [$secondResponse, $secondWrites] = $this->captureDatabaseWrites(fn () => $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk());
+
+        $firstResponse->assertJsonPath('fulfillment.status', Order::FULFILLMENT_RESERVED)
+            ->assertJsonPath('fulfillment.picking_packing.available', true)
+            ->assertJsonPath('fulfillment.picking_packing.legacy', false)
+            ->assertJsonPath('fulfillment.picking_packing.picking.status', OrderHandlingProcess::PENDING)
+            ->assertJsonPath('fulfillment.picking_packing.packing.status', OrderHandlingProcess::PENDING)
+            ->assertJsonPath('fulfillment.picking_packing.picking.started_at', null)
+            ->assertJsonPath('fulfillment.picking_packing.actions.start_picking', false)
+            ->assertJsonPath('fulfillment.picking_packing.actions.mark_ready', false)
+            ->assertJsonPath('fulfillment.picking_packing.items.0.ordered_quantity', 2);
+        $this->assertSame($firstResponse->json(), $secondResponse->json());
+        $this->assertSame([], $firstWrites);
+        $this->assertSame([], $secondWrites);
+        $this->assertSame(0, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame(0, OrderHandlingItem::whereHas('process', fn ($query) => $query->where('order_id', $order->id))->count());
+        $after = $order->fresh();
+        $afterSnapshot = $after->only(['status', 'fulfillment_status', 'tracking_status']);
+        $afterSnapshot['updated_at'] = $after->updated_at?->toISOString();
+        $this->assertSame($before, $afterSnapshot);
+    }
+
+    public function test_fulfillment_detail_get_for_preparing_order_without_process_is_read_only(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 2, 'contra_entrega');
+        $order->update([
+            'status' => 'confirmed',
+            'fulfillment_status' => Order::FULFILLMENT_PREPARING,
+            'tracking_status' => 'processing',
+            'preparing_at' => now(),
+        ]);
+        $before = $order->fresh()->only(['status', 'fulfillment_status', 'tracking_status', 'preparing_at', 'updated_at']);
+        $before['preparing_at'] = $order->fresh()->preparing_at?->toISOString();
+        $before['updated_at'] = $order->fresh()->updated_at?->toISOString();
+        Sanctum::actingAs($this->admin());
+
+        [$response, $writes] = $this->captureDatabaseWrites(fn () => $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk());
+
+        $response->assertJsonPath('fulfillment.status', Order::FULFILLMENT_PREPARING)
+            ->assertJsonPath('fulfillment.actions.mark_ready', false)
+            ->assertJsonPath('fulfillment.picking_packing.picking.status', OrderHandlingProcess::PENDING)
+            ->assertJsonPath('fulfillment.picking_packing.picking.started_at', null)
+            ->assertJsonPath('fulfillment.picking_packing.packing.status', OrderHandlingProcess::PENDING)
+            ->assertJsonPath('fulfillment.picking_packing.actions.start_picking', true)
+            ->assertJsonPath('fulfillment.picking_packing.actions.update_picking', false)
+            ->assertJsonPath('fulfillment.picking_packing.items.0.picked_quantity', 0);
+        $this->assertSame([], $writes);
+        $this->assertSame(0, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame(0, OrderHandlingItem::whereHas('process', fn ($query) => $query->where('order_id', $order->id))->count());
+        $after = $order->fresh();
+        $afterSnapshot = $after->only(['status', 'fulfillment_status', 'tracking_status']);
+        $afterSnapshot['preparing_at'] = $after->preparing_at?->toISOString();
+        $afterSnapshot['updated_at'] = $after->updated_at?->toISOString();
+        $this->assertSame($before, $afterSnapshot);
+    }
+
+    public function test_fulfillment_detail_get_preserves_existing_process_and_items_without_writes(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 2, 'contra_entrega');
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $this->postJson($this->url($order, 'start-preparation'))->assertOk();
+        $process = OrderHandlingProcess::where('order_id', $order->id)->firstOrFail();
+        $handlingItem = OrderHandlingItem::where('order_handling_process_id', $process->id)->firstOrFail();
+        $handlingItem->update(['picked_quantity' => 1]);
+        $processFresh = $process->fresh();
+        $processBefore = $processFresh->only(['picking_status', 'packing_status']);
+        $processBefore['updated_at'] = $processFresh->updated_at?->toISOString();
+        $itemFresh = $handlingItem->fresh();
+        $itemBefore = $itemFresh->only(['picked_quantity', 'packed_quantity']);
+        $itemBefore['updated_at'] = $itemFresh->updated_at?->toISOString();
+
+        [$response, $writes] = $this->captureDatabaseWrites(fn () => $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertOk());
+
+        $response->assertJsonPath('fulfillment.picking_packing.items.0.picked_quantity', 1)
+            ->assertJsonPath('fulfillment.picking_packing.picking.status', OrderHandlingProcess::PENDING);
+        $this->assertSame([], $writes);
+        $this->assertSame(1, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame(1, OrderHandlingItem::where('order_handling_process_id', $process->id)->count());
+        $processAfter = $process->fresh();
+        $processAfterSnapshot = $processAfter->only(['picking_status', 'packing_status']);
+        $processAfterSnapshot['updated_at'] = $processAfter->updated_at?->toISOString();
+        $itemAfter = $handlingItem->fresh();
+        $itemAfterSnapshot = $itemAfter->only(['picked_quantity', 'packed_quantity']);
+        $itemAfterSnapshot['updated_at'] = $itemAfter->updated_at?->toISOString();
+        $this->assertSame($processBefore, $processAfterSnapshot);
+        $this->assertSame($itemBefore, $itemAfterSnapshot);
+    }
+
+    public function test_start_preparation_explicitly_initializes_handling_once_and_unauthorized_user_cannot_initialize(): void
+    {
+        $product = $this->product(5);
+        $order = $this->createOrder($product, 2, 'contra_entrega');
+        Sanctum::actingAs($order->user);
+        $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')->assertForbidden();
+        $this->postJson($this->url($order, 'start-preparation'))->assertForbidden();
+        $this->assertSame(0, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame(0, OrderHandlingItem::whereHas('process', fn ($query) => $query->where('order_id', $order->id))->count());
+
+        Sanctum::actingAs($this->admin());
+        $this->postJson($this->url($order, 'start-preparation'))->assertOk()
+            ->assertJsonPath('fulfillment.picking_packing.picking.status', OrderHandlingProcess::PENDING);
+        $process = OrderHandlingProcess::where('order_id', $order->id)->firstOrFail();
+        $itemsAfterFirstStart = OrderHandlingItem::where('order_handling_process_id', $process->id)->count();
+        $this->assertSame(1, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame($order->items()->count(), $itemsAfterFirstStart);
+
+        $this->postJson($this->url($order, 'start-preparation'))->assertOk();
+        $this->assertSame(1, OrderHandlingProcess::where('order_id', $order->id)->count());
+        $this->assertSame($itemsAfterFirstStart, OrderHandlingItem::where('order_handling_process_id', $process->id)->count());
+    }
+
     public function test_legacy_order_preparation_never_duplicates_existing_sale(): void
     {
         $admin = $this->admin();
@@ -377,6 +502,25 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
                 $this->assertNoPrivateOrderFields($child);
             }
         }
+    }
+
+    private function captureDatabaseWrites(callable $callback): array
+    {
+        $capturing = true;
+        $writes = [];
+        DB::listen(static function ($query) use (&$capturing, &$writes): void {
+            if ($capturing && preg_match('/^\\s*(?:insert|update|delete|replace)\\b/i', $query->sql) === 1) {
+                $writes[] = $query->sql;
+            }
+        });
+
+        try {
+            $result = $callback();
+        } finally {
+            $capturing = false;
+        }
+
+        return [$result, $writes];
     }
 
     private function product(int $stock): Product
