@@ -139,10 +139,18 @@
 
         <section v-if="newsState.loading || newsState.error || newsList.length" class="section-shell bg-slate-50" aria-labelledby="news-heading">
             <div class="site-container">
-                <div class="section-heading text-center"><p class="eyebrow">Consejos y novedades</p><h2 id="news-heading">Noticias y guías</h2></div>
+                <div class="section-heading text-center"><p class="eyebrow">Consejos y novedades</p><h2 id="news-heading">Noticias y guías</h2><p>Consejos y novedades para cuidar tu vehículo.</p></div>
                 <div v-if="newsState.loading" class="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3" aria-busy="true"><div v-for="index in 3" :key="index" class="surface-card overflow-hidden"><Skeleton width="100%" height="12rem" /><div class="space-y-3 p-5"><Skeleton width="80%" height="1.5rem" /><Skeleton width="100%" /><Skeleton width="70%" /></div></div></div>
                 <div v-else-if="newsState.error" class="state-panel mt-9" role="alert"><i class="pi pi-exclamation-circle" aria-hidden="true"></i><h3>No pudimos cargar las noticias</h3><p>El resto de la tienda continúa disponible.</p><button type="button" class="btn-outline" @click="loadNews">Reintentar</button></div>
-                <div v-else class="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3"><article v-for="news in newsList" :key="news.slug" class="surface-card overflow-hidden"><div class="flex aspect-[16/9] items-center justify-center overflow-hidden bg-slate-200"><img v-if="news.image_url" :src="news.image_url" :alt="news.title" class="h-full w-full object-cover" loading="lazy"><i v-else class="pi pi-book text-4xl text-slate-400" aria-hidden="true"></i></div><div class="p-5"><h3 class="text-xl font-bold text-slate-900">{{ news.title }}</h3><p v-if="news.summary" class="mt-3 line-clamp-3 leading-relaxed text-slate-600">{{ news.summary }}</p></div></article></div>
+                <div v-else-if="newsLayoutVariant(newsList.length) === 'featured'" class="mx-auto mt-9 max-w-4xl">
+                    <NewsCard :article="newsList[0]" :featured="true" heading-level="h3" />
+                </div>
+                <div v-else-if="newsLayoutVariant(newsList.length) !== 'none'" class="mx-auto mt-9 grid max-w-6xl grid-cols-1 gap-6" :class="newsLayoutVariant(newsList.length) === 'two' ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-3'">
+                    <NewsCard v-for="news in newsList" :key="news.slug" :article="news" heading-level="h3" />
+                </div>
+                <div v-if="!newsState.loading && !newsState.error && newsList.length" class="mt-8 text-center">
+                    <RouterLink to="/guias" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-blue-700 px-5 font-bold text-blue-800 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">Ver todas las guías <i class="pi pi-arrow-right" aria-hidden="true"></i></RouterLink>
+                </div>
             </div>
         </section>
     </AppLayout>
@@ -156,7 +164,9 @@ import Carousel from 'primevue/carousel';
 import Skeleton from 'primevue/skeleton';
 import api from '@/api';
 import ProductCard from '@/components/ProductCard.vue';
+import NewsCard from '@/components/NewsCard.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { NEWS_HOME_LIMIT, normalizeNewsPage, newsLayoutVariant } from '@/utils/newsPublic.mjs';
 
 const seoConfig = getSiteSeoConfig();
 useSiteSeo(() => ({
@@ -222,8 +232,8 @@ const loadProducts = () => runLoad(productsState, async () => {
     featuredProducts.value = (Array.isArray(response.data?.data) ? response.data.data : []).slice(0, 4);
 });
 const loadNews = () => runLoad(newsState, async () => {
-    const response = await api.get('/news', { params: { per_page: 3 } });
-    newsList.value = Array.isArray(response.data?.data) ? response.data.data : [];
+    const response = await api.get('/news', { params: { per_page: NEWS_HOME_LIMIT } });
+    newsList.value = normalizeNewsPage(response.data).items.slice(0, NEWS_HOME_LIMIT);
 });
 const markSlideImageFailed = image => { if (image) failedSlideImages[image] = true; };
 const markCategoryImageFailed = id => { if (id !== null && id !== undefined) failedCategoryImages[id] = true; };

@@ -14,6 +14,8 @@ const PaymentReturn = () => import('./views/PaymentReturn.vue');
 const OrderTracking = () => import('./views/OrderTracking.vue');
 import About from '@/views/About.vue';
 import Contact from '@/views/Contact.vue';
+const NewsIndex = () => import('@/views/NewsIndex.vue');
+const NewsDetail = () => import('@/views/NewsDetail.vue');
 const AdminDashboard = () => import('./views/admin/Dashboard.vue');
 import AdminProducts from '@/views/admin/Products.vue';
 // import AdminOrders from '@/views/admin/Orders.vue'; // Need to create or reuse
@@ -51,6 +53,8 @@ const routes = [
     { path: '/orders/:id/tracking', name: 'OrderTracking', component: OrderTracking, meta: { requiresAuth: true, noindex: true } },
     { path: '/about', name: 'About', component: About },
     { path: '/contact', component: Contact },
+    { path: '/guias', name: 'GuideIndex', component: NewsIndex },
+    { path: '/guias/:slug', name: 'GuideDetail', component: NewsDetail },
 
     // Admin Routes
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
