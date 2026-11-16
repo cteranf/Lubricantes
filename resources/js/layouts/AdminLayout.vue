@@ -1,23 +1,23 @@
 <template>
     <div class="admin-shell flex min-h-screen bg-slate-100" :class="{ 'sidebar-collapsed': isCollapsed && !isMobileViewport }">
-        <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/60 md:hidden" aria-hidden="true" @mousedown.self="closeMobileMenu"></div>
+        <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/60 lg:hidden" aria-hidden="true" @click.self="closeMobileMenu"></div>
 
         <aside
             id="admin-navigation"
             ref="sidebar"
-            class="fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col bg-slate-950 text-white shadow-2xl transition-transform md:static md:z-auto md:w-64 md:translate-x-0 md:shadow-none"
+            class="fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col bg-slate-950 text-white shadow-2xl transition-transform lg:static lg:z-auto lg:w-64 lg:translate-x-0 lg:shadow-none"
             :class="mobileOpen ? 'translate-x-0' : '-translate-x-full'"
             :aria-label="mobileOpen ? 'Menú administrativo' : undefined"
             @keydown="handleSidebarKeydown"
         >
-            <div class="flex h-16 items-center justify-between border-b border-slate-800 px-5">
-                <router-link :to="isTreasury ? '/treasury/payments' : '/admin/dashboard'" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isCollapsed && !isMobileViewport ? 'LubriStore Admin' : undefined" @click="closeMobileMenu"><span v-if="!isCollapsed || isMobileViewport">Lubri<span class="text-blue-400">Store</span> {{ isTreasury ? 'Tesorería' : 'Admin' }}</span><span v-else class="text-blue-400" aria-hidden="true">LS</span></router-link>
-                <button ref="closeButton" type="button" class="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 md:hidden" aria-label="Cerrar menú administrativo" @click="closeMobileMenu"><i class="pi pi-times" aria-hidden="true"></i></button>
-                <button v-if="!isMobileViewport" type="button" class="collapse-toggle flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :aria-label="isCollapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'" :title="isCollapsed ? 'Expandir menú lateral' : 'Contraer menú lateral'" @click="toggleCollapsed"><i :class="isCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'" aria-hidden="true"></i></button>
+            <div class="flex h-16 items-center justify-between border-b border-slate-800" :class="isSidebarCollapsed ? 'px-2' : 'px-5'">
+                <router-link :to="isTreasury ? '/treasury/payments' : '/admin/dashboard'" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isSidebarCollapsed ? (isTreasury ? 'LubriStore Tesorería' : 'LubriStore Admin') : undefined" @click="closeMobileMenu"><span v-if="!isSidebarCollapsed">Lubri<span class="text-blue-400">Store</span> {{ isTreasury ? 'Tesorería' : 'Admin' }}</span><span v-else class="text-sm text-blue-400" aria-hidden="true">LS</span></router-link>
+                <button ref="closeButton" type="button" class="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 lg:hidden" aria-label="Cerrar menú administrativo" @click="closeMobileMenu"><i class="pi pi-times" aria-hidden="true"></i></button>
+                <button v-if="!isMobileViewport" type="button" class="collapse-toggle flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :aria-label="isCollapsed ? 'Expandir menú' : 'Contraer menú'" aria-controls="admin-navigation" :aria-expanded="!isSidebarCollapsed" @click="toggleCollapsed"><i :class="isCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'" aria-hidden="true"></i></button>
             </div>
 
             <nav class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3" aria-label="Navegación administrativa">
-                <router-link v-for="item in directNavigation" :key="item.to" :to="item.to" active-class="bg-slate-800 text-blue-300 border-blue-400" class="admin-nav-link mb-1 flex min-h-10 items-center rounded-lg border-l-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" :data-label="item.label" :aria-label="item.label" :title="isSidebarCollapsed ? item.label : undefined" :aria-current="isRouteActive(item.to) ? 'page' : undefined" @click="closeMobileMenu">
+                <router-link v-for="item in directNavigation" :key="item.to" :to="item.to" active-class="bg-slate-800 text-blue-300 border-blue-400" class="admin-nav-link mb-1 flex min-h-10 items-center rounded-lg border-l-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" :data-label="item.label" :aria-label="item.label" :aria-current="isRouteActive(item.to) ? 'page' : undefined" @click="closeMobileMenu">
                     <i :class="[item.icon, { 'mr-0': isSidebarCollapsed }]" class="mr-3 w-5 shrink-0 text-center" aria-hidden="true"></i><span :class="{ 'sr-only': isSidebarCollapsed }">{{ item.label }}</span>
                     <span v-if="!isTreasury && item.to === '/admin/contact-inquiries' && pendingCount > 0" class="ml-auto flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-black text-white" :aria-label="`${pendingCount} consultas pendientes o en atención`">{{ pendingCount > 99 ? '99+' : pendingCount }}</span>
                 </router-link>
@@ -32,14 +32,14 @@
                             activeGroupId === group.id ? 'border-blue-400 bg-slate-800/80 text-white' : 'border-transparent text-slate-300',
                         ]"
                         :aria-label="group.label"
-                        :title="isSidebarCollapsed ? group.label : undefined"
+                        :data-label="group.label"
                         :aria-expanded="isGroupExpanded(group.id)"
                         :aria-controls="`admin-submenu-${group.id}`"
                         :aria-current="activeGroupId === group.id ? 'location' : undefined"
                         @click="toggleGroup(group.id)"
                     >
                         <i :class="[group.icon, { 'mr-0': isSidebarCollapsed }]" class="mr-3 w-5 shrink-0 text-center" aria-hidden="true"></i>
-                        <span class="min-w-0 flex-1 truncate" :class="{ 'sr-only': isSidebarCollapsed }">{{ group.label }}<span v-if="activeGroupId === group.id" class="sr-only">, sección actual</span></span>
+                        <span class="min-w-0 flex-1" :class="{ 'sr-only': isSidebarCollapsed }">{{ group.label }}<span v-if="activeGroupId === group.id" class="sr-only">, sección actual</span></span>
                         <i v-if="!isSidebarCollapsed" class="pi pi-chevron-down ml-auto text-xs transition-transform duration-150 motion-reduce:transition-none" :class="{ 'rotate-180': isGroupExpanded(group.id) }" aria-hidden="true"></i>
                     </button>
 
@@ -61,7 +61,7 @@
                                 :aria-current="isRouteActive(item.to) ? 'page' : undefined"
                                 @click="closeMobileMenu"
                             >
-                                <i :class="item.icon" class="mr-2.5 w-4 shrink-0 text-center" aria-hidden="true"></i><span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                                <i :class="item.icon" class="mr-2.5 w-4 shrink-0 text-center" aria-hidden="true"></i><span class="min-w-0 flex-1">{{ item.label }}</span>
                                 <span v-if="item.to === '/admin/contact-inquiries' && pendingCount > 0" class="ml-auto flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-black text-white" :aria-label="`${pendingCount} consultas pendientes o en atención`">{{ pendingCount > 99 ? '99+' : pendingCount }}</span>
                             </router-link>
                         </div>
@@ -69,15 +69,15 @@
                 </section>
             </nav>
             <div class="shrink-0 space-y-1 border-t border-slate-800 p-3">
-                <router-link :to="profileNavigation.to" active-class="bg-slate-800 text-blue-300 border-blue-400" class="admin-nav-link flex min-h-10 items-center rounded-lg border-l-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" :data-label="profileNavigation.label" :aria-label="profileNavigation.label" :title="isSidebarCollapsed ? profileNavigation.label : undefined" :aria-current="isRouteActive(profileNavigation.to) ? 'page' : undefined" @click="closeMobileMenu">
+                <router-link :to="profileNavigation.to" active-class="bg-slate-800 text-blue-300 border-blue-400" class="admin-nav-link flex min-h-10 items-center rounded-lg border-l-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" :data-label="profileNavigation.label" :aria-label="profileNavigation.label" :aria-current="isRouteActive(profileNavigation.to) ? 'page' : undefined" @click="closeMobileMenu">
                     <i :class="[profileNavigation.icon, { 'mr-0': isSidebarCollapsed }]" class="mr-3 w-5 shrink-0 text-center" aria-hidden="true"></i><span :class="{ 'sr-only': isSidebarCollapsed }">{{ profileNavigation.label }}</span>
                 </router-link>
-                <button type="button" class="logout-button flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-red-300 transition hover:bg-red-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" data-label="Cerrar sesión" aria-label="Cerrar sesión" :title="isSidebarCollapsed ? 'Cerrar sesión' : undefined" @click="logout"><i class="pi pi-sign-out mr-3 w-5 shrink-0 text-center" :class="{ 'mr-0': isSidebarCollapsed }" aria-hidden="true"></i><span :class="{ 'sr-only': isSidebarCollapsed }">Cerrar sesión</span></button>
+                <button type="button" class="logout-button flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-semibold text-red-300 transition hover:bg-red-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-400" :class="{ 'justify-center px-2': isSidebarCollapsed }" data-label="Cerrar sesión" aria-label="Cerrar sesión" @click="logout"><i class="pi pi-sign-out mr-3 w-5 shrink-0 text-center" :class="{ 'mr-0': isSidebarCollapsed }" aria-hidden="true"></i><span :class="{ 'sr-only': isSidebarCollapsed }">Cerrar sesión</span></button>
             </div>
         </aside>
 
         <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <header class="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm md:hidden">
+            <header class="flex min-h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm lg:hidden">
                 <span class="font-black text-slate-900">Panel administrativo</span>
                 <button ref="menuButton" type="button" class="flex h-11 w-11 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700" :aria-expanded="mobileOpen" aria-controls="admin-navigation" aria-label="Abrir menú administrativo" @click="openMobileMenu"><i class="pi pi-bars" aria-hidden="true"></i></button>
             </header>
@@ -203,7 +203,7 @@ function reconcileActiveGroup() {
     openGroupId.value = nextGroupId;
     persistOpenGroup(nextGroupId);
 }
-function updateViewport(event) { isMobileViewport.value = event.matches; if (event.matches) closeMobileMenu(false); }
+function updateViewport(event) { isMobileViewport.value = event.matches; if (mobileOpen.value) closeMobileMenu(false); }
 function handleSidebarKeydown(event) {
     if (!mobileOpen.value) return;
     if (event.key === 'Escape') { event.preventDefault(); closeMobileMenu(); return; }
@@ -217,7 +217,7 @@ async function logout() { closeMobileMenu(false); await authStore.logout(); rout
 function onChanged() { loadPendingCount(); }
 
 watch([() => route.path, visibleGroupSignature], reconcileActiveGroup, { immediate: true });
-watch(() => route.fullPath, () => { closeMobileMenu(false); loadPendingCount(); });
+watch(() => route.fullPath, () => { closeMobileMenu(); loadPendingCount(); });
 onMounted(() => {
     try {
         const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
@@ -233,16 +233,16 @@ onBeforeUnmount(() => { document.body.style.overflow = previousOverflow; mediaQu
 .admin-shell.sidebar-collapsed aside { width: 5rem; }
 .admin-shell.sidebar-collapsed .admin-nav-link { position: relative; }
 .admin-shell.sidebar-collapsed .admin-nav-link:hover::after,
-.admin-shell.sidebar-collapsed .admin-nav-link:focus-visible::after { content: attr(data-label); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; transform: translateY(-50%); white-space: nowrap; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
+.admin-shell.sidebar-collapsed .admin-nav-link:focus-visible::after { content: attr(data-label); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; transform: translateY(-50%); max-width: min(14rem, calc(100vw - 6rem)); white-space: normal; overflow-wrap: anywhere; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; line-height: 1.25; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
 .admin-shell.sidebar-collapsed .logout-button { position: relative; white-space: nowrap; }
 .admin-shell.sidebar-collapsed .logout-button:hover::after,
-.admin-shell.sidebar-collapsed .logout-button:focus-visible::after { content: attr(data-label); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; transform: translateY(-50%); white-space: nowrap; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
+.admin-shell.sidebar-collapsed .logout-button:focus-visible::after { content: attr(data-label); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; max-width: min(14rem, calc(100vw - 6rem)); transform: translateY(-50%); white-space: normal; overflow-wrap: anywhere; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; line-height: 1.25; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
 .admin-shell.sidebar-collapsed .admin-group-button { position: relative; white-space: nowrap; }
 .admin-shell.sidebar-collapsed .admin-group-button:hover::after,
-.admin-shell.sidebar-collapsed .admin-group-button:focus-visible::after { content: attr(title); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; transform: translateY(-50%); white-space: nowrap; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
+.admin-shell.sidebar-collapsed .admin-group-button:focus-visible::after { content: attr(data-label); position: absolute; left: calc(100% + .5rem); top: 50%; z-index: 100; max-width: min(14rem, calc(100vw - 6rem)); transform: translateY(-50%); white-space: normal; overflow-wrap: anywhere; border-radius: .375rem; background: #0f172a; padding: .4rem .6rem; color: white; font-size: .75rem; line-height: 1.25; pointer-events: none; box-shadow: 0 4px 12px rgb(15 23 42 / .25); }
 .admin-submenu-enter-active, .admin-submenu-leave-active { transition: opacity 140ms ease, transform 140ms ease; }
 .admin-submenu-enter-from, .admin-submenu-leave-to { opacity: 0; transform: translateY(-.25rem); }
-@media (prefers-reduced-motion: reduce) { .admin-shell aside { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .admin-shell aside, .admin-nav-link, .admin-group-button, .logout-button { transition: none; } }
 @media (prefers-reduced-motion: reduce) { .admin-submenu-enter-active, .admin-submenu-leave-active { transition: none; } }
 @media (max-width: 1023px) { .admin-shell aside { width: 18rem; } }
 </style>
