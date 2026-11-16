@@ -513,7 +513,8 @@ class AdminOrdersFrontendTest extends TestCase
         $normalized = preg_replace('/\s+/', ' ', $view);
 
         $this->assertStringContainsString('function closeModal() { invalidateModalActions(); detailSequence++; openingOrderId.value = null; detailLoading.value = false; selectedOrder.value = null;', $normalized);
-        $this->assertStringContainsString('async function openOrder(order) { if (detailLoading.value && openingOrderId.value === order.id) return; invalidateModalActions(); const sequence = ++detailSequence;', $normalized);
+        $this->assertStringContainsString('async function openOrder(order, event = null) { if (detailLoading.value && openingOrderId.value === order.id) return; const isOpeningDialog = selectedOrder.value === null;', $normalized);
+        $this->assertStringContainsString('invalidateModalActions(); const sequence = ++detailSequence;', $normalized);
         $this->assertStringContainsString('onBeforeUnmount(() => { componentMounted = false;', $normalized);
         $this->assertStringContainsString('const targetOrderId = targetOrder.id', $normalized);
         $this->assertStringContainsString('modalSequence: targetModalSequence', $normalized);
@@ -655,8 +656,8 @@ class AdminOrdersFrontendTest extends TestCase
             'const activeFilterTags = computed(() => {',
             'function removeFilter(key)',
             'return list.applyFilters()',
-            'function openOrder(order)',
-            '@click="openOrder(row)"',
+            'async function openOrder(order, event = null)',
+            '@click="openOrder(row, $event)"',
             ':disabled="detailLoading && openingOrderId === row.id"',
             'aria-live="polite"',
             '@media (prefers-reduced-motion: reduce)',
@@ -671,5 +672,60 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringNotContainsString('row.tracking_status', $view);
         $this->assertDoesNotMatchRegularExpression('/(?:ordersByStatus|globalOrderTotals|kpiCards)/i', $view);
         $this->assertStringNotContainsString('v-html', $view);
+    }
+
+    public function test_manage_order_dialog_prioritizes_real_operations_and_preserves_accessible_modal_flow(): void
+    {
+        $view = file_get_contents(resource_path('js/views/admin/Orders.vue'));
+        $handling = file_get_contents(resource_path('js/components/admin/OrderPickingPackingPanel.vue'));
+        $delivery = file_get_contents(resource_path('js/components/admin/OrderDeliveryPanel.vue'));
+        $normalizedView = preg_replace('/\s+/', ' ', $view);
+        $normalizedHandling = preg_replace('/\s+/', ' ', $handling);
+        $normalizedDelivery = preg_replace('/\s+/', ' ', $delivery);
+
+        $this->assertStringContainsString('role="dialog" aria-modal="true" aria-labelledby="order-dialog-title"', $view);
+        $this->assertStringContainsString('aria-describedby="order-dialog-description"', $view);
+        $this->assertStringContainsString('.order-dialog:focus', $view);
+        $this->assertStringNotContainsString('.order-dialog:focus { outline: none;', $view);
+        $this->assertStringContainsString('@keydown.esc.prevent.stop="closeModal"', $view);
+        $this->assertStringContainsString('@keydown.tab="trapModalFocus"', $view);
+        $this->assertStringContainsString('manageTrigger.value.focus()', $view);
+        $this->assertStringContainsString('@click="openOrder(row, $event)"', $view);
+        $this->assertStringContainsString('max-h-[calc(100dvh-1rem)] max-w-6xl overflow-y-auto', $view);
+        $this->assertStringContainsString('Total registrado', $view);
+        $this->assertStringContainsString('Progreso operativo', $view);
+        $this->assertSame(['reservation', 'preparation', 'picking', 'packing', 'ready', 'completion'], $this->operationalStageKeys($view));
+        $this->assertStringContainsString('const actions = fulfillment.value?.actions || {}', $view);
+        $this->assertStringContainsString('function runAction(action)', $view);
+        $this->assertStringContainsString('if (!targetOrder || actionLoading.value) return;', $view);
+        $this->assertStringContainsString('Siguiente acción autorizada', $view);
+        $this->assertLessThan(strpos($view, 'Siguiente acción autorizada'), strpos($view, '<OrderPickingPackingPanel'));
+        $this->assertStringContainsString('fulfillment.actions?.mark_ready', $view);
+        $this->assertStringContainsString('fulfillment.actions?.mark_picked_up', $view);
+        $this->assertStringContainsString('fulfillment.actions?.mark_delivered', $view);
+        $this->assertStringContainsString('fulfillment.actions?.cancel', $view);
+        $this->assertStringContainsString('role="alert" aria-live="assertive"', $view);
+        $this->assertStringContainsString('fulfillment.history?.length', $view);
+        $this->assertMatchesRegularExpression('/if\s*\(\s*busy\.value\s*\)\s*return\s+false\s*;/', $normalizedHandling);
+        $this->assertStringContainsString('summary.incidents?.some((incident) => incident.status === \'open\')', $handling);
+        $this->assertLessThan(strpos($handling, '<OperationCard'), strpos($handling, 'aria-labelledby="handling-incidents-title"'));
+        $this->assertStringContainsString("'role':'progressbar'", $normalizedHandling);
+        $this->assertStringContainsString('if(busy.value)return false;', $normalizedDelivery);
+        $this->assertStringContainsString('loadError.value=true', $normalizedDelivery);
+        $this->assertStringContainsString('data.value?.actions?.[action]', $normalizedDelivery);
+        $this->assertStringContainsString("primaryDeliveryAction === 'dispatch'", $delivery);
+        $this->assertStringContainsString('data.actions.cancel', $delivery);
+        $this->assertStringContainsString('aria-labelledby="delivery-confirm-title"', $delivery);
+        $this->assertStringNotContainsString('checkout_token', $normalizedView);
+        $this->assertStringNotContainsString('payment_data', $normalizedView);
+    }
+
+    private function operationalStageKeys(string $view): array
+    {
+        $matched = preg_match('/const operationalStages = computed\(\(\) => \{(.*?)\n\}\);/s', $view, $matches);
+        $this->assertSame(1, $matched, 'The operational timeline should be derived from the current projected records.');
+        preg_match_all("/key: '([^']+)'/", $matches[1], $keys);
+
+        return $keys[1];
     }
 }

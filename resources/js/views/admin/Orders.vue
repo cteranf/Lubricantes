@@ -144,7 +144,7 @@
                     <template #cell-reservation_status="{ row }"><Tag :value="reservationLabel(row.reservation_status)" :severity="reservationSeverity(row.reservation_status)" /></template>
                     <template #cell-delivery_type="{ row }"><span class="text-sm font-medium text-slate-700">{{ deliveryLabel(row) }}</span></template>
                     <template #cell-created_at="{ row }"><span class="whitespace-nowrap text-sm text-slate-600">{{ formatDate(row.created_at) }}</span></template>
-                    <template #actions="{ row }"><Button type="button" label="Gestionar" icon="pi pi-eye" size="small" outlined :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row)" /></template>
+                        <template #actions="{ row }"><Button type="button" label="Gestionar" icon="pi pi-eye" size="small" outlined :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row, $event)" /></template>
                 </AdminDataTable>
                 </div>
                 <div class="space-y-3 md:hidden" aria-label="Pedidos de esta página" :aria-busy="list.loading.value">
@@ -159,7 +159,7 @@
                             <div><dt class="text-xs font-medium text-slate-500">Método de pago</dt><dd class="mt-0.5 text-slate-700">{{ paymentMethodLabel(row.payment_method) }}</dd></div>
                             <div><dt class="text-xs font-medium text-slate-500">Almacén · reserva</dt><dd class="mt-0.5 break-words text-slate-700">{{ row.warehouse_name || '—' }} · {{ reservationLabel(row.reservation_status) }}</dd></div>
                         </dl>
-                        <Button type="button" label="Gestionar" icon="pi pi-eye" class="w-full" size="small" :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row)" />
+                        <Button type="button" label="Gestionar" icon="pi pi-eye" class="w-full" size="small" :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row, $event)" />
                     </article>
                     <div v-if="!list.loading.value && !list.rows.value.length && !list.error.value" class="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center" role="status">
                         <i class="pi pi-inbox mb-3 text-2xl text-slate-400" aria-hidden="true" />
@@ -174,21 +174,98 @@
             </section>
         </div>
 
-        <div v-if="selectedOrder" class="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4" @keydown.esc="closeModal">
-            <div class="mx-auto my-8 max-w-4xl rounded-lg bg-white p-6 shadow-xl" role="dialog" aria-modal="true" :aria-labelledby="'order-dialog-title'">
-                <div class="mb-5 flex justify-between gap-3"><div><h2 id="order-dialog-title" class="text-xl font-bold">Pedido #{{ selectedOrder.id }}</h2><p class="text-slate-500">{{ selectedOrder.user?.name }} · {{ selectedOrder.payment_method }} · Pago {{ selectedOrder.payment_status }}</p></div><button type="button" class="text-2xl" aria-label="Cerrar gestión del pedido" @click="closeModal">&times;</button></div>
-                <div v-if="detailLoading" class="p-8 text-center" role="status">Cargando detalle…</div>
-                <div v-else-if="detailError" class="rounded bg-red-50 p-4 text-red-800" role="alert">{{ detailError }} <button type="button" class="underline" @click="openOrder(selectedOrder)">Reintentar</button></div>
-                <template v-else>
-                    <div class="mb-5 grid gap-3 md:grid-cols-3"><Info label="Estado operativo" :value="fulfillment.label"/><Info label="Almacén reservado" :value="fulfillment.warehouse?.name || '—'"/><Info label="Reserva" :value="`${fulfillment.reservation_status} · ${fulfillment.expires_at ? formatDate(fulfillment.expires_at) : 'sin vencimiento'}`"/><Info label="Preparación" :value="stepText(fulfillment.preparing_at, fulfillment.prepared_by)"/><Info :label="selectedOrder.delivery_type === 'pickup' ? 'Listo para recoger' : 'Listo'" :value="stepText(fulfillment.ready_at, fulfillment.ready_by)"/><Info :label="selectedOrder.delivery_type === 'pickup' ? 'Recogido' : 'Entrega'" :value="stepText(fulfillment.picked_up_at || fulfillment.delivered_at, fulfillment.delivered_by)"/></div>
-                    <div v-if="selectedOrder.delivery_type === 'pickup'" class="mb-5 rounded-lg border border-blue-200 bg-blue-50 p-4"><b>Recojo en sede · {{ selectedOrder.pickup_branch_name_snapshot || 'Sede histórica' }}</b><p class="text-sm">{{ selectedOrder.pickup_address_snapshot }}<template v-if="selectedOrder.pickup_district_snapshot"> — {{ selectedOrder.pickup_district_snapshot }}</template></p><p v-if="selectedOrder.pickup_business_hours_snapshot" class="text-sm">Horario: {{ selectedOrder.pickup_business_hours_snapshot }}</p><p v-if="selectedOrder.pickup_instructions_snapshot" class="text-sm">{{ selectedOrder.pickup_instructions_snapshot }}</p><p class="mt-2 text-sm"><b>Plazo:</b> {{ deadlineLabel(fulfillment.pickup_deadline_status) }}<template v-if="fulfillment.pickup_deadline_at"> · hasta {{ formatDate(fulfillment.pickup_deadline_at) }}</template></p></div>
-                    <div v-else class="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4"><b>Envío a domicilio</b><p class="text-sm">{{ selectedOrder.shipping_info?.address }}<template v-if="selectedOrder.shipping_district_snapshot"> — {{ selectedOrder.shipping_district_snapshot }}</template></p><p class="text-sm">Zona: {{ selectedOrder.shipping_zone_name_snapshot || 'Configuración histórica' }} · Envío S/ {{ selectedOrder.shipping_amount || '0.00' }}</p><p v-if="selectedOrder.shipping_estimated_days_min_snapshot != null" class="text-sm">Plazo estimado: {{ selectedOrder.shipping_estimated_days_min_snapshot }}–{{ selectedOrder.shipping_estimated_days_max_snapshot }} días</p></div>
-                    <div v-if="selectedOrder.payment_method === 'transferencia' && selectedOrder.has_payment_submission" class="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900"><span class="font-semibold">{{ paymentSubmissionLabel(selectedOrder.payment_submission_status) }}</span><p class="mt-1 text-sm">Este pago se gestiona desde el flujo de Tesorería.</p></div>
-                    <div class="mb-6 flex flex-wrap gap-3"><button v-if="fulfillment.actions?.approve_payment && !selectedOrder.has_payment_submission" type="button" class="rounded bg-emerald-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('approve')">Aprobar transferencia</button><button v-if="fulfillment.actions?.start_preparation" type="button" class="rounded bg-blue-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('start')">Iniciar preparación</button><button v-if="fulfillment.actions?.mark_ready" type="button" class="rounded bg-indigo-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('ready')">{{ selectedOrder.delivery_type === 'pickup' ? 'Listo para recoger' : 'Marcar como listo' }}</button><button v-if="fulfillment.actions?.mark_picked_up" type="button" class="rounded bg-green-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('picked')">Pedido recogido</button><button v-if="fulfillment.actions?.mark_delivered" type="button" class="rounded bg-green-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('delivered')">Marcar como entregado</button><button v-if="fulfillment.actions?.cancel" type="button" class="rounded bg-red-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50" :disabled="actionLoading" @click="confirmAction('cancel')">Cancelar pedido</button></div>
-                    <OrderPickingPackingPanel v-if="handling" :order-id="selectedOrder.id" :summary="handling" @updated="handlingUpdated"/><OrderDeliveryPanel v-if="selectedOrder.delivery_type !== 'pickup' && (fulfillment.status === 'ready' || fulfillment.status === 'delivered')" :order-id="selectedOrder.id" :initial="delivery" @updated="deliveryUpdated"/>
-                    <h3 class="mb-2 border-b pb-2 font-bold">Productos</h3><div v-for="item in selectedOrder.items" :key="item.id" class="flex justify-between border-b py-2"><div>{{ item.product?.name }}<div class="text-xs text-slate-500">{{ item.warehouse?.name }} · reserva {{ item.reservation?.status || 'legacy' }}</div></div><b>{{ item.quantity }} × S/ {{ item.price }}</b></div>
-                    <h3 class="mb-2 mt-6 border-b pb-2 font-bold">Historial operativo</h3><div v-if="!fulfillment.history?.length" class="py-3 text-slate-500">Sin transiciones registradas.</div><div v-for="entry in fulfillment.history" :key="entry.id" class="border-l-4 border-blue-300 py-2 pl-3"><b>{{ stateLabel(entry.from_status) }} → {{ stateLabel(entry.to_status) }}</b><div class="text-xs text-slate-500">{{ formatDate(entry.created_at) }} · {{ entry.user?.name || 'Sistema' }}</div><p v-if="entry.observation" class="text-sm">{{ entry.observation }}</p></div>
-                </template>
+        <div v-if="selectedOrder" class="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 p-2 sm:p-4" @click.self="closeModal">
+            <div ref="orderDialog" class="order-dialog mx-auto my-2 max-h-[calc(100dvh-1rem)] max-w-6xl overflow-y-auto rounded-2xl bg-slate-50 shadow-2xl sm:my-4 sm:max-h-[calc(100dvh-2rem)]" role="dialog" aria-modal="true" aria-labelledby="order-dialog-title" aria-describedby="order-dialog-description" tabindex="-1" @keydown.esc.prevent.stop="closeModal" @keydown.tab="trapModalFocus">
+                <header class="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Gestión operativa</p>
+                            <div class="mt-1 flex flex-wrap items-center gap-2">
+                                <h2 id="order-dialog-title" class="text-xl font-bold text-slate-950 sm:text-2xl">Pedido #{{ selectedOrder.id }}</h2>
+                                <Tag v-if="fulfillment.status" :value="stateLabel(fulfillment.status, selectedOrder)" :severity="stateSeverity(fulfillment.status)" :class="stateClass(fulfillment.status)" />
+                            </div>
+                            <p id="order-dialog-description" class="mt-1 text-sm text-slate-600">{{ selectedOrder.user?.name || selectedOrder.customer_name || 'Cliente no disponible' }} · {{ deliveryLabel(selectedOrder) }}</p>
+                        </div>
+                        <Button type="button" label="Cerrar" icon="pi pi-times" severity="secondary" text aria-label="Cerrar gestión del pedido y volver al listado" @click="closeModal" />
+                    </div>
+                    <div class="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                        <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-xs text-slate-500">Total registrado</span><strong class="tabular-nums text-slate-900">{{ moneyLabel(selectedOrder.total) }}</strong></div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-xs text-slate-500">Pago</span><strong>{{ paymentStatusLabel(selectedOrder.payment_status) }}</strong><span class="block text-xs text-slate-600">{{ paymentMethodLabel(selectedOrder.payment_method) }}</span></div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-xs text-slate-500">Almacén</span><strong>{{ fulfillment.warehouse?.name || '—' }}</strong></div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-xs text-slate-500">Reserva</span><strong>{{ reservationLabel(fulfillment.reservation_status) }}</strong><span v-if="fulfillment.expires_at" class="block text-xs text-slate-600">Vence {{ formatDate(fulfillment.expires_at) }}</span></div>
+                    </div>
+                    <p v-if="selectedOrder.payment_method === 'transferencia' && selectedOrder.has_payment_submission" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+                        {{ paymentSubmissionLabel(selectedOrder.payment_submission_status) }}. Este pago se gestiona desde el flujo de Tesorería.
+                    </p>
+                </header>
+
+                <div class="space-y-5 p-4 sm:p-6">
+                    <div v-if="detailLoading" class="rounded-xl border border-blue-100 bg-white p-8 text-center text-slate-700" role="status" aria-live="polite"><i class="pi pi-spin pi-spinner mr-2" aria-hidden="true" />Cargando la gestión del pedido…</div>
+                    <div v-else-if="detailError" class="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900 sm:flex-row sm:items-center sm:justify-between" role="alert" aria-live="assertive"><span>{{ detailError }}</span><Button type="button" label="Reintentar" icon="pi pi-refresh" severity="danger" outlined :disabled="detailLoading" @click="openOrder(selectedOrder)" /></div>
+                    <template v-else>
+                        <section aria-labelledby="order-progress-title" class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                            <div class="mb-4 flex flex-wrap items-end justify-between gap-2">
+                                <div><h3 id="order-progress-title" class="text-lg font-bold text-slate-900">Progreso operativo</h3><p class="text-sm text-slate-600">Etapas informativas basadas en los registros actuales.</p></div>
+                                <p class="text-sm font-semibold text-slate-700" role="status">{{ activeIncidentCount ? `${activeIncidentCount} incidencia${activeIncidentCount === 1 ? '' : 's'} abierta${activeIncidentCount === 1 ? '' : 's'}` : 'Sin incidencias abiertas' }}</p>
+                            </div>
+                            <ol class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Etapas del pedido">
+                                <li v-for="stage in operationalStages" :key="stage.key" class="rounded-xl border p-3" :class="stageClass(stage.state)">
+                                    <div class="flex items-start gap-3"><span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/80"><i :class="stageIcon(stage.state)" aria-hidden="true" /></span><div class="min-w-0"><h4 class="font-semibold">{{ stage.label }}</h4><p class="text-sm">{{ stage.detail }}</p><span class="mt-1 inline-block text-xs font-bold">{{ stageLabel(stage.state) }}</span></div></div>
+                                </li>
+                            </ol>
+                        </section>
+
+                        <section v-if="selectedOrder.delivery_type === 'pickup'" aria-labelledby="order-destination-title" class="rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:p-5">
+                            <h3 id="order-destination-title" class="font-bold text-blue-950">Recojo en sede · {{ selectedOrder.pickup_branch_name_snapshot || 'Sede histórica' }}</h3>
+                            <p class="mt-1 text-sm text-blue-900">{{ selectedOrder.pickup_address_snapshot || 'Dirección no disponible' }}<template v-if="selectedOrder.pickup_district_snapshot"> — {{ selectedOrder.pickup_district_snapshot }}</template></p>
+                            <p v-if="selectedOrder.pickup_business_hours_snapshot" class="mt-1 text-sm text-blue-900">Horario: {{ selectedOrder.pickup_business_hours_snapshot }}</p>
+                            <p v-if="selectedOrder.pickup_instructions_snapshot" class="mt-1 text-sm text-blue-900">{{ selectedOrder.pickup_instructions_snapshot }}</p>
+                            <p class="mt-3 text-sm text-blue-950"><b>Plazo:</b> {{ deadlineLabel(fulfillment.pickup_deadline_status) }}<template v-if="fulfillment.pickup_deadline_at"> · hasta {{ formatDate(fulfillment.pickup_deadline_at) }}</template></p>
+                        </section>
+                        <section v-else aria-labelledby="order-destination-title" class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                            <h3 id="order-destination-title" class="font-bold text-slate-900">Envío a domicilio</h3>
+                            <p class="mt-1 text-sm text-slate-700">{{ selectedOrder.shipping_info?.address || 'Dirección no disponible' }}<template v-if="selectedOrder.shipping_district_snapshot"> — {{ selectedOrder.shipping_district_snapshot }}</template></p>
+                            <p class="mt-1 text-sm text-slate-700">Zona: {{ selectedOrder.shipping_zone_name_snapshot || 'Configuración histórica' }} · Envío {{ moneyLabel(selectedOrder.shipping_amount) }}</p>
+                            <p v-if="selectedOrder.shipping_estimated_days_min_snapshot != null" class="mt-1 text-sm text-slate-700">Plazo estimado registrado: {{ selectedOrder.shipping_estimated_days_min_snapshot }}–{{ selectedOrder.shipping_estimated_days_max_snapshot }} días</p>
+                        </section>
+
+                        <OrderPickingPackingPanel v-if="handling" :order-id="selectedOrder.id" :summary="handling" @updated="handlingUpdated" />
+                        <section v-if="!handling?.items?.length && selectedOrder.items?.length" class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5" aria-labelledby="order-products-title">
+                            <h3 id="order-products-title" class="font-bold text-slate-900">Productos del pedido</h3>
+                            <ul class="mt-3 divide-y divide-slate-100">
+                                <li v-for="item in selectedOrder.items" :key="item.id" class="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+                                    <div class="min-w-0"><p class="font-semibold text-slate-900">{{ item.product?.name || 'Producto no disponible' }}</p><p class="text-xs text-slate-600">{{ item.warehouse?.name || 'Almacén no disponible' }} · reserva {{ reservationLabel(item.reservation?.status) }}</p></div>
+                                    <p class="shrink-0 font-semibold tabular-nums text-slate-800">{{ item.quantity }} × {{ moneyLabel(item.price) }}</p>
+                                </li>
+                            </ul>
+                        </section>
+                        <section v-if="fulfillment.actions?.approve_payment || fulfillment.actions?.start_preparation || fulfillment.actions?.mark_ready || fulfillment.actions?.mark_picked_up || fulfillment.actions?.mark_delivered || fulfillment.actions?.cancel" aria-labelledby="order-actions-title" class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                            <div class="mb-3"><h3 id="order-actions-title" class="font-bold text-slate-900">Siguiente acción autorizada</h3><p class="text-sm text-slate-600">Las acciones disponibles corresponden al estado confirmado por el sistema.</p></div>
+                            <div class="flex flex-wrap gap-2">
+                                <Button v-if="fulfillment.actions?.approve_payment && !selectedOrder.has_payment_submission" type="button" label="Aprobar transferencia" icon="pi pi-check" severity="success" :outlined="primaryActionName !== 'approve'" :disabled="actionLoading" @click="confirmAction('approve')" />
+                                <Button v-if="fulfillment.actions?.start_preparation" type="button" label="Iniciar preparación" icon="pi pi-play" :outlined="primaryActionName !== 'start'" :disabled="actionLoading" @click="confirmAction('start')" />
+                                <Button v-if="fulfillment.actions?.mark_ready" type="button" :label="selectedOrder.delivery_type === 'pickup' ? 'Listo para recoger' : 'Marcar como listo'" icon="pi pi-check-circle" severity="info" :outlined="primaryActionName !== 'ready'" :disabled="actionLoading" @click="confirmAction('ready')" />
+                                <Button v-if="fulfillment.actions?.mark_picked_up" type="button" label="Confirmar recojo" icon="pi pi-box" severity="success" :outlined="primaryActionName !== 'picked'" :disabled="actionLoading" @click="confirmAction('picked')" />
+                                <Button v-if="fulfillment.actions?.mark_delivered" type="button" label="Marcar como entregado" icon="pi pi-check-circle" severity="success" :outlined="primaryActionName !== 'delivered'" :disabled="actionLoading" @click="confirmAction('delivered')" />
+                                <Button v-if="fulfillment.actions?.cancel" type="button" label="Cancelar pedido" icon="pi pi-ban" severity="danger" outlined :disabled="actionLoading" @click="confirmAction('cancel')" />
+                            </div>
+                            <p v-if="actionLoading" class="mt-3 text-sm text-blue-800" role="status" aria-live="polite">Procesando la acción…</p>
+                        </section>
+                        <OrderDeliveryPanel v-if="fulfillment.actions?.manage_delivery || (selectedOrder.delivery_type !== 'pickup' && (fulfillment.status === 'ready' || fulfillment.status === 'delivered'))" :order-id="selectedOrder.id" :initial="delivery" @updated="deliveryUpdated" />
+
+                        <section aria-labelledby="order-history-title" class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                            <h3 id="order-history-title" class="font-bold text-slate-900">Historial operativo <span class="text-sm font-normal text-slate-500">({{ fulfillment.history?.length || 0 }})</span></h3>
+                            <p v-if="!fulfillment.history?.length" class="mt-2 text-sm text-slate-600">Sin transiciones registradas.</p>
+                            <ol v-else class="mt-3 space-y-3">
+                                <li v-for="entry in fulfillment.history" :key="entry.id" class="border-l-2 border-blue-300 py-1 pl-3">
+                                    <p class="font-semibold text-slate-900">{{ stateLabel(entry.from_status) }} → {{ stateLabel(entry.to_status) }}</p>
+                                    <p class="text-xs text-slate-600">{{ formatDate(entry.created_at) }} · {{ entry.user?.name || 'Sistema' }}</p>
+                                    <p v-if="entry.observation" class="mt-1 text-sm text-slate-700">{{ entry.observation }}</p>
+                                </li>
+                            </ol>
+                        </section>
+                    </template>
+                </div>
             </div>
         </div>
     </AdminLayout>
@@ -335,6 +412,8 @@ function setTotalBound(filterModel, bound, value, callback) {
     callback();
 }
 const selectedOrder = ref(null);
+const orderDialog = ref(null);
+const manageTrigger = ref(null);
 const fulfillment = ref({ actions: {} });
 const handling = ref(null);
 const delivery = ref(null);
@@ -357,6 +436,63 @@ const actionStatusMessages = {
     429: 'Se realizaron demasiadas solicitudes. Espera un momento e inténtalo nuevamente.',
 };
 const listErrorMessage = computed(() => statusMessages[list.error.value?.response?.status] || 'No se pudieron cargar los pedidos.');
+const activeIncidentCount = computed(() => (handling.value?.incidents || []).filter((incident) => incident.status === 'open').length);
+const primaryActionName = computed(() => {
+    const actions = fulfillment.value?.actions || {};
+    const available = [
+        ['approve', actions.approve_payment && !selectedOrder.value?.has_payment_submission],
+        ['start', actions.start_preparation],
+        ['ready', actions.mark_ready],
+        ['picked', actions.mark_picked_up],
+        ['delivered', actions.mark_delivered],
+    ];
+
+    return available.find(([, enabled]) => enabled)?.[0] || null;
+});
+const operationalStages = computed(() => {
+    const current = fulfillment.value || {};
+    const order = selectedOrder.value || {};
+    const process = handling.value || {};
+    const deliveryStatus = delivery.value?.delivery?.status;
+    const isCanceled = current.status === 'canceled';
+    const isFinal = current.status === 'delivered';
+    const operationState = (operation) => operation?.status === 'completed'
+        ? 'completed'
+        : operation?.status === 'in_progress' ? 'in_progress' : 'pending';
+
+    return [
+        {
+            key: 'reservation', label: 'Reserva y pago',
+            detail: `Reserva ${reservationLabel(current.reservation_status).toLowerCase()} · pago ${paymentStatusLabel(order.payment_status).toLowerCase()}`,
+            state: isCanceled ? 'canceled' : ['active', 'consumed'].includes(current.reservation_status) ? 'completed' : 'pending',
+        },
+        {
+            key: 'preparation', label: 'Preparación',
+            detail: stepText(current.preparing_at, current.prepared_by),
+            state: isCanceled ? 'canceled' : ['ready', 'delivered'].includes(current.status) ? 'completed' : current.status === 'preparing' ? 'in_progress' : 'pending',
+        },
+        {
+            key: 'picking', label: 'Picking',
+            detail: process.picking?.completed_at ? `Completado ${formatDate(process.picking.completed_at)}` : process.picking?.started_at ? `En curso desde ${formatDate(process.picking.started_at)}` : process.legacy ? 'Registro no requerido para este pedido' : 'Sin iniciar',
+            state: isCanceled ? 'canceled' : process.legacy || process.available === false ? 'blocked' : activeIncidentCount.value ? 'incident' : operationState(process.picking),
+        },
+        {
+            key: 'packing', label: 'Packing',
+            detail: process.packing?.completed_at ? `Completado ${formatDate(process.packing.completed_at)}` : process.packing?.started_at ? `En curso desde ${formatDate(process.packing.started_at)}` : process.legacy ? 'Registro no requerido para este pedido' : 'Sin iniciar',
+            state: isCanceled ? 'canceled' : process.legacy || process.available === false ? 'blocked' : activeIncidentCount.value ? 'incident' : operationState(process.packing),
+        },
+        {
+            key: 'ready', label: order.delivery_type === 'pickup' ? 'Listo para recojo' : 'Listo',
+            detail: stepText(current.ready_for_pickup_at || current.ready_at, current.ready_by),
+            state: isCanceled ? 'canceled' : current.ready_for_pickup_at || current.ready_at || isFinal ? 'completed' : current.status === 'preparing' ? 'in_progress' : 'pending',
+        },
+        {
+            key: 'completion', label: order.delivery_type === 'pickup' ? 'Recojo' : 'Entrega',
+            detail: stepText(current.picked_up_at || current.delivered_at || delivery.value?.delivery?.delivered_at, current.delivered_by),
+            state: isCanceled ? 'canceled' : isFinal || ['delivered', 'picked_up'].includes(deliveryStatus) ? 'completed' : ['out_for_delivery', 'awaiting_pickup'].includes(deliveryStatus) ? 'in_progress' : 'pending',
+        },
+    ];
+});
 
 function stateLabel(status, order) { return ({ reserved: 'Reservado', preparing: 'En preparación', ready: order?.delivery_type === 'pickup' ? 'Listo para recoger' : 'Listo para entrega', delivered: order?.delivery_type === 'pickup' ? 'Recogido' : 'Entregado', canceled: 'Cancelado' })[status] || 'Estado no disponible'; }
 function stateSeverity(status) { return ({ reserved: 'info', preparing: 'info', ready: 'info', delivered: 'success', canceled: 'secondary' })[status] || 'secondary'; }
@@ -368,23 +504,36 @@ function reservationLabel(status) { return ({ active: 'Activa', expired: 'Expira
 function reservationSeverity(status) { return ({ active: 'info', expired: 'warn', consumed: 'success', released: 'secondary' })[status] || 'secondary'; }
 function moneyLabel(value) { const amount = Number(value); return Number.isFinite(amount) ? new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(amount) : 'S/ —'; }
 function deliveryLabel(order) { return order.delivery_type === 'pickup' ? `Recojo en sede · ${order.pickup_branch_name_snapshot || 'Sede histórica'}` : 'Envío a domicilio'; }
+function stageLabel(state) { return ({ completed: 'Completado', in_progress: 'En proceso', pending: 'Pendiente', blocked: 'No aplica o no disponible', incident: 'Con incidencia', canceled: 'Cancelado' })[state] || 'Estado no disponible'; }
+function stageClass(state) { return ({ completed: 'stage--completed', in_progress: 'stage--progress', pending: 'stage--pending', blocked: 'stage--blocked', incident: 'stage--incident', canceled: 'stage--canceled' })[state] || 'stage--pending'; }
+function stageIcon(state) { return ({ completed: 'pi pi-check', in_progress: 'pi pi-spin pi-spinner', pending: 'pi pi-clock', blocked: 'pi pi-minus-circle', incident: 'pi pi-exclamation-triangle', canceled: 'pi pi-ban' })[state] || 'pi pi-circle'; }
 const deadlineLabel = (status) => ({ preparing: 'En preparación', within_deadline: 'Dentro del plazo', expired: 'Recojo vencido · requiere revisión administrativa', picked_up: 'Recogido', not_applicable: 'No aplica' })[status] || status;
 const paymentSubmissionLabel = (status) => ({ pending_review: 'Pendiente de Tesorería', observed: 'Observado por Tesorería', approved: 'Aprobado por Tesorería', rejected: 'Rechazado por Tesorería', expired: 'Presentación vencida', canceled: 'Presentación cancelada' })[status] || 'Pago gestionado por Tesorería';
 const formatDate = formatDateTime;
 const stepText = (date, user) => date ? `${formatDate(date)} · ${user?.name || 'Sistema'}` : 'Pendiente';
 
-async function openOrder(order) {
+async function openOrder(order, event = null) {
     if (detailLoading.value && openingOrderId.value === order.id) return;
+    const isOpeningDialog = selectedOrder.value === null;
+    if (event?.currentTarget?.isConnected) manageTrigger.value = event.currentTarget;
     invalidateModalActions();
     const sequence = ++detailSequence;
     openingOrderId.value = order.id;
     selectedOrder.value = order;
     detailLoading.value = true;
     detailError.value = '';
+    if (isOpeningDialog) {
+        await nextTick();
+        orderDialog.value?.focus();
+    }
     try {
         const { data } = await api.get(`/admin/orders/${order.id}/fulfillment`);
         if (sequence !== detailSequence) return;
-        selectedOrder.value = data.order;
+        selectedOrder.value = {
+            ...data.order,
+            total: order.total ?? selectedOrder.value?.total,
+            customer_name: order.customer_name ?? selectedOrder.value?.customer_name,
+        };
         fulfillment.value = data.fulfillment;
         handling.value = data.fulfillment.picking_packing || null;
         if (order.delivery_type !== 'pickup') {
@@ -418,7 +567,42 @@ function actionContextIsCurrent(context) {
         && active?.sequence === context.sequence
         && active?.action === context.action;
 }
-function closeModal() { invalidateModalActions(); detailSequence++; openingOrderId.value = null; detailLoading.value = false; selectedOrder.value = null; fulfillment.value = { actions: {} }; handling.value = null; delivery.value = null; detailError.value = ''; }
+function trapModalFocus(event) {
+    const dialog = orderDialog.value;
+    if (!dialog) return;
+    const focusable = [...dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && element.getClientRects().length > 0);
+    if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+async function closeModal() {
+    invalidateModalActions();
+    detailSequence++;
+    openingOrderId.value = null;
+    detailLoading.value = false;
+    selectedOrder.value = null;
+    fulfillment.value = { actions: {} };
+    handling.value = null;
+    delivery.value = null;
+    detailError.value = '';
+    await nextTick();
+    if (componentMounted && manageTrigger.value?.isConnected && manageTrigger.value.getClientRects().length > 0) {
+        manageTrigger.value.focus();
+    }
+}
 onBeforeUnmount(() => {
     componentMounted = false;
     void closeMobileFilters({ restoreFocus: false });
@@ -427,7 +611,7 @@ onBeforeUnmount(() => {
     activeActionsByOrder.clear();
 });
 function handlingUpdated(summary) { handling.value = summary; fulfillment.value.picking_packing = summary; fulfillment.value.actions.mark_ready = Boolean(summary.actions?.mark_ready); }
-async function deliveryUpdated(value) { delivery.value = value; if (value.order?.fulfillment_status === 'delivered') await openOrder({ id: selectedOrder.value.id, delivery_type: 'delivery' }); await list.load(); }
+async function deliveryUpdated(value) { delivery.value = value; if (value.order?.fulfillment_status === 'delivered' && selectedOrder.value) await openOrder({ ...selectedOrder.value, delivery_type: 'delivery' }); await list.load(); }
 function confirmAction(action) {
     const messages = { approve: '¿Confirmar la recepción de la transferencia?', start: '¿Iniciar la preparación?', ready: selectedOrder.value.delivery_type === 'pickup' ? '¿Marcar como listo para recoger e iniciar el plazo de 10 días hábiles?' : '¿Marcar como listo?', picked: '¿Confirmar que el cliente recogió el pedido?', delivered: '¿Marcar como entregado?', cancel: 'La cancelación afectará la reserva o el inventario consumido.' };
     confirm.require({ message: messages[action], header: 'Confirmación', accept: () => runAction(action) });
@@ -481,6 +665,47 @@ function showActionError(error) { toast.add({ severity: 'error', summary: 'Opera
 .order-state--canceled {
     background: #e2e8f0;
     color: #334155;
+}
+
+.order-dialog:focus {
+    outline: 3px solid #2563eb;
+    outline-offset: 3px;
+}
+
+.stage--completed {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.stage--progress {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.stage--pending {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.stage--blocked {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.stage--incident {
+    border-color: #fdba74;
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.stage--canceled {
+    border-color: #fecaca;
+    background: #fff1f2;
+    color: #9f1239;
 }
 
 @media (prefers-reduced-motion: reduce) {
