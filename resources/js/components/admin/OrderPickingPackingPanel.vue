@@ -15,31 +15,19 @@
             Pedido heredado finalizado. No requiere registros retroactivos de picking o packing.
         </div>
         <template v-else>
-            <section class="rounded-xl border border-rose-200 bg-white p-4" aria-labelledby="handling-incidents-title" :aria-live="summary.incidents?.some((incident) => incident.status === 'open') ? 'assertive' : 'polite'">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <h4 id="handling-incidents-title" class="font-bold text-slate-900">Incidencias</h4>
-                        <p class="text-sm text-slate-600">Revisa las incidencias registradas antes de continuar con la preparación.</p>
-                    </div>
-                    <button v-if="summary.actions.report_incident" type="button" :disabled="busy" @click="openIncident(null)" class="min-h-10 rounded-lg border border-rose-300 px-3 text-sm font-semibold text-rose-800 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">Nueva incidencia</button>
-                </div>
-                <p v-if="!summary.incidents?.length" class="mt-3 text-sm text-slate-500">Sin incidencias registradas.</p>
-                <div v-for="incident in summary.incidents" :key="incident.id" :class="incident.status === 'open' ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-slate-50'" class="mt-3 rounded-lg border p-3 text-sm">
-                    <div class="flex flex-wrap justify-between gap-2"><b>{{ incidentLabel(incident.type) }}</b><span :class="incident.status === 'open' ? 'text-rose-800' : 'text-emerald-800'" class="font-semibold">{{ incident.status === 'open' ? 'Abierta' : 'Resuelta' }}</span></div>
-                    <p class="mt-1">{{ incident.description }}</p>
-                    <p class="mt-1 text-xs text-slate-600">{{ incident.reported_at ? formatDateTime(incident.reported_at) : 'Fecha no disponible' }} · {{ incident.reporter?.name || 'Usuario eliminado' }}<span v-if="incident.affected_quantity !== null"> · cantidad {{ incident.affected_quantity }}</span></p>
-                    <button v-if="incident.status === 'open' && summary.actions.report_incident" type="button" :disabled="busy" @click="resolveIncident(incident)" class="mt-2 min-h-10 rounded px-2 text-sm font-semibold text-emerald-800 underline hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">Resolver incidencia</button>
-                </div>
-            </section>
+            <aside v-if="openIncidentCount > 0" class="flex flex-col gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-rose-950 sm:flex-row sm:items-center sm:justify-between" role="alert" aria-live="assertive">
+                <p class="text-sm font-semibold"><i class="pi pi-exclamation-triangle mr-2" aria-hidden="true" />{{ openIncidentCount }} {{ openIncidentCount === 1 ? 'incidencia abierta' : 'incidencias abiertas' }}. Deben resolverse antes de marcar el pedido como listo.</p>
+                <button type="button" class="min-h-10 shrink-0 rounded-lg border border-rose-400 bg-white px-3 text-sm font-semibold text-rose-900 hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700" @click="focusIncidents">Ver incidencias</button>
+            </aside>
 
             <div class="grid gap-4 lg:grid-cols-2">
                 <OperationCard title="Picking" :operation="summary.picking" :progress="summary.picking.progress">
-                    <button v-if="summary.actions.start_picking" :disabled="busy" @click="confirmTransition('picking-start')" class="btn-primary">Iniciar picking</button>
-                    <button v-if="summary.actions.complete_picking" :disabled="busy" @click="confirmTransition('picking-complete')" class="btn-success">Completar picking</button>
+                    <button v-if="!readOnly && summary.actions.start_picking" :disabled="busy" @click="confirmTransition('picking-start')" class="btn-primary">Iniciar picking</button>
+                    <button v-if="!readOnly && summary.actions.complete_picking" :disabled="busy" @click="confirmTransition('picking-complete')" class="btn-success">Completar picking</button>
                 </OperationCard>
                 <OperationCard title="Packing" :operation="summary.packing" :progress="summary.packing.progress">
-                    <button v-if="summary.actions.start_packing" :disabled="busy" @click="confirmTransition('packing-start')" class="btn-primary">Iniciar packing</button>
-                    <button v-if="summary.actions.complete_packing" :disabled="busy" @click="confirmTransition('packing-complete')" class="btn-success">Completar packing</button>
+                    <button v-if="!readOnly && summary.actions.start_packing" :disabled="busy" @click="confirmTransition('packing-start')" class="btn-primary">Iniciar packing</button>
+                    <button v-if="!readOnly && summary.actions.complete_packing" :disabled="busy" @click="confirmTransition('packing-complete')" class="btn-success">Completar packing</button>
                 </OperationCard>
             </div>
 
@@ -56,14 +44,14 @@
                                 <p class="text-xs text-gray-500">{{ item.warehouse?.name || 'Almacén histórico' }}<span v-if="item.warehouse?.branch?.name"> — {{ item.warehouse.branch.name }}</span></p>
                             </div>
                         </div>
-                        <div class="grid grid-cols-3 gap-3 text-center text-sm">
+                        <div class="grid grid-cols-3 gap-2 text-center text-sm">
                             <Metric label="Solicitado" :value="item.ordered_quantity" />
-                            <Metric label="Recogido" :value="item.picked_quantity" />
-                            <Metric label="Empacado" :value="item.packed_quantity" />
+                            <Metric label="Picking" :value="quantityMetric(item.picked_quantity, item.ordered_quantity)" />
+                            <Metric label="Packing" :value="quantityMetric(item.packed_quantity, item.ordered_quantity)" />
                         </div>
                     </div>
 
-                    <div class="mt-4 grid gap-3 md:grid-cols-2">
+                    <div v-if="!readOnly" class="mt-4 grid gap-3 md:grid-cols-2">
                         <div class="rounded bg-emerald-50 p-3">
                             <label :for="`picked-quantity-${item.id}`" class="text-xs font-semibold text-emerald-900">Cantidad recogida · pendiente {{ item.pending_picking }}</label>
                             <div class="mt-2 flex gap-2">
@@ -84,17 +72,36 @@
                     <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
                         <span>Método: {{ item.confirmation_method === 'manual' ? 'Manual' : item.confirmation_method }}</span>
                         <span v-if="item.last_operated_at">Última operación: {{ formatDateTime(item.last_operated_at) }} · {{ item.last_operated_by?.name || 'Usuario eliminado' }}</span>
-                        <button v-if="summary.actions.report_incident" @click="openIncident(item)" class="font-semibold text-red-600 hover:underline">Reportar incidencia</button>
+                        <button v-if="!readOnly && summary.actions.report_incident" type="button" :disabled="busy" @click="openIncident(item)" class="min-h-10 rounded px-2 font-semibold text-red-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-50">Reportar incidencia</button>
                     </div>
                 </article>
             </div>
 
-            <details class="rounded border p-4">
-                <summary class="cursor-pointer font-semibold">Historial de picking y packing ({{ summary.history?.length || 0 }})</summary>
+            <section ref="incidentsSection" id="handling-incidents" tabindex="-1" class="scroll-mt-28 rounded-xl border border-rose-200 bg-white p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700" aria-labelledby="handling-incidents-title" :aria-live="openIncidentCount > 0 ? 'assertive' : 'polite'">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h4 id="handling-incidents-title" class="font-bold text-slate-900">Incidencias</h4>
+                        <p class="text-sm text-slate-600">{{ openIncidentCount > 0 ? 'Revisa las incidencias abiertas antes de continuar con la preparación.' : 'Revisa el registro de incidencias del pedido.' }}</p>
+                    </div>
+                    <button v-if="!readOnly && summary.actions.report_incident" type="button" :disabled="busy" @click="openIncident(null)" class="min-h-10 rounded-lg border border-rose-300 px-3 text-sm font-semibold text-rose-800 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">Nueva incidencia</button>
+                </div>
+                <p v-if="!summary.incidents?.length" class="mt-3 text-sm text-slate-500">Sin incidencias registradas.</p>
+                <div v-for="incident in summary.incidents" :key="incident.id" :class="incident.status === 'open' ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-slate-50'" class="mt-3 rounded-lg border p-3 text-sm">
+                    <div class="flex flex-wrap justify-between gap-2"><b>{{ incidentLabel(incident.type) }}</b><span :class="incident.status === 'open' ? 'text-rose-800' : 'text-emerald-800'" class="font-semibold">{{ incident.status === 'open' ? 'Abierta' : 'Resuelta' }}</span></div>
+                    <p class="mt-1">{{ incident.description }}</p>
+                    <p class="mt-1 text-xs text-slate-600">{{ incident.reported_at ? formatDateTime(incident.reported_at) : 'Fecha no disponible' }} · {{ incident.reporter?.name || 'Usuario eliminado' }}<span v-if="incident.affected_quantity !== null"> · cantidad {{ incident.affected_quantity }}</span></p>
+                    <button v-if="!readOnly && incident.status === 'open' && summary.actions.report_incident" type="button" :disabled="busy" @click="resolveIncident(incident)" class="mt-2 min-h-10 rounded px-2 text-sm font-semibold text-emerald-800 underline hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">Resolver incidencia</button>
+                </div>
+            </section>
+
+            <details class="rounded border p-4" @toggle="syncHistory">
+                <summary class="cursor-pointer font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" :aria-expanded="historyExpanded" aria-controls="handling-history-content">Historial de picking y packing ({{ summary.history?.length || 0 }})</summary>
+                <div id="handling-history-content">
                 <div v-for="event in summary.history" :key="event.id" class="mt-3 border-l-2 border-slate-300 pl-3 text-sm">
                     <b>{{ eventLabel(event.event_type) }}</b>
                     <p class="text-xs text-gray-500">{{ formatDateTime(event.created_at) }} · {{ event.user?.name || 'Usuario eliminado' }} · {{ event.confirmation_method }}</p>
                     <p v-if="event.observation" class="text-gray-600">{{ event.observation }}</p>
+                </div>
                 </div>
             </details>
         </template>
@@ -121,14 +128,18 @@ import {formatDateTime} from '@/utils/dateTime';
 import {useConfirm} from 'primevue/useconfirm';
 import {useToast} from 'primevue/usetoast';
 
-const props=defineProps({orderId:{type:Number,required:true},summary:{type:Object,required:true}});
+const props=defineProps({orderId:{type:Number,required:true},summary:{type:Object,required:true},readOnly:{type:Boolean,default:false}});
 const emit=defineEmits(['updated']);
 const confirm=useConfirm(),toast=useToast(),busy=ref(false),brokenImages=reactive({}),pickedInputs=reactive({}),packedInputs=reactive({});
-const incidentModal=ref(false),incidentForm=reactive({type:'missing',order_item_id:'',affected_quantity:null,description:'',idempotency_key:''});
+const incidentModal=ref(false),incidentForm=reactive({type:'missing',order_item_id:'',affected_quantity:null,description:'',idempotency_key:''}),incidentsSection=ref(null),historyExpanded=ref(false);
 const OperationCard=defineComponent({props:{title:String,operation:Object,progress:Number},setup(p,{slots}){return()=>{const progress=Math.max(0,Math.min(100,Number(p.progress)||0));return h('div',{class:'rounded-xl border border-slate-200 bg-white p-4'},[h('div',{class:'flex flex-wrap items-center justify-between gap-2'},[h('h4',{class:'font-bold text-slate-900'},p.title),h('span',{class:'rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700'},statusLabel(p.operation?.status))]),h('div',{class:'mt-3 h-2 overflow-hidden rounded-full bg-slate-200','role':'progressbar','aria-label':`Progreso de ${p.title}`,'aria-valuemin':0,'aria-valuemax':100,'aria-valuenow':progress},[h('div',{class:'h-full rounded-full bg-emerald-600 transition-[width]',style:{width:`${progress}%`}})]),h('div',{class:'mt-2 text-xs text-slate-600'},p.operation?.started_at?`Inicio ${formatDateTime(p.operation.started_at)} · ${p.operation.started_by?.name||'Usuario eliminado'}`:'Sin iniciar'),p.operation?.completed_at?h('div',{class:'text-xs text-slate-600'},`Fin ${formatDateTime(p.operation.completed_at)} · ${p.operation.completed_by?.name||'Usuario eliminado'}`):null,h('div',{class:'mt-3 flex flex-wrap gap-2'},slots.default?.())])}}});
 const Metric=defineComponent({props:{label:String,value:[String,Number]},setup:p=>()=>h('div',{class:'rounded bg-gray-50 px-3 py-2'},[h('div',{class:'text-xs text-gray-500'},p.label),h('b',String(p.value))])});
 
 watch(()=>props.summary?.items,(items=[])=>items.forEach(item=>{pickedInputs[item.id]=item.picked_quantity;packedInputs[item.id]=item.packed_quantity}),{immediate:true,deep:true});
+const openIncidentCount=computed(()=> (props.summary?.incidents||[]).filter(incident=>incident.status==='open').length);
+const quantityMetric=(quantity,total)=>`${Number(quantity)||0} de ${Number(total)||0}`;
+function focusIncidents(){incidentsSection.value?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});incidentsSection.value?.focus({preventScroll:true})}
+function syncHistory(event){historyExpanded.value=event.currentTarget.open}
 const statusLabel=s=>({pending:'Pendiente',in_progress:'En curso',completed:'Completado'}[s]||s||'—');
 const incidentLabel=t=>({missing:'Producto faltante',damaged:'Producto dañado',quantity_mismatch:'Diferencia de cantidad',wrong_product:'Producto incorrecto',other:'Otra incidencia'}[t]||t);
 const eventLabel=e=>({picking_started:'Picking iniciado',picked_quantity_updated:'Cantidad recogida actualizada',picking_completed:'Picking completado',packing_started:'Packing iniciado',packed_quantity_updated:'Cantidad empacada actualizada',packing_completed:'Packing completado',incident_reported:'Incidencia reportada',incident_resolved:'Incidencia resuelta',operation_canceled:'Operación cancelada'}[e]||e);
