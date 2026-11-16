@@ -94,7 +94,17 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringContainsString('node_modules/@primeuix/themes', $lock);
         $this->assertStringNotContainsString('node_modules/jquery', $lock);
         $this->assertStringNotContainsString('node_modules/datatables.net', $lock);
-        $this->assertStringContainsString('stateLabel(row.fulfillment_status || legacyState(row), row)', $view);
+        $this->assertStringContainsString('stateLabel(row.fulfillment_status, row)', $view);
+        $this->assertStringNotContainsString('|| legacyState(row)', $view);
+        $this->assertDoesNotMatchRegularExpression('/function\s+legacyState\s*\(/', $view);
+        $this->assertStringNotContainsString('row.status', $view);
+        $this->assertStringNotContainsString('row.tracking_status', $view);
+        $this->assertStringContainsString("filters: ['search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status'", $view);
+        $this->assertStringContainsString("filterKey: 'fulfillment_status'", $view);
+        $this->assertSame(
+            ['reserved', 'preparing', 'ready', 'delivered', 'canceled'],
+            $this->fulfillmentOptionValues($view)
+        );
         $this->assertStringContainsString("row.payment_status === 'approved'", $view);
         $this->assertStringContainsString('row.reservation_status || \'legacy\'', $view);
 
@@ -159,6 +169,16 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertNotFalse($runtimeKeyTypePosition);
         $this->assertNotFalse($rowIterationPosition);
         $this->assertLessThan($rowIterationPosition, $runtimeKeyTypePosition);
+    }
+
+    private function fulfillmentOptionValues(string $view): array
+    {
+        $matched = preg_match('/const fulfillmentOptions\s*=\s*\[(.*?)\];/s', $view, $matches);
+        $this->assertSame(1, $matched, 'The administrative fulfillment options must be declared once.');
+
+        preg_match_all("/value:\\s*'([^']+)'/", $matches[1], $values);
+
+        return $values[1];
     }
 
     public function test_orders_filters_use_primevue_menus_and_flat_server_side_query_contract(): void

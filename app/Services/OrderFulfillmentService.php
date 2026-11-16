@@ -158,17 +158,27 @@ class OrderFulfillmentService
     {
         return DB::transaction(function () use ($order, $user, $observation) {
             $order = $this->lock($order);
-            $from = $order->effectiveFulfillmentStatus();
-            if ($from === Order::FULFILLMENT_DELIVERED) {
-                return $this->present($order);
-            }
             if ($order->delivery_flow_version) {
                 $delivery = OrderDelivery::where('order_id', $order->id)->lockForUpdate()->first();
                 if (! $delivery || $delivery->status !== OrderDelivery::DELIVERED) {
                     $this->invalid('Los pedidos del nuevo flujo deben confirmarse desde Despacho y entrega.');
                 }
 
-                return $this->finalizeLockedDelivery($order, $user, $observation, $delivery->delivered_at ?: now());
+                if ($this->orderDeliveryFinalizationIsComplete($order, $delivery)) {
+                    return $this->present($order);
+                }
+
+                return $this->finalizeLockedDelivery(
+                    $order,
+                    $user,
+                    $observation,
+                    $this->deliveryCompletionTime($order, $delivery)
+                );
+            }
+
+            $from = $order->effectiveFulfillmentStatus();
+            if ($from === Order::FULFILLMENT_DELIVERED) {
+                return $this->present($order);
             }
             $this->requireState($from, Order::FULFILLMENT_READY, 'Solo un pedido listo puede marcarse como entregado.');
             $this->assertInventoryConsumed($order);
@@ -189,9 +199,6 @@ class OrderFulfillmentService
     {
         return DB::transaction(function () use ($order, $user, $observation, $deliveredAt) {
             $order = $this->lock($order);
-            if ($order->effectiveFulfillmentStatus() === Order::FULFILLMENT_DELIVERED) {
-                return $this->present($order);
-            }
             if (! $order->delivery_flow_version) {
                 $this->invalid('El pedido no pertenece al flujo de despacho vigente.');
             }
@@ -200,7 +207,11 @@ class OrderFulfillmentService
                 $this->invalid('La entrega logística y sus datos mínimos deben estar confirmados.');
             }
 
-            return $this->finalizeLockedDelivery($order, $user, $observation, $deliveredAt ?: $delivery->delivered_at ?: now());
+            if ($this->orderDeliveryFinalizationIsComplete($order, $delivery)) {
+                return $this->present($order);
+            }
+
+            return $this->finalizeLockedDelivery($order, $user, $observation, $deliveredAt ?: $this->deliveryCompletionTime($order, $delivery));
         });
     }
 
@@ -249,7 +260,7 @@ class OrderFulfillmentService
 
     public function present(Order $order): array
     {
-        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'paymentSubmission:id,order_id,status', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name']);
+        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'paymentSubmission:id,order_id,status', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name', 'delivery:id,order_id,status']);
         $state = $order->effectiveFulfillmentStatus();
         $legacy = ! $this->inventory->orderUsesReservationFlow($order);
         $canStart = $state === Order::FULFILLMENT_RESERVED && ($legacy || $order->payment_method === 'contra_entrega' || $order->payment_status === 'approved');
@@ -259,8 +270,9 @@ class OrderFulfillmentService
         $hasPaymentSubmission = $order->paymentSubmission !== null;
         $order->setAttribute('has_payment_submission', $hasPaymentSubmission);
         $order->append('payment_submission_status');
+        $order->loadMissing('delivery:id,order_id,status');
         $handlingAllowsReady = ! ($handling['available'] ?? false) || ($handling['actions']['mark_ready'] ?? false);
-        $hasDelivery = OrderDelivery::where('order_id', $order->id)->exists();
+        $hasDelivery = $order->delivery !== null;
         $canMarkReady = $state === Order::FULFILLMENT_PREPARING && $handlingAllowsReady;
         $actions = ['approve_payment' => $state === Order::FULFILLMENT_RESERVED && $order->payment_method === 'transferencia' && $order->payment_status !== 'approved' && ! $hasPaymentSubmission, 'start_preparation' => $canStart, 'mark_ready' => $canMarkReady, 'mark_ready_for_pickup' => $canMarkReady && $order->isPickup(), 'mark_picked_up' => $state === Order::FULFILLMENT_READY && $order->isPickup(), 'mark_delivered' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && ! $order->delivery_flow_version, 'manage_delivery' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && (bool) $order->delivery_flow_version, 'cancel' => in_array($state, [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY], true) && ! $hasDelivery];
         $reservationStatuses = $order->items->pluck('reservation.status')->filter()->unique()->values();
@@ -296,19 +308,63 @@ class OrderFulfillmentService
 
     private function finalizeLockedDelivery(Order $order, User $user, ?string $observation, $deliveredAt): array
     {
-        $from = $order->effectiveFulfillmentStatus();
-        $this->requireState($from, Order::FULFILLMENT_READY, 'Solo un pedido listo puede marcarse como entregado.');
+        $from = in_array($order->fulfillment_status, [
+            Order::FULFILLMENT_RESERVED,
+            Order::FULFILLMENT_PREPARING,
+            Order::FULFILLMENT_READY,
+            Order::FULFILLMENT_CANCELED,
+            Order::FULFILLMENT_DELIVERED,
+        ], true) ? $order->fulfillment_status : Order::FULFILLMENT_READY;
         $this->assertInventoryConsumed($order);
+        $updates = [
+            'fulfillment_status' => Order::FULFILLMENT_DELIVERED,
+            'delivered_at' => $deliveredAt,
+            'delivered_by' => $order->delivered_by ?: $user->id,
+            'status' => 'delivered',
+            'tracking_status' => $order->delivery_type === 'pickup' ? 'picked_up' : 'delivered',
+        ];
+        if ($order->delivery_type === 'pickup') {
+            $updates['picked_up_at'] = $order->picked_up_at ?: $deliveredAt;
+        }
         if (in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true)) {
             $payment = PaymentTransaction::where('order_id', $order->id)->where('payment_method', 'contra_entrega')->where('transaction_type', PaymentTransaction::PAYMENT)->where('status', PaymentTransaction::APPROVED)->first();
             if (! $payment) {
                 $this->invalid('El cobro contraentrega aprobado es obligatorio antes de finalizar la entrega.');
             }
+            $updates['payment_status'] = 'approved';
+            $updates['paid_at'] = $order->paid_at ?: $payment->collected_at ?: $payment->confirmed_at ?: $deliveredAt;
         }
-        $order->update(['fulfillment_status' => Order::FULFILLMENT_DELIVERED, 'delivered_at' => $deliveredAt, 'delivered_by' => $order->delivered_by ?: $user->id, 'status' => 'delivered', 'tracking_status' => $order->delivery_type === 'pickup' ? 'picked_up' : 'delivered']);
+        $order->update($updates);
         $this->record($order, $from, Order::FULFILLMENT_DELIVERED, $user, $observation, ['delivery_flow_version' => $order->delivery_flow_version, 'payment_confirmed_on_delivery' => $order->payment_method === 'contra_entrega']);
 
         return $this->present($order->refresh());
+    }
+
+    private function orderDeliveryFinalizationIsComplete(Order $order, OrderDelivery $delivery): bool
+    {
+        $expectedTrackingStatus = $order->delivery_type === 'pickup' ? 'picked_up' : 'delivered';
+        $cashPaymentComplete = ! in_array($order->payment_method, ['contra_entrega', 'pago_en_sede'], true)
+            || ($order->payment_status === 'approved' && $order->paid_at !== null);
+
+        return $order->fulfillment_status === Order::FULFILLMENT_DELIVERED
+            && $order->status === 'delivered'
+            && $order->tracking_status === $expectedTrackingStatus
+            && $order->delivered_at !== null
+            && ($order->delivery_type !== 'pickup' || $order->picked_up_at !== null)
+            && $cashPaymentComplete
+            && OrderFulfillmentHistory::where('order_id', $order->id)
+                ->where('to_status', Order::FULFILLMENT_DELIVERED)
+                ->exists();
+    }
+
+    private function deliveryCompletionTime(Order $order, OrderDelivery $delivery): mixed
+    {
+        return $order->delivered_at
+            ?: ($order->delivery_type === 'pickup' ? $order->picked_up_at : null)
+            ?: ($order->delivery_type === 'pickup' ? $delivery->picked_up_at : null)
+            ?: $delivery->delivered_at
+            ?: $delivery->confirmed_at
+            ?: now();
     }
 
     private function record(Order $order, string $from, string $to, User $user, ?string $observation, array $metadata = []): void

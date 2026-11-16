@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReservation;
 use App\Models\Order;
+use App\Models\OrderDelivery;
 use App\Models\OrderFulfillmentHistory;
 use App\Models\OrderHandlingItem;
 use App\Models\OrderHandlingProcess;
@@ -13,6 +14,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\WarehouseInventory;
 use App\Services\InventoryService;
+use App\Services\OrderFulfillmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -108,6 +110,76 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->assertSame($admin->id, $order->ready_by);
         $this->assertSame($admin->id, $order->delivered_by);
         $this->assertSame(3, OrderFulfillmentHistory::where('order_id', $order->id)->count());
+
+        $delivery = OrderDelivery::where('order_id', $order->id)->firstOrFail();
+        $deliveredAt = $order->delivered_at->toISOString();
+        $paidAt = $order->paid_at->toISOString();
+        $movementCount = InventoryMovement::where('reference_id', (string) $order->id)->count();
+        $paymentCount = DB::table('payment_transactions')->where('order_id', $order->id)->count();
+        $deliveryHistoryCount = DB::table('order_delivery_histories')->where('order_delivery_id', $delivery->id)->count();
+
+        app(OrderFulfillmentService::class)->finalizeDeliveredFromDelivery($order, $admin, 'Reintento idempotente', $delivery->delivered_at);
+        $order->refresh();
+
+        $this->assertSame($deliveredAt, $order->delivered_at?->toISOString());
+        $this->assertSame($paidAt, $order->paid_at?->toISOString());
+        $this->assertSame('delivered', $order->fulfillment_status);
+        $this->assertSame('delivered', $order->status);
+        $this->assertSame('delivered', $order->tracking_status);
+        $this->assertSame($movementCount, InventoryMovement::where('reference_id', (string) $order->id)->count());
+        $this->assertSame($paymentCount, DB::table('payment_transactions')->where('order_id', $order->id)->count());
+        $this->assertSame(3, OrderFulfillmentHistory::where('order_id', $order->id)->count());
+        $this->assertSame($deliveryHistoryCount, DB::table('order_delivery_histories')->where('order_delivery_id', $delivery->id)->count());
+    }
+
+    public function test_pickup_delivery_finalization_uses_pickup_instant_and_is_idempotent(): void
+    {
+        $admin = $this->admin();
+        $order = Order::create([
+            'user_id' => $this->customer()->id,
+            'status' => 'confirmed',
+            'total' => '10.00',
+            'shipping_info' => [],
+            'payment_method' => 'transferencia',
+            'payment_status' => 'approved',
+            'delivery_type' => 'pickup',
+            'tracking_status' => 'ready_for_pickup',
+            'fulfillment_status' => Order::FULFILLMENT_READY,
+            'delivery_flow_version' => 1,
+            'ready_at' => now()->subHour(),
+        ]);
+        $pickedUpAt = now()->subMinutes(5);
+        $delivery = OrderDelivery::create([
+            'order_id' => $order->id,
+            'method' => OrderDelivery::STORE_PICKUP,
+            'status' => OrderDelivery::DELIVERED,
+            'delivered_at' => $pickedUpAt,
+            'picked_up_at' => $pickedUpAt,
+            'confirmed_at' => $pickedUpAt,
+            'recipient_name' => 'Cliente de prueba',
+            'recipient_document_type' => 'DNI',
+            'recipient_document_number' => '12345678',
+        ]);
+
+        app(OrderFulfillmentService::class)->finalizeDeliveredFromDelivery($order, $admin, 'Recojo confirmado', $pickedUpAt);
+        $order->refresh();
+        $historyCount = OrderFulfillmentHistory::where('order_id', $order->id)->count();
+        $storedDeliveredAt = $order->delivered_at?->copy()->startOfSecond()->toISOString();
+        $storedPickedUpAt = $order->picked_up_at?->copy()->startOfSecond()->toISOString();
+
+        $this->assertSame('delivered', $order->fulfillment_status);
+        $this->assertSame('delivered', $order->status);
+        $this->assertSame('picked_up', $order->tracking_status);
+        $this->assertSame($pickedUpAt->copy()->startOfSecond()->toISOString(), $storedDeliveredAt);
+        $this->assertSame($pickedUpAt->copy()->startOfSecond()->toISOString(), $storedPickedUpAt);
+        $this->assertSame(1, $historyCount);
+
+        app(OrderFulfillmentService::class)->finalizeDeliveredFromDelivery($order, $admin, 'No debe duplicar', $delivery->delivered_at);
+        $order->refresh();
+
+        $this->assertSame($storedDeliveredAt, $order->delivered_at?->copy()->startOfSecond()->toISOString());
+        $this->assertSame($storedPickedUpAt, $order->picked_up_at?->copy()->startOfSecond()->toISOString());
+        $this->assertSame($historyCount, OrderFulfillmentHistory::where('order_id', $order->id)->count());
     }
 
     public function test_customer_tracking_uses_public_image_url_iso_instants_and_clear_cod_payment_event(): void

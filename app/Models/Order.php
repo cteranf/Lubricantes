@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\OrderOperationalStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -225,17 +226,7 @@ class Order extends Model
 
     public function effectiveFulfillmentStatus(): string
     {
-        if ($this->fulfillment_status) {
-            return $this->fulfillment_status;
-        }
-        if (in_array($this->status, ['canceled', 'rejected'], true)) {
-            return self::FULFILLMENT_CANCELED;
-        }
-        if ($this->status === 'delivered') {
-            return self::FULFILLMENT_DELIVERED;
-        }
-
-        return self::FULFILLMENT_RESERVED;
+        return OrderOperationalStatus::resolve($this);
     }
 
     public function isPickup(): bool

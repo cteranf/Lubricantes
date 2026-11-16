@@ -117,6 +117,7 @@ class OrderStateService
 
             $updates['status'] = 'canceled';
             $updates['tracking_status'] = 'canceled';
+            $updates['fulfillment_status'] = Order::FULFILLMENT_CANCELED;
         }
         // Nota: Si $normalizedPaymentStatus === 'rejected', se actualiza payment_status = 'rejected',
         // pero se mantiene status = 'pending' para permitir reintentos y preservar la reserva de stock.

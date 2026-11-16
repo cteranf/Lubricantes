@@ -18,7 +18,7 @@ class AdminOrderListResource extends JsonResource
             'payment_method' => $this->payment_method,
             'payment_status' => $this->payment_status,
             'status' => $this->status,
-            'fulfillment_status' => $this->fulfillment_status,
+            'fulfillment_status' => $this->effectiveFulfillmentStatus(),
             'delivery_type' => $this->delivery_type,
             'pickup_branch_name_snapshot' => $this->pickup_branch_name_snapshot,
             'warehouse_name' => $firstItem?->warehouse?->name,

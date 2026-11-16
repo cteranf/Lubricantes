@@ -10,6 +10,7 @@ use App\Services\InventoryService;
 use App\Services\MoneyService;
 use App\Services\OrderFulfillmentService;
 use App\Services\OrderStateService;
+use App\Support\OrderOperationalStatus;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +46,7 @@ class OrderController extends Controller
                     'inventory_reservations.status',
                 ]),
                 'paymentSubmission:id,order_id,status',
+                'delivery:id,order_id,status',
             ])
             ->withExists(['paymentSubmission as has_payment_submission'])
             ->orderBy($sort, $direction)
@@ -152,22 +154,7 @@ class OrderController extends Controller
 
     private function whereEffectiveFulfillmentStatus(\Illuminate\Database\Eloquent\Builder $query, string $status): void
     {
-        $query->where(function ($effective) use ($status): void {
-            $effective->where('orders.fulfillment_status', $status);
-
-            $effective->orWhere(function ($legacy) use ($status): void {
-                $legacy->where(function ($unset): void {
-                    $unset->whereNull('orders.fulfillment_status')->orWhere('orders.fulfillment_status', '');
-                });
-
-                match ($status) {
-                    Order::FULFILLMENT_CANCELED => $legacy->whereIn('orders.status', ['canceled', 'rejected']),
-                    Order::FULFILLMENT_DELIVERED => $legacy->where('orders.status', 'delivered'),
-                    Order::FULFILLMENT_RESERVED => $legacy->whereNotIn('orders.status', ['canceled', 'rejected', 'delivered']),
-                    default => $legacy->whereRaw('1 = 0'),
-                };
-            });
-        });
+        OrderOperationalStatus::applyFilter($query, $status);
     }
 
     public function update(Request $request, Order $order)

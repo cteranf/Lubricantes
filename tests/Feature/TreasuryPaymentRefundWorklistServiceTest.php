@@ -128,12 +128,16 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         $models = Model::getEventDispatcher();
         $modelProbe = clone $models;
         $queries = 0;
+        $queryPatterns = [];
         $writes = 0;
         $locks = 0;
         $transactions = 0;
         $events = 0;
-        $probe->listen(QueryExecuted::class, function ($event) use (&$queries, &$writes, &$locks): void {
+        $probe->listen(QueryExecuted::class, function ($event) use (&$queries, &$writes, &$locks, &$queryPatterns): void {
             $queries++;
+            $pattern = strtolower(preg_replace('/\s+/', ' ', trim($event->sql)));
+            $pattern = preg_replace("/'(?:''|[^'])*'/", "'?'", $pattern);
+            $queryPatterns[$pattern] = ($queryPatterns[$pattern] ?? 0) + 1;
             $writes += (int) preg_match('/^\s*(insert|update|delete|alter|create|drop)\b/i', $event->sql);
             $locks += (int) preg_match('/\bfor\s+update\b/i', $event->sql);
         });
@@ -152,12 +156,17 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         $lazy = Model::preventsLazyLoading();
         Model::preventLazyLoading(true);
         try {
+            $unfilteredQueryCounts = [];
             foreach ([1, 20, TreasuryPaymentRefundWorklistService::MAX_PER_PAGE] as $perPage) {
                 $queries = 0;
+                $queryPatterns = [];
                 $page = $service->paginate(['per_page' => $perPage]);
                 $this->assertSame($perPage, count($page->items()));
-                $this->assertTrue($queries <= 24, 'Unfiltered pages must use a bounded batch query budget.');
+                $repeatedPatterns = array_filter($queryPatterns, fn ($count) => $count > 1);
+                $this->assertTrue($queries <= 24, 'Unfiltered pages must use a bounded batch query budget; got '.$queries.' queries, repeated patterns: '.json_encode($repeatedPatterns));
+                $unfilteredQueryCounts[] = $queries;
             }
+            $this->assertCount(1, array_unique($unfilteredQueryCounts), 'Increasing the page size must not increase the batch query count.');
             $queries = 0;
             $page = $service->paginate(['refund_status' => 'not_started']);
             $this->assertSame(20, $page->total());

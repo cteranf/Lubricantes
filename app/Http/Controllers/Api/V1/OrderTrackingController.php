@@ -17,7 +17,7 @@ class OrderTrackingController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user'])->findOrFail($id);
+        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user', 'delivery:id,order_id,status'])->findOrFail($id);
 
         $user = $request->user();
 

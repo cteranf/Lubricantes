@@ -391,10 +391,24 @@ trait TreasuryPaymentRefundPredicates
     private function isCanceledUndeliveredOrder(array $state): bool
     {
         $order = $state['order'];
+        $persistedFulfillment = $order->getRawOriginal('fulfillment_status');
+
+        // OperationalStatus is a read-time presentation classification. An
+        // explicit non-terminal fulfillment state must not authorize a refund
+        // merely because legacy/commercial fields normalize the order as
+        // canceled. Keep the existing normalization behavior for legacy rows
+        // whose fulfillment state is null.
+        if (in_array($persistedFulfillment, [
+            Order::FULFILLMENT_RESERVED,
+            Order::FULFILLMENT_PREPARING,
+            Order::FULFILLMENT_READY,
+            Order::FULFILLMENT_DELIVERED,
+        ], true)) {
+            return false;
+        }
 
         return $order->status === 'canceled'
             && $order->tracking_status === 'canceled'
-            && $order->effectiveFulfillmentStatus() === Order::FULFILLMENT_CANCELED
             && ! $order->delivered_at && ! $order->picked_up_at
             && (! $state['delivery'] || $state['delivery']->status === OrderDelivery::CANCELED)
             && (! $state['handling'] || $state['handling']->canceled_at !== null);

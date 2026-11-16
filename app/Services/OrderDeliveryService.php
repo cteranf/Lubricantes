@@ -321,7 +321,9 @@ class OrderDeliveryService
                 $order = $this->lockOrder($order);
                 $d = $this->lockDelivery($order);
                 if ($d->status === OrderDelivery::DELIVERED) {
-                    return $this->summary($order, $d);
+                    $this->fulfillment->finalizeDeliveredFromDelivery($order, $user, $data['delivery_notes'] ?? null, $this->deliveryCompletionTime($order, $d));
+
+                    return $this->summary($order->refresh(), $d->refresh());
                 }
                 $valid = $d->method === OrderDelivery::STORE_PICKUP ? $d->status === OrderDelivery::AWAITING_PICKUP : $d->status === OrderDelivery::OUT_FOR_DELIVERY;
                 if (! $valid) {
@@ -398,10 +400,12 @@ class OrderDeliveryService
 
     public function getOperationalSummary(Order $order): array
     {
+        $d = OrderDelivery::where('order_id', $order->id)->first();
+        $order->setRelation('delivery', $d);
+
         if (! $order->delivery_flow_version && $order->effectiveFulfillmentStatus() === Order::FULFILLMENT_DELIVERED) {
             return ['available' => false, 'legacy' => true, 'status' => 'delivered', 'message' => 'Pedido entregado antes del flujo de despacho.'];
         }
-        $d = OrderDelivery::where('order_id', $order->id)->first();
 
         return $d ? $this->summary($order, $d) : ['available' => false, 'legacy' => ! $order->delivery_flow_version, 'can_initialize' => $order->effectiveFulfillmentStatus() === Order::FULFILLMENT_READY];
     }
@@ -440,6 +444,15 @@ class OrderDeliveryService
         }
 
         return $d;
+    }
+
+    private function deliveryCompletionTime(Order $order, OrderDelivery $delivery): mixed
+    {
+        return $order->delivered_at
+            ?: ($order->delivery_type === 'pickup' ? $order->picked_up_at : null)
+            ?: ($order->delivery_type === 'pickup' ? $delivery->picked_up_at : null)
+            ?: $delivery->delivered_at
+            ?: $delivery->confirmed_at;
     }
 
     private function assertReady(Order $order): void
@@ -504,6 +517,7 @@ class OrderDeliveryService
 
     private function summary(Order $o, OrderDelivery $d): array
     {
+        $o->setRelation('delivery', $d);
         $d->load(['pickupWarehouse.branch', 'deliveryUser:id,name,phone', 'creator:id,name', 'updater:id,name', 'assigner:id,name', 'confirmer:id,name', 'attempts.responsible:id,name', 'attempts.reporter:id,name', 'history.user:id,name']);
         $payment = $this->payments->approvedCashOnDeliveryFor($o);
         $s = $d->status;

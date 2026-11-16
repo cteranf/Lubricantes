@@ -122,7 +122,7 @@
                     <template #cell-id="{ row }"><span class="font-semibold">Pedido #{{ row.id }}</span></template>
                     <template #cell-customer_name="{ row }"><span>{{ row.customer_name }}</span></template>
                     <template #cell-total="{ row }"><span class="font-semibold">S/ {{ row.total }}</span></template>
-                    <template #cell-fulfillment_status="{ row }"><span class="rounded-full bg-blue-100 px-2 py-1 text-blue-800">{{ stateLabel(row.fulfillment_status || legacyState(row), row) }}</span></template>
+                    <template #cell-fulfillment_status="{ row }"><span class="rounded-full bg-blue-100 px-2 py-1 text-blue-800">{{ stateLabel(row.fulfillment_status, row) }}</span></template>
                     <template #cell-payment_method="{ row }"><span class="text-xs uppercase">{{ row.payment_method || '—' }}</span></template>
                     <template #cell-payment_status="{ row }"><span :class="row.payment_status === 'approved' ? 'font-semibold text-green-700' : 'text-amber-700'">{{ row.payment_status || '—' }}</span></template>
                     <template #cell-warehouse_name="{ row }"><span>{{ row.warehouse_name || '—' }}</span></template>
@@ -280,7 +280,6 @@ const actionStatusMessages = {
 const listErrorMessage = computed(() => statusMessages[list.error.value?.response?.status] || 'No se pudieron cargar los pedidos.');
 
 function stateLabel(status, order) { return ({ reserved: 'Reservado', preparing: 'En preparación', ready: order?.delivery_type === 'pickup' ? 'Listo para recoger' : 'Listo para entrega', delivered: order?.delivery_type === 'pickup' ? 'Recogido' : 'Entregado', canceled: 'Cancelado' })[status] || status || 'Reservado'; }
-function legacyState(order) { return ['canceled', 'rejected'].includes(order.status) ? 'canceled' : order.status === 'delivered' ? 'delivered' : 'reserved'; }
 function deliveryLabel(order) { return order.delivery_type === 'pickup' ? `Recojo en sede · ${order.pickup_branch_name_snapshot || 'Sede histórica'}` : 'Envío a domicilio'; }
 const deadlineLabel = (status) => ({ preparing: 'En preparación', within_deadline: 'Dentro del plazo', expired: 'Recojo vencido · requiere revisión administrativa', picked_up: 'Recogido', not_applicable: 'No aplica' })[status] || status;
 const paymentSubmissionLabel = (status) => ({ pending_review: 'Pendiente de Tesorería', observed: 'Observado por Tesorería', approved: 'Aprobado por Tesorería', rejected: 'Rechazado por Tesorería', expired: 'Presentación vencida', canceled: 'Presentación cancelada' })[status] || 'Pago gestionado por Tesorería';

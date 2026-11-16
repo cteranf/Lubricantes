@@ -38,6 +38,7 @@ class OrderController extends Controller
                 'items:id,order_id,product_id,quantity,price,subtotal',
                 'items.product:id,name,image_path',
                 'items.product.images:id,product_id,image_path,variants,is_primary,sort_order,processing_status',
+                'delivery:id,order_id,status',
             ])
             ->latest()
             ->get();
