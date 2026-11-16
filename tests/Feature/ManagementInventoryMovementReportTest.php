@@ -44,7 +44,7 @@ class ManagementInventoryMovementReportTest extends TestCase
 
     public static function movementTypes(): array
     {
-        return [[InventoryMovement::INITIAL, 'in', 1], [InventoryMovement::MANUAL_IN, 'in', 1], [InventoryMovement::MANUAL_OUT, 'out', -1], [InventoryMovement::TRANSFER_IN, 'in', 1], [InventoryMovement::TRANSFER_OUT, 'out', -1], [InventoryMovement::SALE, 'out', -1], [InventoryMovement::CANCELLATION_RETURN, 'in', 1]];
+        return [[InventoryMovement::INITIAL, 'in', 1], [InventoryMovement::MANUAL_IN, 'in', 1], [InventoryMovement::MANUAL_OUT, 'out', -1], [InventoryMovement::TRANSFER_IN, 'in', 1], [InventoryMovement::TRANSFER_OUT, 'out', -1], [InventoryMovement::SALE, 'out', -1], [InventoryMovement::CANCELLATION_RETURN, 'in', 1], [InventoryMovement::RECEIPT, 'in', 1]];
     }
 
     public function test_movements_report_types_totals_and_unknown_are_safe(): void

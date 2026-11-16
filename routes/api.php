@@ -194,6 +194,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/inventories/{product}', [AdminInventoryController::class, 'show'])->name('inventories.show');
             Route::post('/inventories/adjustments', [AdminInventoryController::class, 'adjustment'])->name('inventories.adjustments');
             Route::post('/inventories/transfers', [AdminInventoryController::class, 'transfer'])->name('inventories.transfers');
+            Route::get('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'index'])->name('inventory-receipts.index');
+            Route::post('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'store'])->name('inventory-receipts.store');
+            Route::get('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'show'])->name('inventory-receipts.show');
+            Route::put('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'update'])->name('inventory-receipts.update');
+            Route::post('/inventory-receipts/{receipt}/confirm', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'confirm'])->name('inventory-receipts.confirm');
+            Route::post('/inventory-receipts/{receipt}/cancel', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'cancel'])->name('inventory-receipts.cancel');
             Route::get('/inventory-movements', [AdminInventoryMovementController::class, 'index'])->name('inventory-movements.index');
             Route::apiResource('orders', AdminOrderController::class)->only(['index', 'update']);
             Route::put('/orders/{id}/tracking', [AdminOrderController::class, 'updateTracking'])->name('orders.tracking.update');

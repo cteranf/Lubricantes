@@ -7,6 +7,7 @@ use App\Exceptions\InventoryException;
 use App\Exceptions\InventoryReservationConflictException;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReservation;
+use App\Models\InventoryReceiptLine;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
 use App\Models\OrderItem;
@@ -995,6 +996,101 @@ class InventoryService
         // public mass-assignable attribute. This row is already locked here.
         Product::whereKey($product->id)->update(['stock' => $total]);
         $product->setAttribute('stock', $total);
+    }
+
+    /**
+     * Apply a receipt's physical quantities while preserving the established
+     * warehouse -> balance -> product lock order. The caller owns the outer
+     * transaction and has already locked the receipt and its lines.
+     *
+     * @param  Collection<int, InventoryReceiptLine>  $lines
+     */
+    public function receiveInventory(int $warehouseId, Collection $lines, User $actor, string $receiptReference): array
+    {
+        $this->requireOuterTransaction();
+
+        $lines = $lines->sortBy(fn (InventoryReceiptLine $line) => [(int) $line->product_id, (int) $line->id])->values();
+        $productIds = $lines->pluck('product_id')->map(fn ($id) => (int) $id)->unique()->sort()->values();
+        if ($lines->isEmpty() || $productIds->count() !== $lines->count()) {
+            throw new InventoryException('Las líneas de recepción no son válidas.');
+        }
+
+        $warehouses = Warehouse::query()->with('branch')->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $warehouse = $warehouses->get($warehouseId);
+        if (! $warehouse instanceof Warehouse) {
+            throw new InventoryException('El almacén ya no existe.');
+        }
+        $this->assertActive($warehouse);
+
+        foreach ($productIds as $productId) {
+            WarehouseInventory::insertOrIgnore([
+                'warehouse_id' => $warehouseId,
+                'product_id' => $productId,
+                'quantity' => 0,
+                'reserved_quantity' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $pairs = WarehouseInventory::query()
+            ->whereIn('product_id', $productIds)
+            ->get(['warehouse_id', 'product_id'])
+            ->map(fn (WarehouseInventory $inventory) => [
+                'warehouse_id' => (int) $inventory->warehouse_id,
+                'product_id' => (int) $inventory->product_id,
+            ]);
+        $pairs = $pairs->concat($productIds->map(fn (int $productId) => [
+            'warehouse_id' => $warehouseId,
+            'product_id' => $productId,
+        ]));
+        $inventories = $this->balanceLocks->lock($pairs);
+
+        $products = Product::query()->whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        if ($products->count() !== $productIds->count()) {
+            throw new InventoryException('Uno de los productos ya no existe.');
+        }
+
+        $movements = [];
+        foreach ($lines as $line) {
+            $productId = (int) $line->product_id;
+            $quantity = (int) $line->quantity;
+            $product = $products->get($productId);
+            $inventory = $this->lockedBalance($inventories, $warehouseId, $productId);
+            $newPhysical = (int) $inventory->quantity + $quantity;
+            $productPhysical = (int) $inventories->where('product_id', $productId)->sum('quantity') + $quantity;
+
+            if ($quantity < 1
+                || $newPhysical > (int) config('inventory_receipts.max_inventory_quantity')
+                || $productPhysical > (int) config('inventory_receipts.max_product_stock')
+                || (int) $product->stock < 0
+                || (int) $inventory->reserved_quantity > (int) $inventory->quantity) {
+                throw new InventoryException('La recepción supera los límites de inventario permitidos.');
+            }
+
+            $key = 'inventory-receipt-line-'.$line->id;
+            if (InventoryMovement::query()->where('idempotency_key', $key)->exists()) {
+                throw new InventoryException('La recepción contiene un movimiento previo incompatible.');
+            }
+
+            $movements[] = $this->applyLocked(
+                $inventory,
+                $quantity,
+                InventoryMovement::RECEIPT,
+                'Recepción '.$receiptReference,
+                $actor,
+                'inventory_receipt_line',
+                (string) $line->id,
+                $key,
+                ['receipt_reference' => $receiptReference]
+            );
+        }
+
+        foreach ($productIds as $productId) {
+            $this->syncProductStockFromLockedBalances($products->get($productId), $inventories);
+        }
+
+        return $movements;
     }
 
     private function resolutionReservationKey(int $caseId, int $itemId, int $sequence): string

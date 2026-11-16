@@ -28,6 +28,7 @@ class ManagementReportsFrontendTest extends TestCase
             $this->assertStringContainsString($contract, $view);
         }
         $this->assertStringContainsString('query: { tab: activeSection.value, ...safeParams() }', $view);
+        $this->assertStringContainsString("'receipt'", $view, 'The movement type filter must include bulk receipts.');
         $this->assertStringContainsString('buildManagementReportParams(activeSection.value, filters.value', $view);
         $this->assertStringNotContainsString("key === 'tab' || allowed.includes(key)", $view);
         $this->assertStringNotContainsString('v-html', $view);
