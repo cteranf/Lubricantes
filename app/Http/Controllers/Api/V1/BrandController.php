@@ -3,18 +3,18 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\BrandResource;
 use App\Models\Brand;
-use Illuminate\Http\Request;
 
 class BrandController extends Controller
 {
     public function index()
     {
-        return Brand::all();
+        return response()->json(BrandResource::collection(Brand::all())->resolve(request()));
     }
 
     public function show($slug)
     {
-        return Brand::where('slug', $slug)->firstOrFail();
+        return response()->json((new BrandResource(Brand::where('slug', $slug)->firstOrFail()))->resolve(request()));
     }
 }

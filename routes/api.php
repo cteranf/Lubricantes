@@ -242,6 +242,7 @@ Route::prefix('v1')->group(function () {
             Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');
             Route::apiResource('categories', AdminCategoryController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');
+            Route::delete('/brands/{brand}/image', [AdminBrandController::class, 'removeImage'])->name('brands.image.destroy');
             Route::patch('/brands/{brand}/status', [AdminBrandController::class, 'status'])->name('brands.status');
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'show'])->name('payment-settings.show');
