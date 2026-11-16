@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\InventoryReservation;
 use App\Models\Order;
+use App\Models\OrderHandlingIncident;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\User;
@@ -53,6 +54,72 @@ class AdminOrderListingTest extends TestCase
             ->assertJsonMissingPath('data.0.user')
             ->assertJsonMissingPath('data.0.payment_data')
             ->assertJsonMissingPath('data.0.paymentSubmission');
+    }
+
+    public function test_operational_counts_are_server_wide_scoped_and_open_incidents_are_distinct(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        $orders = [];
+
+        foreach ([
+            Order::FULFILLMENT_RESERVED => 8,
+            Order::FULFILLMENT_PREPARING => 5,
+            Order::FULFILLMENT_READY => 4,
+            Order::FULFILLMENT_CANCELED => 2,
+            Order::FULFILLMENT_DELIVERED => 2,
+        ] as $status => $count) {
+            for ($index = 0; $index < $count; $index++) {
+                $orders[$status][] = $this->order($admin, [
+                    'status' => $status === Order::FULFILLMENT_CANCELED ? 'canceled' : ($status === Order::FULFILLMENT_DELIVERED ? 'delivered' : 'pending'),
+                    'fulfillment_status' => $status,
+                    'tracking_status' => $status === Order::FULFILLMENT_DELIVERED ? 'delivered' : ($status === Order::FULFILLMENT_CANCELED ? 'canceled' : 'pending'),
+                    'payment_method' => $index === 0 ? 'card' : 'transferencia',
+                ]);
+            }
+        }
+
+        $createIncident = function (Order $order, string $status = OrderHandlingIncident::OPEN): void {
+            OrderHandlingIncident::create([
+                'order_id' => $order->id,
+                'type' => 'other',
+                'description' => 'Incidencia sintética',
+                'status' => $status,
+                'reported_at' => now(),
+            ]);
+        };
+        $createIncident($orders[Order::FULFILLMENT_RESERVED][0]);
+        $createIncident($orders[Order::FULFILLMENT_RESERVED][0]);
+        $createIncident($orders[Order::FULFILLMENT_READY][0]);
+        $createIncident($orders[Order::FULFILLMENT_PREPARING][0], OrderHandlingIncident::RESOLVED);
+        $createIncident($orders[Order::FULFILLMENT_CANCELED][0]);
+        $createIncident($orders[Order::FULFILLMENT_DELIVERED][0]);
+
+        Sanctum::actingAs($admin);
+
+        $all = $this->getJson('/api/v1/admin/orders?per_page=15&page=1')->assertOk();
+        $all->assertJsonPath('meta.total', 21)
+            ->assertJsonPath('meta.operational_counts.reserved', 8)
+            ->assertJsonPath('meta.operational_counts.preparing', 5)
+            ->assertJsonPath('meta.operational_counts.ready', 4)
+            ->assertJsonPath('meta.operational_counts.with_incidents', 2);
+        $this->assertCount(15, $all->json('data'));
+
+        $reserved = $this->getJson('/api/v1/admin/orders?fulfillment_status=reserved&per_page=15')->assertOk();
+        $reserved->assertJsonPath('meta.total', 8)
+            ->assertJsonPath('meta.operational_counts.reserved', 8)
+            ->assertJsonPath('meta.operational_counts.preparing', 5)
+            ->assertJsonPath('meta.operational_counts.ready', 4);
+
+        $incidents = $this->getJson('/api/v1/admin/orders?has_open_incidents=1&per_page=15')->assertOk();
+        $incidents->assertJsonPath('meta.total', 2)
+            ->assertJsonPath('meta.operational_counts.with_incidents', 2);
+        $this->assertCount(2, $incidents->json('data'), 'Multiple open incidents must not duplicate their order.');
+
+        $cardScoped = $this->getJson('/api/v1/admin/orders?payment_method=card&fulfillment_status=ready')->assertOk();
+        $cardScoped->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('meta.operational_counts.reserved', 1)
+            ->assertJsonPath('meta.operational_counts.preparing', 1)
+            ->assertJsonPath('meta.operational_counts.ready', 1);
     }
 
     /** @dataProvider supportedPageSizes */

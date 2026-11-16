@@ -72,6 +72,39 @@ final class OrderOperationalStatus
         $query->whereRaw('('.self::sqlExpression().') = ?', [$status]);
     }
 
+    /** @return array{total:int, reserved:int, preparing:int, ready:int, with_incidents:int} */
+    public static function aggregateListingCounts(Builder $query): array
+    {
+        $expression = self::sqlExpression();
+        $counts = (clone $query)
+            ->reorder()
+            ->selectRaw(
+                'COUNT(*) AS total, '
+                .'COALESCE(SUM(CASE WHEN ('.$expression.') = ? THEN 1 ELSE 0 END), 0) AS reserved, '
+                .'COALESCE(SUM(CASE WHEN ('.$expression.') = ? THEN 1 ELSE 0 END), 0) AS preparing, '
+                .'COALESCE(SUM(CASE WHEN ('.$expression.') = ? THEN 1 ELSE 0 END), 0) AS ready, '
+                .'COALESCE(SUM(CASE WHEN ('.$expression.') IN (\'reserved\', \'preparing\', \'ready\') AND EXISTS ('
+                .'SELECT 1 FROM order_handling_incidents AS active_order_incidents '
+                .'WHERE active_order_incidents.order_id = orders.id AND active_order_incidents.status = ?'
+                .') THEN 1 ELSE 0 END), 0) AS with_incidents',
+                [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY, \App\Models\OrderHandlingIncident::OPEN]
+            )
+            ->first();
+
+        return [
+            'total' => (int) $counts->total,
+            'reserved' => (int) $counts->reserved,
+            'preparing' => (int) $counts->preparing,
+            'ready' => (int) $counts->ready,
+            'with_incidents' => (int) $counts->with_incidents,
+        ];
+    }
+
+    public static function applyActiveOperationalFilter(Builder $query): void
+    {
+        $query->whereRaw('('.self::sqlExpression().") IN ('reserved', 'preparing', 'ready')");
+    }
+
     private static function sqlExpression(): string
     {
         return <<<'SQL'

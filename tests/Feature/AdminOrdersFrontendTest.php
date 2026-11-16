@@ -661,9 +661,22 @@ class AdminOrdersFrontendTest extends TestCase
             ':disabled="detailLoading && openingOrderId === row.id"',
             'aria-live="polite"',
             '@media (prefers-reduced-motion: reduce)',
+            'aria-label="Indicadores operativos"',
+            'const operationalCounts = computed(() => list.meta.value.operational_counts || {})',
+            "countKey: 'with_incidents'",
+            'function applyOperationalIndicator(indicator)',
+            "list.filters.has_open_incidents = ''",
+            "list.filters.fulfillment_status = ''",
+            'return list.applyFilters()',
+            "filters: ['search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status', 'has_open_incidents'",
+            "['has_open_incidents', 'Incidencias abiertas'",
         ] as $contract) {
             $this->assertStringContainsString($contract, $view);
         }
+
+        $this->assertStringNotContainsString('list.rows.value.filter', $view);
+        $this->assertStringNotContainsString('list.rows.value.reduce', $view);
+        $this->assertStringContainsString(':aria-pressed="isOperationalIndicatorActive(indicator)"', $view);
 
         $this->assertStringContainsString('showClearFilters: { type: Boolean, default: true }', $table);
         $this->assertStringContainsString('v-if="showClearFilters"', $table);

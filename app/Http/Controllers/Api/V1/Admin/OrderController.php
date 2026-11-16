@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ListAdminOrdersRequest;
 use App\Http\Resources\AdminOrderListResource;
 use App\Models\Order;
+use App\Models\OrderHandlingIncident;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
 use App\Services\OrderFulfillmentService;
@@ -29,7 +30,14 @@ class OrderController extends Controller
 
         $query = Order::query();
         $this->applyListingFilters($query, $filters);
-        $total = (clone $query)->count();
+        $countFilters = array_diff_key($filters, array_flip(['fulfillment_status', 'has_open_incidents']));
+        $countQuery = Order::query();
+        $this->applyListingFilters($countQuery, $countFilters);
+        $listingCounts = OrderOperationalStatus::aggregateListingCounts($countQuery);
+        $operationalCounts = array_diff_key($listingCounts, ['total' => true]);
+        $total = isset($filters['fulfillment_status']) || isset($filters['has_open_incidents'])
+            ? (clone $query)->count()
+            : $listingCounts['total'];
         $lastPage = max(1, (int) ceil($total / $perPage));
         $currentPage = min($requestedPage, $lastPage);
 
@@ -63,6 +71,7 @@ class OrderController extends Controller
                 'last_page' => $lastPage,
                 'from' => $total === 0 ? null : (($currentPage - 1) * $perPage) + 1,
                 'to' => $total === 0 ? null : min($currentPage * $perPage, $total),
+                'operational_counts' => $operationalCounts,
             ],
             'links' => [
                 'first' => $currentPage > 1 ? 1 : null,
@@ -110,6 +119,11 @@ class OrderController extends Controller
 
         if (isset($filters['fulfillment_status'])) {
             $this->whereEffectiveFulfillmentStatus($query, $filters['fulfillment_status']);
+        }
+
+        if (($filters['has_open_incidents'] ?? null) === '1') {
+            OrderOperationalStatus::applyActiveOperationalFilter($query);
+            $query->whereHas('handlingIncidents', fn ($incidents) => $incidents->where('status', OrderHandlingIncident::OPEN));
         }
 
         foreach (['payment_method', 'payment_status', 'delivery_type'] as $column) {

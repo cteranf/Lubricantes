@@ -7,6 +7,12 @@
                 <p class="text-sm text-slate-600 sm:text-base">Supervisa y gestiona el avance de los pedidos</p>
             </header>
             <section class="space-y-4">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores operativos" aria-live="polite" :aria-busy="list.loading.value">
+                    <button v-for="indicator in operationalIndicators" :key="indicator.key" type="button" class="flex min-h-24 items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition hover:border-blue-300 hover:shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" :class="isOperationalIndicatorActive(indicator) ? 'border-blue-600 ring-2 ring-blue-100' : 'border-slate-200'" :aria-pressed="isOperationalIndicatorActive(indicator)" :aria-label="`${indicator.label}: ${operationalCounts[indicator.countKey] ?? 0} pedidos. ${isOperationalIndicatorActive(indicator) ? 'Filtro activo' : 'Filtrar pedidos'}`" :disabled="list.loading.value" @click="applyOperationalIndicator(indicator)">
+                        <span><span class="block text-sm font-semibold text-slate-700">{{ indicator.label }}</span><span class="mt-1 block text-2xl font-bold tabular-nums text-slate-950">{{ operationalCounts[indicator.countKey] ?? 0 }}</span></span>
+                        <i :class="indicator.icon" class="text-xl text-blue-700" aria-hidden="true" />
+                    </button>
+                </div>
                 <div class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:hidden">
                     <button
                         id="orders-mobile-filters-toggle"
@@ -295,7 +301,26 @@ const route = useRoute();
 const router = useRouter();
 const toast = useToast();
 const confirm = useConfirm();
-const list = useAdminListQuery({ route, router, filters: ['search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status', 'payment_method', 'payment_status', 'warehouse_id', 'reservation_status', 'delivery_type', 'date_from', 'date_to'], sorts: ['created_at', 'total', 'id'], fetchPage: async (params) => (await api.get('/admin/orders', { params })).data });
+const list = useAdminListQuery({ route, router, filters: ['search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status', 'has_open_incidents', 'payment_method', 'payment_status', 'warehouse_id', 'reservation_status', 'delivery_type', 'date_from', 'date_to'], sorts: ['created_at', 'total', 'id'], fetchPage: async (params) => (await api.get('/admin/orders', { params })).data });
+const operationalCounts = computed(() => list.meta.value.operational_counts || {});
+const operationalIndicators = [
+    { key: 'reserved', countKey: 'reserved', label: 'Por atender', icon: 'pi pi-inbox', filter: { fulfillment_status: 'reserved' } },
+    { key: 'preparing', countKey: 'preparing', label: 'En preparación', icon: 'pi pi-cog', filter: { fulfillment_status: 'preparing' } },
+    { key: 'ready', countKey: 'ready', label: 'Listos', icon: 'pi pi-check-circle', filter: { fulfillment_status: 'ready' } },
+    { key: 'incidents', countKey: 'with_incidents', label: 'Con incidencias', icon: 'pi pi-exclamation-triangle', filter: { has_open_incidents: '1' } },
+];
+function isOperationalIndicatorActive(indicator) {
+    const operationalFilter = indicator.filter.fulfillment_status || '';
+    const incidentFilter = indicator.filter.has_open_incidents || '';
+    return list.filters.fulfillment_status === operationalFilter && list.filters.has_open_incidents === incidentFilter;
+}
+function applyOperationalIndicator(indicator) {
+    const active = isOperationalIndicatorActive(indicator);
+    list.filters.fulfillment_status = '';
+    list.filters.has_open_incidents = '';
+    if (!active) Object.assign(list.filters, indicator.filter);
+    return list.applyFilters();
+}
 const columns = [
     { key: 'id', label: 'Pedido', sortable: true, filterKey: 'order_id', filterMatchMode: 'equals', class: 'whitespace-nowrap' },
     { key: 'customer_name', label: 'Cliente', filterKey: 'customer', filterMatchMode: 'contains', class: 'min-w-40' },
@@ -320,7 +345,7 @@ const mobileFiltersToggle = ref(null);
 let mobileFilterCloseSequence = 0;
 const activeFilterCount = computed(() => {
     const filters = list.filters;
-    const singleFilters = [filters.search, filters.order_id, filters.customer, filters.fulfillment_status, filters.payment_method,
+    const singleFilters = [filters.search, filters.order_id, filters.customer, filters.fulfillment_status, filters.has_open_incidents, filters.payment_method,
         filters.payment_status, filters.warehouse_id, filters.reservation_status, filters.delivery_type];
     return singleFilters.filter((value) => value !== '').length
         + Number(Boolean(filters.total_min || filters.total_max))
@@ -334,6 +359,7 @@ const activeFilterTags = computed(() => {
         ['order_id', 'Pedido', filters.order_id],
         ['customer', 'Cliente', filters.customer],
         ['fulfillment_status', 'Estado operativo', optionLabel(fulfillmentOptions, filters.fulfillment_status)],
+        ['has_open_incidents', 'Incidencias abiertas', filters.has_open_incidents === '1' ? 'Sí' : ''],
         ['payment_status', 'Estado de pago', optionLabel(paymentStatusOptions, filters.payment_status)],
         ['payment_method', 'Método de pago', optionLabel(paymentMethodOptions, filters.payment_method)],
         ['delivery_type', 'Entrega', optionLabel(deliveryOptions, filters.delivery_type)],

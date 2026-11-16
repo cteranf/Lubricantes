@@ -32,7 +32,7 @@ class ListAdminOrdersRequest extends FormRequest
     private const FILTER_KEYS = [
         'search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status',
         'payment_method', 'payment_status', 'warehouse_id', 'reservation_status',
-        'delivery_type', 'date_from', 'date_to',
+        'delivery_type', 'date_from', 'date_to', 'has_open_incidents',
     ];
 
     private const QUERY_KEYS = [
@@ -94,6 +94,7 @@ class ListAdminOrdersRequest extends FormRequest
             'payment_status' => ['sometimes', 'nullable', 'string', Rule::in(self::PAYMENT_STATUSES)],
             'warehouse_id' => ['sometimes', 'nullable', 'string', 'regex:/\A[1-9][0-9]*\z/D', 'max:19', Rule::exists('warehouses', 'id')],
             'reservation_status' => ['sometimes', 'nullable', 'string', Rule::in(InventoryReservation::STATUSES)],
+            'has_open_incidents' => ['sometimes', 'string', Rule::in(['1'])],
             'delivery_type' => ['sometimes', 'nullable', 'string', Rule::in(self::DELIVERY_TYPES)],
             'date_from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
             'date_to' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
