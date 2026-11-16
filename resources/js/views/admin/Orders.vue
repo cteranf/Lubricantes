@@ -1,9 +1,13 @@
 <template>
     <AdminLayout>
         <div class="container mx-auto space-y-5 px-4 py-8">
-            <h1 class="text-3xl font-medium text-slate-700">Preparación y entrega de pedidos</h1>
-            <section class="overflow-hidden rounded-lg bg-white shadow">
-                <div class="space-y-3 p-3 lg:hidden">
+            <header class="space-y-2">
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">Operaciones</p>
+                <h1 class="text-3xl font-bold tracking-tight text-slate-900">Preparación y entrega de pedidos</h1>
+                <p class="text-sm text-slate-600 sm:text-base">Supervisa y gestiona el avance de los pedidos</p>
+            </header>
+            <section class="space-y-4">
+                <div class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:hidden">
                     <button
                         id="orders-mobile-filters-toggle"
                         ref="mobileFiltersToggle"
@@ -102,11 +106,22 @@
                         </fieldset>
                         <div class="flex flex-col gap-2 pt-2 sm:flex-row">
                             <button type="submit" class="min-h-11 w-full rounded bg-blue-700 px-4 py-2 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-900">Aplicar</button>
-                            <button type="button" class="min-h-11 w-full rounded border border-slate-400 bg-white px-4 py-2 font-semibold text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" @click="clearMobileFilters">Limpiar</button>
+                            <button v-if="hasActiveFilters" type="button" class="min-h-11 w-full rounded border border-slate-400 bg-white px-4 py-2 font-semibold text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" @click="clearMobileFilters">Limpiar filtros</button>
                         </div>
                     </form>
                 </div>
-                <AdminDataTable :rows="list.rows.value" :columns="columns" :filter-values="list.filters" row-key="id" :page="list.meta.value.current_page" :page-size="list.meta.value.per_page" :total-records="list.meta.value.total" :loading="list.loading.value" :error="list.error.value" :sort="{ column: list.sort.value, direction: list.direction.value }" @retry="list.retry" @page="list.setPage" @per-page="list.setPerPage" @sort="list.setSort" @filters-change="list.setFilters" @clear-filters="list.clearFilters">
+                <div v-if="activeFilterTags.length" class="flex flex-wrap items-center gap-2" aria-label="Filtros activos">
+                    <span class="mr-1 text-sm font-semibold text-slate-600">Filtros activos:</span>
+                    <button v-for="filter in activeFilterTags" :key="filter.key" type="button" class="inline-flex min-h-9 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 text-sm font-medium text-blue-900 hover:bg-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" :aria-label="`Quitar filtro ${filter.label}`" @click="removeFilter(filter.key)">
+                        <span>{{ filter.label }}: {{ filter.value }}</span><i class="pi pi-times text-xs" aria-hidden="true" />
+                    </button>
+                </div>
+                <div v-if="list.error.value" class="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900 sm:flex-row sm:items-center sm:justify-between" role="alert" aria-live="assertive">
+                    <span>{{ list.rows.value.length ? 'No se pudo actualizar el listado. Se conservan los resultados anteriores.' : listErrorMessage }}</span>
+                    <Button type="button" label="Reintentar" icon="pi pi-refresh" severity="danger" outlined size="small" :disabled="list.loading.value" @click="list.retry" />
+                </div>
+                <div class="hidden md:block" aria-label="Tabla de pedidos">
+                <AdminDataTable :rows="list.rows.value" :columns="columns" :filter-values="list.filters" row-key="id" :page="list.meta.value.current_page" :page-size="list.meta.value.per_page" :total-records="list.meta.value.total" :loading="list.loading.value" :error="null" :show-clear-filters="hasActiveFilters" :sort="{ column: list.sort.value, direction: list.direction.value }" @retry="list.retry" @page="list.setPage" @per-page="list.setPerPage" @sort="list.setSort" @filters-change="list.setFilters" @clear-filters="list.clearFilters">
                     <template #error><span>{{ listErrorMessage }}</span></template>
                     <template #empty>{{ list.meta.value.total === 0 && hasActiveFilters ? 'No se encontraron pedidos con los filtros aplicados' : 'No hay pedidos para mostrar' }}</template>
                     <template #filter-id="{ filterModel, filterCallback }"><InputText v-model="filterModel.value" inputmode="numeric" class="w-full" placeholder="ID exacto" @input="filterCallback" /></template>
@@ -119,18 +134,43 @@
                     <template #filter-reservation_status="{ filterModel, filterCallback }"><Select v-model="filterModel.value" :options="reservationOptions" option-label="label" option-value="value" placeholder="Todos" class="w-full" @change="filterCallback" /></template>
                     <template #filter-delivery_type="{ filterModel, filterCallback }"><Select v-model="filterModel.value" :options="deliveryOptions" option-label="label" option-value="value" placeholder="Todos" class="w-full" @change="filterCallback" /></template>
                     <template #filter-created_at="{ filterModel, filterCallback }"><DatePicker v-model="filterModel.value" selection-mode="range" date-format="yy-mm-dd" :manual-input="false" show-icon class="w-full" @update:model-value="filterCallback" /></template>
-                    <template #cell-id="{ row }"><span class="font-semibold">Pedido #{{ row.id }}</span></template>
-                    <template #cell-customer_name="{ row }"><span>{{ row.customer_name }}</span></template>
-                    <template #cell-total="{ row }"><span class="font-semibold">S/ {{ row.total }}</span></template>
-                    <template #cell-fulfillment_status="{ row }"><span class="rounded-full bg-blue-100 px-2 py-1 text-blue-800">{{ stateLabel(row.fulfillment_status, row) }}</span></template>
-                    <template #cell-payment_method="{ row }"><span class="text-xs uppercase">{{ row.payment_method || '—' }}</span></template>
-                    <template #cell-payment_status="{ row }"><span :class="row.payment_status === 'approved' ? 'font-semibold text-green-700' : 'text-amber-700'">{{ row.payment_status || '—' }}</span></template>
-                    <template #cell-warehouse_name="{ row }"><span>{{ row.warehouse_name || '—' }}</span></template>
-                    <template #cell-reservation_status="{ row }"><span>{{ row.reservation_status || 'legacy' }}</span></template>
-                    <template #cell-delivery_type="{ row }"><span>{{ deliveryLabel(row) }}</span></template>
-                    <template #cell-created_at="{ row }"><span>{{ formatDate(row.created_at) }}</span></template>
-                    <template #actions="{ row }"><button type="button" class="whitespace-nowrap font-semibold text-blue-700 underline" @click="openOrder(row)"><i class="pi pi-eye mr-1" aria-hidden="true"/>Gestionar</button></template>
+                    <template #cell-id="{ row }"><span class="font-bold text-slate-900">#{{ row.id }}</span></template>
+                    <template #cell-customer_name="{ row }"><span class="font-medium text-slate-800">{{ row.customer_name || 'Cliente no disponible' }}</span></template>
+                    <template #cell-total="{ row }"><span class="block text-right font-bold tabular-nums text-slate-900">{{ moneyLabel(row.total) }}</span></template>
+                    <template #cell-fulfillment_status="{ row }"><Tag :value="stateLabel(row.fulfillment_status, row)" :severity="stateSeverity(row.fulfillment_status)" :class="stateClass(row.fulfillment_status)" /></template>
+                    <template #cell-payment_method="{ row }"><span class="text-sm text-slate-600">{{ paymentMethodLabel(row.payment_method) }}</span></template>
+                    <template #cell-payment_status="{ row }"><Tag :value="paymentStatusLabel(row.payment_status)" :severity="paymentStatusSeverity(row.payment_status)" /></template>
+                    <template #cell-warehouse_name="{ row }"><div class="space-y-1"><p>{{ row.warehouse_name || 'Almacén no disponible' }}</p><Tag :value="reservationLabel(row.reservation_status)" :severity="reservationSeverity(row.reservation_status)" /></div></template>
+                    <template #cell-reservation_status="{ row }"><Tag :value="reservationLabel(row.reservation_status)" :severity="reservationSeverity(row.reservation_status)" /></template>
+                    <template #cell-delivery_type="{ row }"><span class="text-sm font-medium text-slate-700">{{ deliveryLabel(row) }}</span></template>
+                    <template #cell-created_at="{ row }"><span class="whitespace-nowrap text-sm text-slate-600">{{ formatDate(row.created_at) }}</span></template>
+                    <template #actions="{ row }"><Button type="button" label="Gestionar" icon="pi pi-eye" size="small" outlined :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row)" /></template>
                 </AdminDataTable>
+                </div>
+                <div class="space-y-3 md:hidden" aria-label="Pedidos de esta página" :aria-busy="list.loading.value">
+                    <div v-if="list.loading.value && !list.rows.value.length" class="rounded-xl border border-slate-200 bg-white p-5 text-center text-sm text-slate-600" role="status" aria-live="polite"><i class="pi pi-spin pi-spinner mr-2" aria-hidden="true" />Cargando pedidos…</div>
+                    <article v-for="row in list.rows.value" :key="row.id" class="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div class="flex items-start justify-between gap-3"><div><p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Pedido</p><h2 class="text-lg font-bold text-slate-900">#{{ row.id }}</h2></div><span class="text-right text-xs text-slate-500">{{ formatDate(row.created_at) }}</span></div>
+                        <p class="break-words font-semibold text-slate-800">{{ row.customer_name || 'Cliente no disponible' }}</p>
+                        <div class="flex flex-wrap gap-2"><Tag :value="stateLabel(row.fulfillment_status, row)" :severity="stateSeverity(row.fulfillment_status)" :class="stateClass(row.fulfillment_status)"/><Tag :value="paymentStatusLabel(row.payment_status)" :severity="paymentStatusSeverity(row.payment_status)"/></div>
+                        <dl class="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                            <div><dt class="text-xs font-medium text-slate-500">Entrega</dt><dd class="mt-0.5 font-medium text-slate-800">{{ deliveryLabel(row) }}</dd></div>
+                            <div><dt class="text-xs font-medium text-slate-500">Importe</dt><dd class="mt-0.5 text-right font-bold tabular-nums text-slate-900">{{ moneyLabel(row.total) }}</dd></div>
+                            <div><dt class="text-xs font-medium text-slate-500">Método de pago</dt><dd class="mt-0.5 text-slate-700">{{ paymentMethodLabel(row.payment_method) }}</dd></div>
+                            <div><dt class="text-xs font-medium text-slate-500">Almacén · reserva</dt><dd class="mt-0.5 break-words text-slate-700">{{ row.warehouse_name || '—' }} · {{ reservationLabel(row.reservation_status) }}</dd></div>
+                        </dl>
+                        <Button type="button" label="Gestionar" icon="pi pi-eye" class="w-full" size="small" :disabled="detailLoading && openingOrderId === row.id" :aria-label="`Gestionar pedido ${row.id}`" @click="openOrder(row)" />
+                    </article>
+                    <div v-if="!list.loading.value && !list.rows.value.length && !list.error.value" class="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center" role="status">
+                        <i class="pi pi-inbox mb-3 text-2xl text-slate-400" aria-hidden="true" />
+                        <h2 class="font-semibold text-slate-800">{{ hasActiveFilters ? 'No se encontraron pedidos' : 'No hay pedidos para mostrar' }}</h2>
+                        <p class="mt-1 text-sm text-slate-600">{{ hasActiveFilters ? 'Prueba cambiando o limpiando los filtros.' : 'Los pedidos aparecerán aquí cuando estén disponibles.' }}</p>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-3 py-3 shadow-sm" aria-label="Paginación de pedidos">
+                        <p class="text-sm text-slate-600" aria-live="polite">{{ pageSummary }}</p>
+                        <div class="flex gap-2"><Button type="button" label="Anterior" icon="pi pi-chevron-left" severity="secondary" outlined size="small" :disabled="list.loading.value || list.meta.value.current_page <= 1" @click="list.setPage(list.meta.value.current_page - 1)"/><Button type="button" label="Siguiente" icon="pi pi-chevron-right" icon-pos="right" severity="secondary" outlined size="small" :disabled="list.loading.value || list.meta.value.current_page >= list.meta.value.last_page" @click="list.setPage(list.meta.value.current_page + 1)"/></div>
+                    </div>
+                </div>
             </section>
         </div>
 
@@ -166,6 +206,8 @@ import api from '@/api';
 import { useAdminListQuery } from '@/composables/useAdminListQuery';
 import { useToast } from 'primevue/usetoast';
 import { useConfirm } from 'primevue/useconfirm';
+import Button from 'primevue/button';
+import Tag from 'primevue/tag';
 import { formatDateTime } from '@/utils/dateTime';
 import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
@@ -179,14 +221,14 @@ const confirm = useConfirm();
 const list = useAdminListQuery({ route, router, filters: ['search', 'order_id', 'customer', 'total_min', 'total_max', 'fulfillment_status', 'payment_method', 'payment_status', 'warehouse_id', 'reservation_status', 'delivery_type', 'date_from', 'date_to'], sorts: ['created_at', 'total', 'id'], fetchPage: async (params) => (await api.get('/admin/orders', { params })).data });
 const columns = [
     { key: 'id', label: 'Pedido', sortable: true, filterKey: 'order_id', filterMatchMode: 'equals', class: 'whitespace-nowrap' },
-    { key: 'customer_name', label: 'Cliente', filterKey: 'customer', filterMatchMode: 'contains', class: 'min-w-48' },
-    { key: 'total', label: 'Total', sortable: true, filterKey: 'total_range', filterMatchMode: 'between', class: 'hidden md:table-cell whitespace-nowrap', mobileDetail: true },
-    { key: 'fulfillment_status', label: 'Estado', filterKey: 'fulfillment_status', filterMatchMode: 'equals', class: 'whitespace-nowrap' },
-    { key: 'payment_method', label: 'Pago', filterKey: 'payment_method', filterMatchMode: 'equals', class: 'hidden lg:table-cell', mobileDetail: true },
-    { key: 'payment_status', label: 'Estado de pago', filterKey: 'payment_status', filterMatchMode: 'equals', class: 'hidden lg:table-cell', mobileDetail: true },
-    { key: 'warehouse_name', label: 'Almacén', filterKey: 'warehouse_id', filterMatchMode: 'equals', class: 'hidden lg:table-cell', mobileDetail: true },
-    { key: 'reservation_status', label: 'Reserva', filterKey: 'reservation_status', filterMatchMode: 'equals', class: 'hidden lg:table-cell', mobileDetail: true },
-    { key: 'delivery_type', label: 'Entrega', filterKey: 'delivery_type', filterMatchMode: 'equals', class: 'hidden lg:table-cell', mobileDetail: true },
+    { key: 'customer_name', label: 'Cliente', filterKey: 'customer', filterMatchMode: 'contains', class: 'min-w-40' },
+    { key: 'fulfillment_status', label: 'Estado operativo', filterKey: 'fulfillment_status', filterMatchMode: 'equals', class: 'whitespace-nowrap' },
+    { key: 'payment_status', label: 'Estado de pago', filterKey: 'payment_status', filterMatchMode: 'equals', class: 'whitespace-nowrap' },
+    { key: 'payment_method', label: 'Método de pago', filterKey: 'payment_method', filterMatchMode: 'equals', class: 'hidden xl:table-cell whitespace-nowrap', mobileDetail: true },
+    { key: 'delivery_type', label: 'Entrega o recojo', filterKey: 'delivery_type', filterMatchMode: 'equals', class: 'hidden lg:table-cell min-w-44', mobileDetail: true },
+    { key: 'warehouse_name', label: 'Almacén y reserva', filterKey: 'warehouse_id', filterMatchMode: 'equals', class: 'hidden xl:table-cell min-w-36', mobileDetail: true },
+    { key: 'reservation_status', label: 'Estado de reserva', filterKey: 'reservation_status', filterMatchMode: 'equals', class: 'hidden xl:table-cell whitespace-nowrap', mobileDetail: true },
+    { key: 'total', label: 'Importe', sortable: true, filterKey: 'total_range', filterMatchMode: 'between', class: 'min-w-32 text-right whitespace-nowrap', mobileDetail: true },
     { key: 'created_at', label: 'Fecha', sortable: true, filterKey: 'date_range', filterMatchMode: 'between', class: 'hidden lg:table-cell whitespace-nowrap', mobileDetail: true },
 ];
 const fulfillmentOptions = [{ value: 'reserved', label: 'Reservado' }, { value: 'preparing', label: 'En preparación' }, { value: 'ready', label: 'Listo' }, { value: 'delivered', label: 'Entregado' }, { value: 'canceled', label: 'Cancelado' }];
@@ -208,6 +250,42 @@ const activeFilterCount = computed(() => {
         + Number(Boolean(filters.date_from || filters.date_to));
 });
 const hasActiveFilters = computed(() => activeFilterCount.value > 0);
+const activeFilterTags = computed(() => {
+    const filters = list.filters;
+    const tags = [
+        ['search', 'Búsqueda', filters.search],
+        ['order_id', 'Pedido', filters.order_id],
+        ['customer', 'Cliente', filters.customer],
+        ['fulfillment_status', 'Estado operativo', optionLabel(fulfillmentOptions, filters.fulfillment_status)],
+        ['payment_status', 'Estado de pago', optionLabel(paymentStatusOptions, filters.payment_status)],
+        ['payment_method', 'Método de pago', optionLabel(paymentMethodOptions, filters.payment_method)],
+        ['delivery_type', 'Entrega', optionLabel(deliveryOptions, filters.delivery_type)],
+        ['warehouse_id', 'Almacén', optionLabel(warehouseOptions.value, filters.warehouse_id)],
+        ['reservation_status', 'Reserva', optionLabel(reservationOptions, filters.reservation_status)],
+    ].filter(([, , value]) => value !== '');
+    if (filters.total_min || filters.total_max) tags.push(['total_range', 'Importe', `${filters.total_min || '0'}–${filters.total_max || 'sin máximo'}`]);
+    if (filters.date_from || filters.date_to) tags.push(['date_range', 'Fecha', `${filters.date_from || 'inicio'}–${filters.date_to || 'hoy'}`]);
+
+    return tags.map(([key, label, value]) => ({ key, label, value }));
+});
+const pageSummary = computed(() => {
+    const { from, to, total } = list.meta.value;
+
+    return total ? `Mostrando ${from ?? 0}–${to ?? 0} de ${total} pedidos` : '0 pedidos';
+});
+function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value; }
+function removeFilter(key) {
+    if (key === 'total_range') {
+        list.filters.total_min = '';
+        list.filters.total_max = '';
+    } else if (key === 'date_range') {
+        list.filters.date_from = '';
+        list.filters.date_to = '';
+    } else {
+        list.filters[key] = '';
+    }
+    return list.applyFilters();
+}
 function applyMobileFilters() {
     const update = list.applyFilters();
     void closeMobileFilters();
@@ -263,6 +341,7 @@ const delivery = ref(null);
 const detailLoading = ref(false);
 const detailError = ref('');
 const actionLoading = ref(false);
+const openingOrderId = ref(null);
 let detailSequence = 0;
 let actionSequence = 0;
 let modalSequence = 0;
@@ -279,7 +358,15 @@ const actionStatusMessages = {
 };
 const listErrorMessage = computed(() => statusMessages[list.error.value?.response?.status] || 'No se pudieron cargar los pedidos.');
 
-function stateLabel(status, order) { return ({ reserved: 'Reservado', preparing: 'En preparación', ready: order?.delivery_type === 'pickup' ? 'Listo para recoger' : 'Listo para entrega', delivered: order?.delivery_type === 'pickup' ? 'Recogido' : 'Entregado', canceled: 'Cancelado' })[status] || status || 'Reservado'; }
+function stateLabel(status, order) { return ({ reserved: 'Reservado', preparing: 'En preparación', ready: order?.delivery_type === 'pickup' ? 'Listo para recoger' : 'Listo para entrega', delivered: order?.delivery_type === 'pickup' ? 'Recogido' : 'Entregado', canceled: 'Cancelado' })[status] || 'Estado no disponible'; }
+function stateSeverity(status) { return ({ reserved: 'info', preparing: 'info', ready: 'info', delivered: 'success', canceled: 'secondary' })[status] || 'secondary'; }
+function stateClass(status) { return ({ preparing: 'order-state--preparing', ready: 'order-state--ready', canceled: 'order-state--canceled' })[status] || ''; }
+function paymentStatusLabel(status) { return ({ pending: 'Pendiente', approved: 'Aprobado', rejected: 'Rechazado', refund_pending: 'Reembolso pendiente', refunded: 'Reembolsado' })[status] || 'Estado no disponible'; }
+function paymentStatusSeverity(status) { return ({ pending: 'warn', approved: 'success', rejected: 'danger', refund_pending: 'warn', refunded: 'secondary' })[status] || 'secondary'; }
+function paymentMethodLabel(method) { return ({ card: 'Tarjeta', transferencia: 'Transferencia bancaria', contra_entrega: 'Pago contraentrega', pago_en_sede: 'Pago en sede', mercadopago: 'Mercado Pago' })[method] || 'Método no disponible'; }
+function reservationLabel(status) { return ({ active: 'Activa', expired: 'Expirada', consumed: 'Consumida', released: 'Liberada' })[status] || (status ? 'Estado no disponible' : 'Histórica'); }
+function reservationSeverity(status) { return ({ active: 'info', expired: 'warn', consumed: 'success', released: 'secondary' })[status] || 'secondary'; }
+function moneyLabel(value) { const amount = Number(value); return Number.isFinite(amount) ? new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(amount) : 'S/ —'; }
 function deliveryLabel(order) { return order.delivery_type === 'pickup' ? `Recojo en sede · ${order.pickup_branch_name_snapshot || 'Sede histórica'}` : 'Envío a domicilio'; }
 const deadlineLabel = (status) => ({ preparing: 'En preparación', within_deadline: 'Dentro del plazo', expired: 'Recojo vencido · requiere revisión administrativa', picked_up: 'Recogido', not_applicable: 'No aplica' })[status] || status;
 const paymentSubmissionLabel = (status) => ({ pending_review: 'Pendiente de Tesorería', observed: 'Observado por Tesorería', approved: 'Aprobado por Tesorería', rejected: 'Rechazado por Tesorería', expired: 'Presentación vencida', canceled: 'Presentación cancelada' })[status] || 'Pago gestionado por Tesorería';
@@ -287,8 +374,10 @@ const formatDate = formatDateTime;
 const stepText = (date, user) => date ? `${formatDate(date)} · ${user?.name || 'Sistema'}` : 'Pendiente';
 
 async function openOrder(order) {
+    if (detailLoading.value && openingOrderId.value === order.id) return;
     invalidateModalActions();
     const sequence = ++detailSequence;
+    openingOrderId.value = order.id;
     selectedOrder.value = order;
     detailLoading.value = true;
     detailError.value = '';
@@ -310,7 +399,10 @@ async function openOrder(order) {
         const status = error.response?.status;
         detailError.value = statusMessages[status] || 'No se pudo cargar el detalle del pedido.';
     } finally {
-        if (sequence === detailSequence) detailLoading.value = false;
+        if (sequence === detailSequence) {
+            detailLoading.value = false;
+            openingOrderId.value = null;
+        }
     }
 }
 
@@ -326,7 +418,7 @@ function actionContextIsCurrent(context) {
         && active?.sequence === context.sequence
         && active?.action === context.action;
 }
-function closeModal() { invalidateModalActions(); detailSequence++; selectedOrder.value = null; fulfillment.value = { actions: {} }; handling.value = null; delivery.value = null; detailError.value = ''; }
+function closeModal() { invalidateModalActions(); detailSequence++; openingOrderId.value = null; detailLoading.value = false; selectedOrder.value = null; fulfillment.value = { actions: {} }; handling.value = null; delivery.value = null; detailError.value = ''; }
 onBeforeUnmount(() => {
     componentMounted = false;
     void closeMobileFilters({ restoreFocus: false });
@@ -374,3 +466,26 @@ function safeActionErrorMessage(error) {
 }
 function showActionError(error) { toast.add({ severity: 'error', summary: 'Operación no completada', detail: safeActionErrorMessage(error), life: 4500 }); }
 </script>
+
+<style scoped>
+.order-state--preparing {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+.order-state--ready {
+    background: #ccfbf1;
+    color: #0f766e;
+}
+
+.order-state--canceled {
+    background: #e2e8f0;
+    color: #334155;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :deep(.pi-spin) {
+        animation: none;
+    }
+}
+</style>

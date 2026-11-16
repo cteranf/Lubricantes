@@ -105,8 +105,10 @@ class AdminOrdersFrontendTest extends TestCase
             ['reserved', 'preparing', 'ready', 'delivered', 'canceled'],
             $this->fulfillmentOptionValues($view)
         );
-        $this->assertStringContainsString("row.payment_status === 'approved'", $view);
-        $this->assertStringContainsString('row.reservation_status || \'legacy\'', $view);
+        $this->assertStringContainsString('paymentStatusLabel(row.payment_status)', $view);
+        $this->assertStringContainsString("approved: 'Aprobado'", $view);
+        $this->assertStringContainsString('reservationLabel(row.reservation_status)', $view);
+        $this->assertStringContainsString("'Histórica'", $view);
 
         foreach ([
             'resources/js/components/admin/table/AdminPagination.vue',
@@ -263,7 +265,8 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringContainsString('aria-expanded="mobileFiltersOpen"', $view);
         $this->assertStringContainsString('aria-controls="orders-mobile-filters-panel"', $view);
         $this->assertStringContainsString('id="orders-mobile-filters-panel"', $view);
-        $this->assertStringContainsString('class="space-y-3 p-3 lg:hidden"', $view);
+        $this->assertMatchesRegularExpression('/class="[^"]*xl:hidden[^"]*"/', $view);
+        $this->assertMatchesRegularExpression('/class="[^"]*hidden md:block[^"]*"/', $view);
         $this->assertStringContainsString(':placeholder="searchPlaceholder"', $table);
 
         foreach ([
@@ -509,8 +512,8 @@ class AdminOrdersFrontendTest extends TestCase
         $view = file_get_contents(resource_path('js/views/admin/Orders.vue'));
         $normalized = preg_replace('/\s+/', ' ', $view);
 
-        $this->assertStringContainsString('invalidateModalActions(); detailSequence++; selectedOrder.value = null', $normalized);
-        $this->assertStringContainsString('async function openOrder(order) { invalidateModalActions();', $normalized);
+        $this->assertStringContainsString('function closeModal() { invalidateModalActions(); detailSequence++; openingOrderId.value = null; detailLoading.value = false; selectedOrder.value = null;', $normalized);
+        $this->assertStringContainsString('async function openOrder(order) { if (detailLoading.value && openingOrderId.value === order.id) return; invalidateModalActions(); const sequence = ++detailSequence;', $normalized);
         $this->assertStringContainsString('onBeforeUnmount(() => { componentMounted = false;', $normalized);
         $this->assertStringContainsString('const targetOrderId = targetOrder.id', $normalized);
         $this->assertStringContainsString('modalSequence: targetModalSequence', $normalized);
@@ -603,5 +606,70 @@ class AdminOrdersFrontendTest extends TestCase
         }
 
         return false;
+    }
+
+    public function test_orders_operational_redesign_uses_one_server_page_for_accessible_table_and_mobile_cards(): void
+    {
+        $view = file_get_contents(resource_path('js/views/admin/Orders.vue'));
+        $table = file_get_contents(resource_path('js/components/admin/table/AdminDataTable.vue'));
+        $this->assertStringContainsString('Preparación y entrega de pedidos', $view);
+        $this->assertStringContainsString('Supervisa y gestiona el avance de los pedidos', $view);
+        $this->assertSame(1, substr_count($view, "api.get('/admin/orders'"));
+
+        preg_match('/const columns\s*=\s*\[(.*?)\];/s', $view, $columnBlock);
+        $this->assertArrayHasKey(1, $columnBlock);
+        preg_match_all("/key:\\s*'([^']+)'/", $columnBlock[1], $columnKeys);
+        $this->assertSame([
+            'id', 'customer_name', 'fulfillment_status', 'payment_status', 'payment_method',
+            'delivery_type', 'warehouse_name', 'reservation_status', 'total', 'created_at',
+        ], $columnKeys[1]);
+
+        $this->assertStringContainsString(':rows="list.rows.value"', $view);
+        $this->assertStringContainsString('v-for="row in list.rows.value"', $view);
+        $this->assertStringContainsString('class="hidden md:block"', $view);
+        $this->assertStringContainsString('class="space-y-3 md:hidden"', $view);
+        $this->assertStringContainsString('aria-busy="list.loading.value"', $view);
+        $this->assertStringContainsString('role="status"', $view);
+        $this->assertStringContainsString('role="alert"', $view);
+        $this->assertStringContainsString('list.meta.value.total', $view);
+        $this->assertStringContainsString('pageSummary', $view);
+        $this->assertStringContainsString('list.setPage(list.meta.value.current_page + 1)', $view);
+        $this->assertStringContainsString('list.loading.value || list.meta.value.current_page >= list.meta.value.last_page', $view);
+
+        foreach ([
+            'function paymentStatusLabel(status)',
+            "pending: 'Pendiente'",
+            "approved: 'Aprobado'",
+            "rejected: 'Rechazado'",
+            "refunded: 'Reembolsado'",
+            "active: 'Activa'",
+            "expired: 'Expirada'",
+            "consumed: 'Consumida'",
+            'stateLabel(row.fulfillment_status, row)',
+            'function paymentMethodLabel(method)',
+            'Transferencia bancaria',
+            'Pago contraentrega',
+            'function moneyLabel(value)',
+            'text-right font-bold tabular-nums',
+            ':show-clear-filters="hasActiveFilters"',
+            'const activeFilterTags = computed(() => {',
+            'function removeFilter(key)',
+            'return list.applyFilters()',
+            'function openOrder(order)',
+            '@click="openOrder(row)"',
+            ':disabled="detailLoading && openingOrderId === row.id"',
+            'aria-live="polite"',
+            '@media (prefers-reduced-motion: reduce)',
+        ] as $contract) {
+            $this->assertStringContainsString($contract, $view);
+        }
+
+        $this->assertStringContainsString('showClearFilters: { type: Boolean, default: true }', $table);
+        $this->assertStringContainsString('v-if="showClearFilters"', $table);
+        $this->assertStringNotContainsString('legacyState', $view);
+        $this->assertStringNotContainsString('row.status', $view);
+        $this->assertStringNotContainsString('row.tracking_status', $view);
+        $this->assertDoesNotMatchRegularExpression('/(?:ordersByStatus|globalOrderTotals|kpiCards)/i', $view);
+        $this->assertStringNotContainsString('v-html', $view);
     }
 }

@@ -9,7 +9,7 @@
         </div>
 
         <div v-if="!error && rowIdentityContract.valid" class="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button type="button" label="Limpiar filtros" icon="pi pi-filter-slash" severity="secondary" size="small" @click="clearFilters" />
+            <Button v-if="showClearFilters" type="button" label="Limpiar filtros" icon="pi pi-filter-slash" severity="secondary" size="small" @click="clearFilters" />
             <IconField class="w-full sm:max-w-xs">
                 <InputIcon class="pi pi-search" />
                 <InputText v-model="tableFilters.global.value" class="w-full" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder" @input="emitFilters" />
@@ -121,6 +121,7 @@ const props = defineProps({
     searchPlaceholder: { type: String, default: 'Buscar pedido o cliente' },
     currentPageReportTemplate: { type: String, default: 'Mostrando {first} a {last} de {totalRecords} pedidos' },
     loadingMessage: { type: String, default: 'Cargando pedidos…' },
+    showClearFilters: { type: Boolean, default: true },
     mobileDetailsLabel: { type: String, default: 'Detalle del pedido {id}' },
     globalFilterFields: { type: Array, default: () => ['id', 'customer_name'] },
 });
