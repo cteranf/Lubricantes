@@ -112,6 +112,57 @@
                             </div>
                         </section>
 
+                        <section class="space-y-3 rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="receipt-scan-title">
+                            <div>
+                                <p class="text-xs font-bold uppercase tracking-wider text-blue-700">Identificación de productos</p>
+                                <h4 id="receipt-scan-title" class="mt-1 text-lg font-black text-slate-900">Recepción por QR</h4>
+                                <p class="mt-1 text-sm text-slate-600">El QR identifica el producto; el stock cambia únicamente al confirmar esta recepción.</p>
+                            </div>
+                            <div class="flex flex-wrap items-center justify-between gap-2"><Tag :value="creatingNew ? 'Nuevo borrador' : statusLabel(receipt?.status)" :severity="creatingNew ? 'info' : statusSeverity(receipt?.status)" /><span class="text-xs font-mono text-slate-600">{{ receipt?.reference || 'Número: se asignará al guardar' }}</span><span class="text-xs font-semibold text-slate-600">Almacén: {{ selectedWarehouseLabel }}</span></div>
+                            <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                                <label class="text-sm font-semibold text-slate-700" for="receipt-count-mode">Modo de conteo
+                                    <Select id="receipt-count-mode" v-model="countMode" class="mt-1 w-full" :options="countModeOptions" option-label="label" option-value="value" :disabled="busy || statusLoading || importBusy" />
+                                </label>
+                                <Button v-if="!cameraOpen" type="button" label="Abrir cámara" icon="pi pi-camera" severity="secondary" outlined :disabled="!form.warehouse_id || busy || statusLoading || importBusy" @click="openCamera" />
+                                <Button v-else type="button" label="Cerrar cámara" icon="pi pi-stop-circle" severity="secondary" outlined :disabled="scannerStarting" @click="closeCamera" />
+                            </div>
+                            <label class="block text-sm font-semibold text-slate-700" for="receipt-scan-code">Escanear con lector USB/Bluetooth o escribir SKU/código
+                                <InputText id="receipt-scan-code" v-model="scanCode" class="mt-1 w-full font-mono" maxlength="120" autocomplete="off" autocapitalize="off" spellcheck="false" :disabled="!form.warehouse_id || scanBusy || busy || statusLoading || importBusy" placeholder="Enfoca aquí y termina cada lectura con Enter" @keydown.enter.prevent="submitScanCode" />
+                            </label>
+                            <p v-if="scanMessage" class="text-sm" :class="scanError ? 'text-red-700' : 'text-slate-600'" :role="scanError ? 'alert' : 'status'" aria-live="polite">{{ scanMessage }}</p>
+                            <div v-if="cameraOpen" class="space-y-3 rounded-lg bg-slate-950 p-3 sm:p-4">
+                                <div class="relative mx-auto w-full max-w-xl overflow-hidden rounded-lg border border-slate-700 bg-black">
+                                    <video ref="cameraVideo" class="mx-auto max-h-72 min-h-52 w-full object-contain" muted playsinline aria-label="Vista previa de la cámara para leer códigos QR" />
+                                    <div class="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true"><div class="h-2/3 w-2/3 rounded-2xl border-2 border-blue-400 shadow-[0_0_0_999px_rgba(2,6,23,.18)]" /></div>
+                                </div>
+                                <div v-if="cameraList.length > 1" class="mx-auto max-w-xl">
+                                    <label class="text-sm font-medium text-white" for="receipt-camera-select">Cámara
+                                        <Select id="receipt-camera-select" v-model="selectedCameraId" class="mt-1 w-full" :options="cameraList" option-label="label" option-value="id" @update:model-value="changeCamera" />
+                                    </label>
+                                </div>
+                                <div class="flex flex-wrap justify-center gap-2">
+                                    <Button v-if="cameraPaused" type="button" label="Reanudar escaneo" icon="pi pi-refresh" :disabled="scannerStarting || scanBusy || !form.warehouse_id" @click="resumeCamera" />
+                                    <Button v-else-if="!scannerStarting" type="button" label="Pausar lectura" icon="pi pi-pause" severity="secondary" outlined @click="pauseCamera" />
+                                    <Button v-if="scannerStarting" type="button" label="Iniciando cámara…" icon="pi pi-spin pi-spinner" disabled />
+                                </div>
+                            </div>
+                            <p v-if="cameraMessage" class="text-sm text-amber-800" role="status" aria-live="polite">{{ cameraMessage }}</p>
+                            <div v-if="scanCandidate" class="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between" aria-live="polite">
+                                <div class="flex min-w-0 items-center gap-3">
+                                    <img v-if="scanCandidate.image_url" :src="scanCandidate.image_url" :alt="`Imagen de ${scanCandidate.name}`" width="56" height="56" class="h-14 w-14 shrink-0 rounded-lg border border-emerald-200 bg-white object-contain p-1" />
+                                    <span v-else class="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white text-slate-400" aria-label="Producto sin imagen"><i class="pi pi-image" aria-hidden="true" /></span>
+                                    <span class="min-w-0"><b class="block truncate text-sm text-slate-900">{{ scanCandidate.name }}</b><span class="font-mono text-xs text-slate-600">{{ scanCandidate.sku || 'Sin SKU' }}</span><span class="mt-1 block text-xs font-semibold text-emerald-800">Acumulado: {{ scannedQuantity(scanCandidate.id) }} unidades</span></span>
+                                </div>
+                                <div v-if="countMode === 'quantity' && !scanCandidateAdded" class="flex items-end gap-2">
+                                    <label class="text-xs font-semibold text-slate-700">Cantidad
+                                        <InputNumber v-model="scanQuantity" input-class="w-24" :min="1" :max="MAX_TOTAL_UNITS" :use-grouping="false" :disabled="scanBusy || busy" />
+                                    </label>
+                                    <Button type="button" label="Agregar al borrador" icon="pi pi-plus" size="small" :disabled="scanBusy || busy || !isPositiveInteger(scanQuantity)" @click="addScanCandidate" />
+                                </div>
+                                <Tag v-else :value="countMode === 'unit' ? 'Lectura unitaria agregada' : 'Agregado al borrador'" severity="success" />
+                            </div>
+                        </section>
+
                         <section class="rounded-xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="receipt-product-search-title">
                             <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
                                 <label class="min-w-0 flex-1 text-sm font-semibold text-slate-700" for="receipt-product-search">Buscar productos por nombre o SKU
@@ -208,7 +259,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
 import InputNumber from 'primevue/inputnumber';
@@ -216,6 +267,8 @@ import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import Tag from 'primevue/tag';
 import { useToast } from 'primevue/usetoast';
+import QrScanner from 'qr-scanner';
+import { accumulateReceiptScan } from '@/utils/inventoryReceiptScan.mjs';
 import AdminPagination from '@/components/admin/AdminPagination.vue';
 import api from '@/api';
 
@@ -251,6 +304,26 @@ const importFile = ref(null);
 const importPreview = ref(null);
 const importBusy = ref(false);
 const importError = ref('');
+const countMode = ref('quantity');
+const countModeOptions = [
+    { label: 'Ingresar cantidad', value: 'quantity' },
+    { label: 'Contar de a una unidad', value: 'unit' },
+];
+const scanCode = ref('');
+const scanQuantity = ref(1);
+const scanCandidate = ref(null);
+const scanCandidateAdded = ref(false);
+const scanBusy = ref(false);
+const scanError = ref(false);
+const scanMessage = ref('');
+const cameraOpen = ref(false);
+const cameraPaused = ref(false);
+const scannerStarting = ref(false);
+const cameraMessage = ref('');
+const cameraVideo = ref(null);
+const cameraList = ref([]);
+const selectedCameraId = ref('');
+let qrScanner = null;
 let productSearchTimer = null;
 let productRequestSequence = 0;
 let listRequestSequence = 0;
@@ -267,6 +340,7 @@ const warehouseOptions = computed(() => {
     }
     return options;
 });
+const selectedWarehouseLabel = computed(() => warehouseOptions.value.find(option => Number(option.id) === Number(form.value.warehouse_id))?.name || 'Selecciona un almacén');
 const totalUnits = computed(() => lines.value.reduce((sum, line) => sum + (Number.isFinite(Number(line.quantity)) ? Number(line.quantity) : 0), 0));
 const duplicateLineIds = computed(() => lines.value.map(line => Number(line.product_id)).filter((id, index, all) => all.indexOf(id) !== index));
 const allQuantitiesValid = computed(() => lines.value.every(line => isPositiveInteger(line.quantity)));
@@ -289,6 +363,14 @@ const canSave = computed(() => Boolean(form.value.warehouse_id)
 
 watch(() => Number(form.value.warehouse_id), clearImportPreview);
 watch(lines, clearImportPreview, { deep: true });
+watch(countMode, () => {
+    scanCandidate.value = null;
+    scanMessage.value = '';
+    scanError.value = false;
+});
+watch([creatingNew, () => receipt.value?.status], ([isNew, status]) => {
+    if (!isNew && status && status !== 'draft') closeCamera();
+});
 
 function emptyForm() {
     return { warehouse_id: null, external_reference: '', notes: '' };
@@ -357,6 +439,7 @@ async function loadWarehouses() {
 }
 
 async function openReceipt(id) {
+    closeCamera();
     creatingNew.value = false;
     receipt.value = null;
     conflictMessage.value = '';
@@ -406,6 +489,7 @@ function applyReceipt(data) {
 
 function startNewReceipt() {
     if (ambiguousCreate.value) return;
+    closeCamera();
     receipt.value = null;
     creatingNew.value = true;
     form.value = emptyForm();
@@ -428,6 +512,7 @@ function allowCreateRetry() {
 }
 
 function closeEditor() {
+    closeCamera();
     creatingNew.value = false;
     receipt.value = null;
     lines.value = [];
@@ -466,6 +551,158 @@ async function searchProducts(query) {
 function addProduct(product) {
     if (busy.value || isDuplicate(product.id) || lines.value.length >= MAX_LINES) return;
     lines.value.push({ product_id: Number(product.id), product, quantity: 1, sort_order: lines.value.length });
+}
+
+async function submitScanCode() {
+    const code = scanCode.value.trim();
+    scanCode.value = '';
+    if (!code || scanBusy.value || busy.value || statusLoading.value || !form.value.warehouse_id) return;
+    await resolveScannedCode(code);
+}
+
+async function resolveScannedCode(code) {
+    if (scanBusy.value || !form.value.warehouse_id || busy.value) return;
+    scanBusy.value = true;
+    scanError.value = false;
+    scanMessage.value = '';
+    scanCandidate.value = null;
+    try {
+        const { data } = await api.post('/admin/inventory-receipts/resolve-product-code', { code });
+        const product = data?.data;
+        if (!product || !Number.isSafeInteger(Number(product.id)) || typeof product.name !== 'string') {
+            throw new Error('invalid_product_projection');
+        }
+        const normalized = { id: Number(product.id), name: product.name, sku: product.sku || null, image_url: product.image_url || null };
+        if (countMode.value === 'unit') {
+            if (addScannedProduct(normalized, 1)) {
+                scanCandidate.value = normalized;
+                scanCandidateAdded.value = true;
+                scanMessage.value = `${normalized.name}: acumulado ${scannedQuantity(normalized.id)}. Reanuda el lector para otra lectura.`;
+            }
+        } else {
+            scanCandidate.value = normalized;
+            scanCandidateAdded.value = false;
+            scanQuantity.value = 1;
+            scanMessage.value = 'Producto identificado. Revisa la cantidad y agrégalo al borrador.';
+        }
+    } catch (error) {
+        scanError.value = true;
+        scanMessage.value = error?.response?.status === 429
+            ? 'Se alcanzó el límite de lecturas. Espera un momento e inténtalo nuevamente.'
+            : error?.response?.status === 404
+                ? 'No se encontró un producto activo para ese código.'
+                : error?.response?.status === 422
+                    ? 'El código no tiene un formato válido.'
+                    : 'No se pudo identificar el producto. Revisa el código e inténtalo nuevamente.';
+    } finally {
+        scanBusy.value = false;
+    }
+}
+
+function addScanCandidate() {
+    const product = scanCandidate.value;
+    if (!product || scanBusy.value || !isPositiveInteger(scanQuantity.value)) return;
+    if (addScannedProduct(product, Number(scanQuantity.value))) {
+        scanCandidateAdded.value = true;
+        scanMessage.value = `${product.name}: se agregó al borrador. Guarda la recepción para conservar el cambio.`;
+    }
+}
+
+function addScannedProduct(product, quantity) {
+    const result = accumulateReceiptScan(lines.value, product, quantity, { maxLines: MAX_LINES, maxTotalUnits: MAX_TOTAL_UNITS });
+    if (!result.ok) {
+        scanError.value = true;
+        scanMessage.value = result.reason === 'max_lines'
+            ? `La recepción ya alcanzó el máximo de ${MAX_LINES} productos.`
+            : `La lectura supera el máximo de ${MAX_TOTAL_UNITS.toLocaleString('es-PE')} unidades por recepción.`;
+        return false;
+    }
+    lines.value = result.lines;
+    scanError.value = false;
+    return true;
+}
+
+function scannedQuantity(productId) {
+    return Number(lines.value.find(line => Number(line.product_id) === Number(productId))?.quantity || 0);
+}
+
+async function openCamera() {
+    if (cameraOpen.value || !form.value.warehouse_id || busy.value || importBusy.value) return;
+    cameraMessage.value = '';
+    try {
+        if (!await QrScanner.hasCamera()) {
+            cameraMessage.value = 'Este dispositivo no tiene una cámara disponible. Puedes usar el lector USB/Bluetooth o escribir el SKU.';
+            return;
+        }
+        cameraOpen.value = true;
+        cameraPaused.value = false;
+        await nextTick();
+        if (!cameraVideo.value) throw new Error('video_unavailable');
+        qrScanner = new QrScanner(cameraVideo.value, result => handleCameraScan(result.data), {
+            preferredCamera: 'environment',
+            maxScansPerSecond: 8,
+            returnDetailedScanResult: true,
+            onDecodeError: () => {},
+        });
+        scannerStarting.value = true;
+        await qrScanner.start();
+        cameraList.value = await QrScanner.listCameras();
+        selectedCameraId.value = cameraList.value.find(camera => camera.id)?.id || '';
+    } catch (error) {
+        closeCamera();
+        cameraMessage.value = error?.name === 'NotAllowedError'
+            ? 'No se concedió permiso para usar la cámara. Habilítalo o usa el lector manual.'
+            : 'No se pudo iniciar la cámara. Verifica el permiso y que la página use HTTPS o localhost.';
+    } finally {
+        scannerStarting.value = false;
+    }
+}
+
+async function handleCameraScan(code) {
+    if (cameraPaused.value || scanBusy.value || !cameraOpen.value) return;
+    cameraPaused.value = true;
+    await qrScanner?.pause();
+    await resolveScannedCode(code);
+}
+
+async function resumeCamera() {
+    if (!qrScanner || !cameraOpen.value || scannerStarting.value || scanBusy.value) return;
+    cameraPaused.value = false;
+    cameraMessage.value = '';
+    try {
+        await qrScanner.start();
+    } catch {
+        cameraPaused.value = true;
+        cameraMessage.value = 'No se pudo reanudar la cámara. Ciérrala y vuelve a abrirla.';
+    }
+}
+
+async function pauseCamera() {
+    if (!qrScanner || cameraPaused.value) return;
+    cameraPaused.value = true;
+    await qrScanner.pause();
+}
+
+async function changeCamera(cameraId) {
+    if (!qrScanner || !cameraId) return;
+    try {
+        await qrScanner.setCamera(cameraId);
+    } catch {
+        cameraMessage.value = 'No se pudo cambiar de cámara.';
+    }
+}
+
+function closeCamera() {
+    cameraOpen.value = false;
+    cameraPaused.value = false;
+    scannerStarting.value = false;
+    cameraList.value = [];
+    selectedCameraId.value = '';
+    if (qrScanner) {
+        qrScanner.stop();
+        qrScanner.destroy();
+        qrScanner = null;
+    }
 }
 
 function removeLine(index) {
@@ -737,5 +974,6 @@ onBeforeUnmount(() => {
     clearTimeout(productSearchTimer);
     productRequestSequence++;
     listRequestSequence++;
+    closeCamera();
 });
 </script>

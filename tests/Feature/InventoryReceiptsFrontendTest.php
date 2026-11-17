@@ -38,14 +38,14 @@ class InventoryReceiptsFrontendTest extends TestCase
         $this->assertStringContainsString('Number.isSafeInteger(Number(value)) && Number(value) > 0', $component);
         $this->assertStringContainsString('lines: lines.value.map(line => ({ product_id: Number(line.product_id), quantity: Number(line.quantity) }))', $component);
 
-        $this->assertStringContainsString("error?.response?.status === 409 && !isNew", $component);
+        $this->assertStringContainsString('error?.response?.status === 409 && !isNew', $component);
         $this->assertStringContainsString('Cargar versión vigente', $component);
         $this->assertStringContainsString('no se sobrescribieron tus cambios', $component);
         $this->assertStringContainsString("recoverReceiptState('confirm', null, receiptId)", $component);
         $this->assertStringContainsString('api.get(`/admin/inventory-receipts/${receiptId}`)', $component);
-        $this->assertStringContainsString("retryConfirmAvailable.value = true", $component);
-        $this->assertStringContainsString("ambiguousCreate.value = true", $component);
-        $this->assertStringContainsString("if (ambiguousCreate.value && Number(page) === 1) ambiguousCreateListChecked.value = true", $component);
+        $this->assertStringContainsString('retryConfirmAvailable.value = true', $component);
+        $this->assertStringContainsString('ambiguousCreate.value = true', $component);
+        $this->assertStringContainsString('if (ambiguousCreate.value && Number(page) === 1) ambiguousCreateListChecked.value = true', $component);
         $this->assertStringContainsString('no se enviará otro borrador automáticamente', $component);
         $this->assertStringContainsString('No aparece: conservar formulario y permitir reintento', $component);
         $this->assertStringContainsString('function allowCreateRetry()', $component);
@@ -78,5 +78,79 @@ class InventoryReceiptsFrontendTest extends TestCase
         $this->assertStringContainsString('Confirmar recepción masiva', $component);
         $this->assertStringContainsString('role="status"', $component);
         $this->assertStringContainsString('Recepción masiva', file_get_contents(resource_path('js/views/admin/Inventory.vue')));
+    }
+
+    public function test_qr_labels_and_receipt_scanning_use_safe_identification_without_inventory_side_effects(): void
+    {
+        $products = file_get_contents(resource_path('js/views/admin/Products.vue'));
+        $label = file_get_contents(resource_path('js/components/admin/ProductQrLabel.vue'));
+        $receipts = file_get_contents(resource_path('js/components/admin/InventoryReceipts.vue'));
+        $controller = file_get_contents(app_path('Http/Controllers/Api/V1/Admin/InventoryReceiptController.php'));
+        $routes = file_get_contents(base_path('routes/api.php'));
+        $scanHelper = file_get_contents(resource_path('js/utils/inventoryReceiptScan.mjs'));
+
+        $this->assertStringContainsString('@click="openQrLabel(row)"', $products);
+        $this->assertStringContainsString("{ label: 'Etiqueta QR', icon: 'pi pi-qrcode', command: () => openQrLabel(product) }", $products);
+        $this->assertStringContainsString('`LS1:PRODUCT:${Number(productId)}`', $label);
+        $this->assertStringContainsString('Código interno LubriStore · no es GS1', $label);
+        $this->assertStringContainsString('LS1:PRODUCT:', $label);
+        $this->assertStringContainsString('QRCode.toDataURL', $label);
+        $this->assertStringContainsString('label="Regenerar QR"', $label);
+        $this->assertStringContainsString('generateQr(true, product.id)', $label);
+        $this->assertStringContainsString('window.print()', $label);
+        $this->assertStringContainsString(':download="`producto-${product?.id || \'qr\'}.png`"', $label);
+        $this->assertStringNotContainsString('v-html', $label);
+
+        $this->assertStringContainsString("import QrScanner from 'qr-scanner'", $receipts);
+        $this->assertStringNotContainsString('qr-scanner-worker.min.js?url', $receipts);
+        $this->assertStringContainsString('preferredCamera: \'environment\'', $receipts);
+        $this->assertStringContainsString('QrScanner.hasCamera()', $receipts);
+        $this->assertStringContainsString("error?.name === 'NotAllowedError'", $receipts);
+        $this->assertStringContainsString('No se concedió permiso para usar la cámara', $receipts);
+        $this->assertStringContainsString('no tiene una cámara disponible', $receipts);
+        $this->assertStringContainsString('qrScanner.setCamera(cameraId)', $receipts);
+        $this->assertStringContainsString('cameraPaused.value = true', $receipts);
+        $this->assertStringContainsString('await qrScanner?.pause()', $receipts);
+        $this->assertStringContainsString('label="Reanudar escaneo"', $receipts);
+        $this->assertStringContainsString('label="Pausar lectura"', $receipts);
+        $this->assertStringContainsString('qrScanner.destroy()', $receipts);
+        $this->assertStringContainsString('pointer-events-none absolute inset-0', $receipts);
+        $this->assertStringContainsString('aria-labelledby="receipt-scan-title"', $receipts);
+        $this->assertStringContainsString('Acumulado: {{ scannedQuantity(scanCandidate.id) }} unidades', $receipts);
+        $this->assertStringContainsString('scanCandidate.image_url', $receipts);
+        $this->assertStringContainsString('maxlength="120"', $receipts);
+        $this->assertStringContainsString('@keydown.enter.prevent="submitScanCode"', $receipts);
+        $this->assertStringContainsString("api.post('/admin/inventory-receipts/resolve-product-code', { code })", $receipts);
+        $this->assertStringContainsString('countModeOptions', $receipts);
+        $this->assertStringContainsString("value: 'quantity'", $receipts);
+        $this->assertStringContainsString("value: 'unit'", $receipts);
+        $this->assertStringContainsString('accumulateReceiptScan(lines.value, product, quantity', $receipts);
+        $this->assertStringContainsString('await qrScanner.pause()', $receipts);
+        $this->assertStringContainsString('onBeforeUnmount(() => {', $receipts);
+        $this->assertStringContainsString('$request->validate([', $controller);
+        $this->assertStringContainsString('LS1:PRODUCT:', $controller);
+        $this->assertStringContainsString("Product::query()->with('images')->where('is_active', true)", $controller);
+        $this->assertStringContainsString("->where('sku', strtoupper(", $controller);
+        $this->assertStringContainsString('hash_equals((string) $product->sku', $controller);
+        $this->assertStringContainsString('$product->image_url', $controller);
+        $this->assertStringContainsString("'max:120'", $controller);
+        $this->assertStringContainsString("'throttle:60,1'", $routes);
+
+        $resolutionStart = strpos($controller, 'public function resolveProductCode');
+        $resolutionEnd = strpos($controller, 'public function index', $resolutionStart);
+        $this->assertNotFalse($resolutionStart);
+        $this->assertNotFalse($resolutionEnd);
+        $resolutionBody = substr($controller, $resolutionStart, $resolutionEnd - $resolutionStart);
+        $this->assertStringNotContainsString('InventoryService', $resolutionBody);
+        $this->assertStringNotContainsString('receiveInventory', $resolutionBody);
+        $this->assertStringNotContainsString('InventoryMovement', $resolutionBody);
+        $this->assertStringNotContainsString('->update(', $resolutionBody);
+        $this->assertStringNotContainsString('->create(', $resolutionBody);
+
+        $this->assertIsString($scanHelper);
+        $this->assertStringContainsString('Number.isSafeInteger(units)', $scanHelper);
+        $this->assertStringContainsString('existingIndex >= 0', $scanHelper);
+        $this->assertStringContainsString('maxLines', $scanHelper);
+        $this->assertStringContainsString('maxTotalUnits', $scanHelper);
     }
 }

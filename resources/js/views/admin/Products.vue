@@ -100,6 +100,7 @@
                     <template #actions="{ row }">
                         <div class="hidden items-center justify-end gap-2 md:flex">
                             <Button type="button" label="Editar" icon="pi pi-pencil" severity="secondary" outlined size="small" v-tooltip.top="'Editar producto'" :aria-label="`Editar ${row.name}`" @click="openModal(row)" />
+                            <Button type="button" label="QR" icon="pi pi-qrcode" severity="secondary" outlined size="small" v-tooltip.top="'Imprimir etiqueta QR'" :aria-label="`Etiqueta QR de ${row.name}`" @click="openQrLabel(row)" />
                             <Button type="button" :label="row.is_active ? 'Desactivar' : 'Reactivar'" :icon="row.is_active ? 'pi pi-power-off' : 'pi pi-check-circle'" :severity="row.is_active ? 'warn' : 'success'" outlined size="small" v-tooltip.top="row.is_active ? 'Desactivar producto' : 'Reactivar producto'" :aria-label="`${row.is_active ? 'Desactivar' : 'Reactivar'} ${row.name}`" :disabled="statusBusy.has(row.id)" :loading="statusBusy.has(row.id)" @click="confirmStatus(row)" />
                         </div>
                         <Button type="button" icon="pi pi-ellipsis-v" text rounded severity="secondary" class="md:hidden" :aria-label="`Acciones para ${row.name}`" aria-haspopup="menu" v-tooltip.top="'Acciones del producto'" @click="openMobileProductActions($event, row)" />
@@ -253,6 +254,7 @@
             </div>
         </div>
         <Menu ref="mobileActionsMenu" :model="mobileActionItems" popup aria-label="Acciones del producto" @hide="clearMobileProductAction" />
+        <ProductQrLabel v-model="qrLabelOpen" :product="qrLabelProduct" />
     </AdminLayout>
 </template>
 
@@ -269,6 +271,7 @@ import Image from 'primevue/image';
 import Tag from 'primevue/tag';
 import Menu from 'primevue/menu';
 import Tooltip from 'primevue/tooltip';
+import ProductQrLabel from '@/components/admin/ProductQrLabel.vue';
 import AdminLayout from '@/layouts/AdminLayout.vue';
 import AdminDataTable from '@/components/admin/table/AdminDataTable.vue';
 import api from '@/api';
@@ -323,6 +326,8 @@ const failedImages = reactive(new Set());
 const statusBusy = reactive(new Set());
 const mobileActionsMenu = ref(null);
 const mobileActionProduct = ref(null);
+const qrLabelOpen = ref(false);
+const qrLabelProduct = ref(null);
 const deletingImageIds = ref(new Set());
 const galleryUpload = ref(null);
 const imagePreviews = ref([]);
@@ -370,6 +375,7 @@ const mobileActionItems = computed(() => {
     const busy = statusBusy.has(product.id);
     return [
         { label: 'Editar', icon: 'pi pi-pencil', command: () => openModal(product) },
+        { label: 'Etiqueta QR', icon: 'pi pi-qrcode', command: () => openQrLabel(product) },
         { separator: true },
         {
             label: product.is_active ? 'Desactivar' : 'Reactivar',
@@ -398,6 +404,11 @@ function stockStatus(value) {
 function openMobileProductActions(event, product) {
     mobileActionProduct.value = product;
     mobileActionsMenu.value?.toggle(event);
+}
+
+function openQrLabel(product) {
+    qrLabelProduct.value = product;
+    qrLabelOpen.value = true;
 }
 
 function clearMobileProductAction() {

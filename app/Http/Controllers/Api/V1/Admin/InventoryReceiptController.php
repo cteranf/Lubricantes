@@ -4,11 +4,12 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Exceptions\InventoryReceiptConflictException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\PreviewInventoryReceiptImportRequest;
 use App\Http\Requests\Admin\StoreInventoryReceiptRequest;
 use App\Http\Requests\Admin\UpdateInventoryReceiptRequest;
-use App\Http\Requests\Admin\PreviewInventoryReceiptImportRequest;
 use App\Http\Resources\AdminInventoryReceiptResource;
 use App\Models\InventoryReceipt;
+use App\Models\Product;
 use App\Services\InventoryReceiptImportService;
 use App\Services\InventoryReceiptService;
 use Illuminate\Http\Request;
@@ -41,6 +42,41 @@ class InventoryReceiptController extends Controller
                 'global_errors' => [$exception->getMessage()],
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
+    }
+
+    public function resolveProductCode(Request $request)
+    {
+        $data = $request->validate([
+            'code' => ['required', 'string', 'max:120'],
+        ]);
+        $code = trim($data['code']);
+        $productId = null;
+
+        if (preg_match('/\\ALS1:PRODUCT:([1-9][0-9]{0,9})\\z/D', $code, $matches) === 1) {
+            $productId = (int) $matches[1];
+        } elseif (preg_match('/\\A[A-Za-z0-9_-]{1,64}\\z/D', $code) === 1) {
+            $product = Product::query()
+                ->with('images')
+                ->where('is_active', true)
+                ->where('sku', strtoupper($code))
+                ->first(['id', 'name', 'sku']);
+
+            if ($product && ! hash_equals((string) $product->sku, strtoupper($code))) {
+                $product = null;
+            }
+
+            return $product
+                ? response()->json(['data' => ['id' => (int) $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => $product->image_url]])
+                : response()->json(['message' => 'No se encontró un producto activo con ese código.'], Response::HTTP_NOT_FOUND);
+        } else {
+            return response()->json(['message' => 'El código no tiene un formato válido.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $product = Product::query()->with('images')->where('is_active', true)->find($productId, ['id', 'name', 'sku']);
+
+        return $product
+            ? response()->json(['data' => ['id' => (int) $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => $product->image_url]])
+            : response()->json(['message' => 'No se encontró un producto activo con ese código.'], Response::HTTP_NOT_FOUND);
     }
 
     public function index(Request $request)

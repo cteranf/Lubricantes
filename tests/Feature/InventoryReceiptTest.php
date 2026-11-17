@@ -6,8 +6,6 @@ use App\Models\Branch;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReceipt;
 use App\Models\InventoryReservation;
-use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -300,7 +298,7 @@ class InventoryReceiptTest extends TestCase
         $failed = false;
         try {
             app(\App\Services\InventoryReceiptService::class)->confirm($receipt->id, $receipt->version, $admin);
-        } catch (Throwable) {
+        } catch (\Throwable) {
             // The second line exceeds the aggregate stock limit after the first line was applied.
             $failed = true;
         }
@@ -355,11 +353,39 @@ class InventoryReceiptTest extends TestCase
 
     public function test_receipt_routes_require_an_active_administrator(): void
     {
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'SKU-TEST'])->assertUnauthorized();
         Sanctum::actingAs(User::factory()->create(['role' => 'customer', 'is_active' => true]));
         $this->getJson('/api/v1/admin/inventory-receipts')->assertForbidden();
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'SKU-TEST'])->assertForbidden();
 
         Sanctum::actingAs(User::factory()->create(['role' => 'admin', 'is_active' => false]));
         $this->getJson('/api/v1/admin/inventory-receipts')->assertForbidden();
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'SKU-TEST'])->assertForbidden();
+    }
+
+    public function test_admin_resolves_internal_product_qr_and_exact_sku_without_exposing_inventory_data(): void
+    {
+        Sanctum::actingAs($this->admin());
+        [$warehouse, $product] = $this->inventoryFixture(12, 3);
+        $movementCount = InventoryMovement::query()->count();
+        $receiptCount = InventoryReceipt::query()->count();
+
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'LS1:PRODUCT:'.$product->id])
+            ->assertOk()
+            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null]]);
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => strtolower($product->sku)])
+            ->assertOk()
+            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null]]);
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'https://example.test/'.$product->id])->assertUnprocessable();
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'LS1:PRODUCT:9999999999'])->assertNotFound();
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => str_repeat('X', 121)])->assertUnprocessable();
+
+        $product->forceFill(['is_active' => false])->save();
+        $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'LS1:PRODUCT:'.$product->id])->assertNotFound();
+        $this->assertSame(12, WarehouseInventory::query()->where('warehouse_id', $warehouse->id)->where('product_id', $product->id)->value('quantity'));
+        $this->assertSame(3, WarehouseInventory::query()->where('warehouse_id', $warehouse->id)->where('product_id', $product->id)->value('reserved_quantity'));
+        $this->assertSame($movementCount, InventoryMovement::query()->count());
+        $this->assertSame($receiptCount, InventoryReceipt::query()->count());
     }
 
     public function test_confirmation_rejects_physical_and_aggregate_stock_overflow_atomically(): void

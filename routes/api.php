@@ -197,6 +197,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'index'])->name('inventory-receipts.index');
             Route::get('/inventory-receipts/import-template', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'importTemplate'])->name('inventory-receipts.import-template');
             Route::post('/inventory-receipts/import-preview', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'importPreview'])->name('inventory-receipts.import-preview');
+            Route::post('/inventory-receipts/resolve-product-code', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'resolveProductCode'])->middleware('throttle:60,1')->name('inventory-receipts.resolve-product-code');
             Route::post('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'store'])->name('inventory-receipts.store');
             Route::get('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'show'])->name('inventory-receipts.show');
             Route::put('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'update'])->name('inventory-receipts.update');
