@@ -372,10 +372,10 @@ class InventoryReceiptTest extends TestCase
 
         $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'LS1:PRODUCT:'.$product->id])
             ->assertOk()
-            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null]]);
+            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null, 'matched_code' => 'LS1:PRODUCT:'.$product->id, 'matched_format' => 'qr_internal']]);
         $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => strtolower($product->sku)])
             ->assertOk()
-            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null]]);
+            ->assertExactJson(['data' => ['id' => $product->id, 'name' => $product->name, 'sku' => $product->sku, 'image_url' => null, 'matched_code' => strtolower($product->sku), 'matched_format' => 'sku']]);
         $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'https://example.test/'.$product->id])->assertUnprocessable();
         $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => 'LS1:PRODUCT:9999999999'])->assertNotFound();
         $this->postJson('/api/v1/admin/inventory-receipts/resolve-product-code', ['code' => str_repeat('X', 121)])->assertUnprocessable();

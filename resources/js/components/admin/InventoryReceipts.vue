@@ -115,8 +115,8 @@
                         <section class="space-y-3 rounded-xl border border-slate-200 bg-white p-4" aria-labelledby="receipt-scan-title">
                             <div>
                                 <p class="text-xs font-bold uppercase tracking-wider text-blue-700">Identificación de productos</p>
-                                <h4 id="receipt-scan-title" class="mt-1 text-lg font-black text-slate-900">Recepción por QR</h4>
-                                <p class="mt-1 text-sm text-slate-600">El QR identifica el producto; el stock cambia únicamente al confirmar esta recepción.</p>
+                                <h4 id="receipt-scan-title" class="mt-1 text-lg font-black text-slate-900">Recepción por QR o código de barras</h4>
+                                <p class="mt-1 text-sm text-slate-600">Identifica el producto con su QR, EAN, UPC o Code 128; el stock cambia únicamente al confirmar esta recepción.</p>
                             </div>
                             <div class="flex flex-wrap items-center justify-between gap-2"><Tag :value="creatingNew ? 'Nuevo borrador' : statusLabel(receipt?.status)" :severity="creatingNew ? 'info' : statusSeverity(receipt?.status)" /><span class="text-xs font-mono text-slate-600">{{ receipt?.reference || 'Número: se asignará al guardar' }}</span><span class="text-xs font-semibold text-slate-600">Almacén: {{ selectedWarehouseLabel }}</span></div>
                             <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
@@ -126,13 +126,13 @@
                                 <Button v-if="!cameraOpen" type="button" label="Abrir cámara" icon="pi pi-camera" severity="secondary" outlined :disabled="!form.warehouse_id || busy || statusLoading || importBusy" @click="openCamera" />
                                 <Button v-else type="button" label="Cerrar cámara" icon="pi pi-stop-circle" severity="secondary" outlined :disabled="scannerStarting" @click="closeCamera" />
                             </div>
-                            <label class="block text-sm font-semibold text-slate-700" for="receipt-scan-code">Escanear con lector USB/Bluetooth o escribir SKU/código
+                                <label class="block text-sm font-semibold text-slate-700" for="receipt-scan-code">Escanear con lector USB/Bluetooth o escribir SKU/código
                                 <InputText id="receipt-scan-code" v-model="scanCode" class="mt-1 w-full font-mono" maxlength="120" autocomplete="off" autocapitalize="off" spellcheck="false" :disabled="!form.warehouse_id || scanBusy || busy || statusLoading || importBusy" placeholder="Enfoca aquí y termina cada lectura con Enter" @keydown.enter.prevent="submitScanCode" />
                             </label>
                             <p v-if="scanMessage" class="text-sm" :class="scanError ? 'text-red-700' : 'text-slate-600'" :role="scanError ? 'alert' : 'status'" aria-live="polite">{{ scanMessage }}</p>
                             <div v-if="cameraOpen" class="space-y-3 rounded-lg bg-slate-950 p-3 sm:p-4">
                                 <div class="relative mx-auto w-full max-w-xl overflow-hidden rounded-lg border border-slate-700 bg-black">
-                                    <video ref="cameraVideo" class="mx-auto max-h-72 min-h-52 w-full object-contain" muted playsinline aria-label="Vista previa de la cámara para leer códigos QR" />
+                                    <video ref="cameraVideo" class="mx-auto max-h-72 min-h-52 w-full object-contain" muted playsinline aria-label="Vista previa de la cámara para leer códigos QR y de barras" />
                                     <div class="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true"><div class="h-2/3 w-2/3 rounded-2xl border-2 border-blue-400 shadow-[0_0_0_999px_rgba(2,6,23,.18)]" /></div>
                                 </div>
                                 <div v-if="cameraList.length > 1" class="mx-auto max-w-xl">
@@ -151,7 +151,7 @@
                                 <div class="flex min-w-0 items-center gap-3">
                                     <img v-if="scanCandidate.image_url" :src="scanCandidate.image_url" :alt="`Imagen de ${scanCandidate.name}`" width="56" height="56" class="h-14 w-14 shrink-0 rounded-lg border border-emerald-200 bg-white object-contain p-1" />
                                     <span v-else class="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white text-slate-400" aria-label="Producto sin imagen"><i class="pi pi-image" aria-hidden="true" /></span>
-                                    <span class="min-w-0"><b class="block truncate text-sm text-slate-900">{{ scanCandidate.name }}</b><span class="font-mono text-xs text-slate-600">{{ scanCandidate.sku || 'Sin SKU' }}</span><span class="mt-1 block text-xs font-semibold text-emerald-800">Acumulado: {{ scannedQuantity(scanCandidate.id) }} unidades</span></span>
+                                    <span class="min-w-0"><b class="block truncate text-sm text-slate-900">{{ scanCandidate.name }}</b><span class="block font-mono text-xs text-slate-600">{{ scanCandidate.sku || 'Sin SKU' }}</span><span v-if="scanCandidate.matched_code" class="block break-all font-mono text-xs text-slate-700">{{ scanCandidate.matched_code }} · {{ barcodeFormatLabel(scanCandidate.matched_format) }}</span><span class="mt-1 block text-xs font-semibold text-emerald-800">Acumulado: {{ scannedQuantity(scanCandidate.id) }} unidades</span></span>
                                 </div>
                                 <div v-if="countMode === 'quantity' && !scanCandidateAdded" class="flex items-end gap-2">
                                     <label class="text-xs font-semibold text-slate-700">Cantidad
@@ -267,8 +267,7 @@ import InputText from 'primevue/inputtext';
 import Select from 'primevue/select';
 import Tag from 'primevue/tag';
 import { useToast } from 'primevue/usetoast';
-import QrScanner from 'qr-scanner';
-import { accumulateReceiptScan } from '@/utils/inventoryReceiptScan.mjs';
+import { accumulateReceiptScan, scannerFormatName } from '@/utils/inventoryReceiptScan.mjs';
 import AdminPagination from '@/components/admin/AdminPagination.vue';
 import api from '@/api';
 
@@ -324,6 +323,11 @@ const cameraVideo = ref(null);
 const cameraList = ref([]);
 const selectedCameraId = ref('');
 let qrScanner = null;
+let zxingModules = null;
+let zxingBarcodeFormat = null;
+let scannerControls = null;
+let cameraSessionSequence = 0;
+let cameraOpenSequence = 0;
 let productSearchTimer = null;
 let productRequestSequence = 0;
 let listRequestSequence = 0;
@@ -560,19 +564,19 @@ async function submitScanCode() {
     await resolveScannedCode(code);
 }
 
-async function resolveScannedCode(code) {
+async function resolveScannedCode(code, format = null) {
     if (scanBusy.value || !form.value.warehouse_id || busy.value) return;
     scanBusy.value = true;
     scanError.value = false;
     scanMessage.value = '';
     scanCandidate.value = null;
     try {
-        const { data } = await api.post('/admin/inventory-receipts/resolve-product-code', { code });
+        const { data } = await api.post('/admin/inventory-receipts/resolve-product-code', { code, format });
         const product = data?.data;
         if (!product || !Number.isSafeInteger(Number(product.id)) || typeof product.name !== 'string') {
             throw new Error('invalid_product_projection');
         }
-        const normalized = { id: Number(product.id), name: product.name, sku: product.sku || null, image_url: product.image_url || null };
+        const normalized = { id: Number(product.id), name: product.name, sku: product.sku || null, image_url: product.image_url || null, matched_code: product.matched_code || code, matched_format: product.matched_format || format || 'sku' };
         if (countMode.value === 'unit') {
             if (addScannedProduct(normalized, 1)) {
                 scanCandidate.value = normalized;
@@ -628,9 +632,10 @@ function scannedQuantity(productId) {
 
 async function openCamera() {
     if (cameraOpen.value || !form.value.warehouse_id || busy.value || importBusy.value) return;
+    const openingSequence = ++cameraOpenSequence;
     cameraMessage.value = '';
     try {
-        if (!await QrScanner.hasCamera()) {
+        if (!navigator.mediaDevices?.getUserMedia) {
             cameraMessage.value = 'Este dispositivo no tiene una cámara disponible. Puedes usar el lector USB/Bluetooth o escribir el SKU.';
             return;
         }
@@ -638,31 +643,45 @@ async function openCamera() {
         cameraPaused.value = false;
         await nextTick();
         if (!cameraVideo.value) throw new Error('video_unavailable');
-        qrScanner = new QrScanner(cameraVideo.value, result => handleCameraScan(result.data), {
-            preferredCamera: 'environment',
-            maxScansPerSecond: 8,
-            returnDetailedScanResult: true,
-            onDecodeError: () => {},
+        zxingModules ||= Promise.all([import('@zxing/browser'), import('@zxing/library')]).catch(error => {
+            zxingModules = null;
+            throw error;
         });
+        const [{ BrowserMultiFormatReader }, zxing] = await zxingModules;
+        if (openingSequence !== cameraOpenSequence || !cameraOpen.value || !cameraVideo.value) return;
+        const { BarcodeFormat, DecodeHintType } = zxing;
+        zxingBarcodeFormat = BarcodeFormat;
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        qrScanner = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 150, delayBetweenScanSuccess: 250 });
         scannerStarting.value = true;
-        await qrScanner.start();
-        cameraList.value = await QrScanner.listCameras();
-        selectedCameraId.value = cameraList.value.find(camera => camera.id)?.id || '';
+        await startCameraReader();
+        if (openingSequence !== cameraOpenSequence || !cameraOpen.value || !qrScanner) return;
+        cameraList.value = (await qrScanner.getVideoInputDevices()).map(camera => ({ id: camera.deviceId, label: camera.label || 'Cámara disponible' }));
+        if (openingSequence !== cameraOpenSequence || !cameraOpen.value || !qrScanner) return;
+        const preferredCamera = cameraList.value.find(camera => /back|rear|environment|trasera/i.test(camera.label));
+        if (!selectedCameraId.value && preferredCamera) {
+            selectedCameraId.value = preferredCamera.id;
+            stopCameraReader();
+            await startCameraReader();
+        }
     } catch (error) {
+        if (openingSequence !== cameraOpenSequence || !cameraOpen.value) return;
         closeCamera();
         cameraMessage.value = error?.name === 'NotAllowedError'
             ? 'No se concedió permiso para usar la cámara. Habilítalo o usa el lector manual.'
             : 'No se pudo iniciar la cámara. Verifica el permiso y que la página use HTTPS o localhost.';
     } finally {
-        scannerStarting.value = false;
+        if (openingSequence === cameraOpenSequence) scannerStarting.value = false;
     }
 }
 
 async function handleCameraScan(code) {
     if (cameraPaused.value || scanBusy.value || !cameraOpen.value) return;
     cameraPaused.value = true;
-    await qrScanner?.pause();
-    await resolveScannedCode(code);
+    stopCameraReader();
+    await resolveScannedCode(code.text, scannerFormatName(code.format));
 }
 
 async function resumeCamera() {
@@ -670,7 +689,7 @@ async function resumeCamera() {
     cameraPaused.value = false;
     cameraMessage.value = '';
     try {
-        await qrScanner.start();
+        await startCameraReader();
     } catch {
         cameraPaused.value = true;
         cameraMessage.value = 'No se pudo reanudar la cámara. Ciérrala y vuelve a abrirla.';
@@ -680,29 +699,65 @@ async function resumeCamera() {
 async function pauseCamera() {
     if (!qrScanner || cameraPaused.value) return;
     cameraPaused.value = true;
-    await qrScanner.pause();
+    stopCameraReader();
 }
 
 async function changeCamera(cameraId) {
     if (!qrScanner || !cameraId) return;
     try {
-        await qrScanner.setCamera(cameraId);
+        selectedCameraId.value = cameraId;
+        if (!cameraPaused.value) {
+            cameraPaused.value = true;
+            stopCameraReader();
+            cameraPaused.value = false;
+            await startCameraReader();
+        }
     } catch {
         cameraMessage.value = 'No se pudo cambiar de cámara.';
     }
 }
 
 function closeCamera() {
+    cameraOpenSequence++;
     cameraOpen.value = false;
     cameraPaused.value = false;
     scannerStarting.value = false;
     cameraList.value = [];
     selectedCameraId.value = '';
-    if (qrScanner) {
-        qrScanner.stop();
-        qrScanner.destroy();
-        qrScanner = null;
+    cameraSessionSequence++;
+    stopCameraReader();
+    qrScanner = null;
+}
+
+async function startCameraReader() {
+    if (!qrScanner || !cameraVideo.value || scannerControls) return;
+    const session = ++cameraSessionSequence;
+    const controls = await qrScanner.decodeFromVideoDevice(selectedCameraId.value || undefined, cameraVideo.value, (result) => {
+        if (!result || session !== cameraSessionSequence || cameraPaused.value || scanBusy.value || !cameraOpen.value) return;
+        void handleCameraScan({ text: result.getText(), format: zxingBarcodeFormat?.[result.getBarcodeFormat()] });
+    });
+    if (session !== cameraSessionSequence || !cameraOpen.value || cameraPaused.value) {
+        controls.stop();
+        stopVideoTracks();
+        return;
     }
+    scannerControls = controls;
+}
+
+function stopCameraReader() {
+    scannerControls?.stop();
+    scannerControls = null;
+    stopVideoTracks();
+}
+
+function stopVideoTracks() {
+    const stream = cameraVideo.value?.srcObject;
+    if (stream instanceof MediaStream) stream.getTracks().forEach(track => track.stop());
+    if (cameraVideo.value) cameraVideo.value.srcObject = null;
+}
+
+function barcodeFormatLabel(format) {
+    return ({ qr_internal: 'QR interno', qr_code: 'QR', ean13: 'EAN-13', ean8: 'EAN-8', upca: 'UPC-A', upce: 'UPC-E', code128: 'Code 128', sku: 'SKU' })[format] || 'Código';
 }
 
 function removeLine(index) {

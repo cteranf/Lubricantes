@@ -75,6 +75,7 @@ class ProductController extends Controller
             'brand:id,name',
             'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status',
             'specifications:id,product_id,name,value,sort_order',
+            'barcodes:id,product_id,code,format,is_primary',
         ]);
 
         return response()->json((new AdminProductListResource($product))->resolve($request));
@@ -85,20 +86,22 @@ class ProductController extends Controller
         $validated = $request->validated();
         $uploads = $validated['images'] ?? [];
         $specifications = $validated['specifications'] ?? [];
+        $barcodes = $validated['barcodes'] ?? [];
         if ($uploads === [] && isset($validated['image'])) {
             $uploads = [$validated['image']];
         }
-        unset($validated['image'], $validated['images'], $validated['specifications']);
+        unset($validated['image'], $validated['images'], $validated['specifications'], $validated['barcodes']);
         $validated['slug'] = Str::slug($validated['name']).'-'.Str::random(5);
         $initialQuantity = (int) $validated['cantidad_inicial'];
         $warehouse = $initialQuantity > 0 ? Warehouse::findOrFail($validated['warehouse_id']) : null;
         unset($validated['cantidad_inicial'], $validated['warehouse_id']);
         $validated['sku'] = Product::normalizeSku($validated['sku'] ?? null);
 
-        $product = DB::transaction(function () use ($validated, $initialQuantity, $warehouse, $request, $specifications) {
+        $product = DB::transaction(function () use ($validated, $initialQuantity, $warehouse, $request, $specifications, $barcodes) {
             $product = Product::create($validated);
             $this->inventory->initializeProduct($product, $initialQuantity, $warehouse, $request->user());
             $this->replaceSpecifications($product, $specifications);
+            app(\App\Services\ProductBarcodeService::class)->sync($product, $barcodes);
 
             return $product;
         });
@@ -106,7 +109,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data, 201);
@@ -118,17 +121,22 @@ class ProductController extends Controller
         $uploads = $validated['images'] ?? [];
         $syncSpecifications = array_key_exists('specifications', $validated);
         $specifications = $validated['specifications'] ?? [];
+        $syncBarcodes = array_key_exists('barcodes', $validated);
+        $barcodes = $validated['barcodes'] ?? [];
         $legacyUpload = $validated['image'] ?? null;
-        unset($validated['image'], $validated['images'], $validated['stock'], $validated['specifications']);
+        unset($validated['image'], $validated['images'], $validated['stock'], $validated['specifications'], $validated['barcodes']);
         if (array_key_exists('sku', $validated)) {
             $validated['sku'] = Product::normalizeSku($validated['sku']);
         }
 
-        DB::transaction(function () use ($validated, $product, $syncSpecifications, $specifications) {
+        DB::transaction(function () use ($validated, $product, $syncSpecifications, $specifications, $syncBarcodes, $barcodes) {
             $locked = Product::query()->whereKey($product->id)->lockForUpdate()->firstOrFail();
             $locked->fill($validated)->save();
             if ($syncSpecifications) {
                 $this->replaceSpecifications($locked, $specifications);
+            }
+            if ($syncBarcodes) {
+                app(\App\Services\ProductBarcodeService::class)->sync($locked, $barcodes);
             }
         });
 
@@ -143,7 +151,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data);

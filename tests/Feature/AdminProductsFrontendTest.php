@@ -8,7 +8,7 @@ class AdminProductsFrontendTest extends TestCase
 {
     public function test_products_view_uses_the_shared_server_side_table_and_preserves_catalog_actions(): void
     {
-        $view = file_get_contents(resource_path('js/views/admin/Products.vue'));
+        $view = str_replace("\r\n", "\n", file_get_contents(resource_path('js/views/admin/Products.vue')));
         $table = file_get_contents(resource_path('js/components/admin/table/AdminDataTable.vue'));
         $composable = file_get_contents(resource_path('js/composables/useAdminListQuery.js'));
 
@@ -199,7 +199,7 @@ class AdminProductsFrontendTest extends TestCase
 
     public function test_product_form_preserves_descriptions_and_guards_stale_openings_and_duplicate_submits(): void
     {
-        $view = file_get_contents(resource_path('js/views/admin/Products.vue'));
+        $view = str_replace("\r\n", "\n", file_get_contents(resource_path('js/views/admin/Products.vue')));
         $controller = file_get_contents(app_path('Http/Controllers/Api/V1/Admin/ProductController.php'));
         $resource = file_get_contents(app_path('Http/Resources/AdminProductListResource.php'));
         $imageResource = file_get_contents(app_path('Http/Resources/AdminProductImageResource.php'));

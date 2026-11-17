@@ -115,6 +115,27 @@
                         <Field label="Nombre" :error="fieldError('name')" class="md:col-span-2"><input v-model="form.name" class="input" required></Field>
                         <Field label="SKU interno" :error="fieldError('sku')"><input v-model="form.sku" class="input uppercase" placeholder="Se genera automáticamente"></Field>
                         <Field label="Precio" :error="fieldError('price')"><input v-model="form.price" type="number" min="0" step="0.01" class="input" required></Field>
+                        <section class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2" aria-labelledby="product-barcodes-title">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div><h3 id="product-barcodes-title" class="font-semibold text-slate-800">Códigos de barras comerciales</h3><p class="text-sm text-slate-600">Asocia códigos impresos en el envase. No reemplazan el SKU ni el QR interno.</p></div>
+                                <Button type="button" label="Agregar código" icon="pi pi-plus" severity="secondary" outlined size="small" :disabled="processing || specificationsLoading || form.barcodes.length >= 20" @click="addBarcode" />
+                            </div>
+                            <div v-if="form.barcodes.length" class="space-y-2">
+                                <article v-for="(barcode, index) in form.barcodes" :key="barcode.clientKey" class="grid grid-cols-1 items-end gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_12rem_auto]">
+                                    <Field :label="`Código ${index + 1}`" :error="barcodeFieldError(index)"><InputText v-model="barcode.code" class="w-full font-mono" maxlength="64" autocomplete="off" :disabled="processing || specificationsLoading" :aria-label="`Código de barras ${index + 1}`" @input="clearBarcodeErrors" /></Field>
+                                    <label class="text-sm font-semibold text-slate-700">Formato
+                                        <Select v-model="barcode.format" class="mt-1 w-full" :options="barcodeFormatOptions" option-label="label" option-value="value" :disabled="processing || specificationsLoading" />
+                                    </label>
+                                    <div class="flex items-center gap-2">
+                                        <label class="flex min-h-11 items-center gap-2 text-sm"><input type="radio" name="primary-barcode" :checked="barcode.is_primary" :disabled="processing || specificationsLoading" @change="setPrimaryBarcode(index)"> Principal</label>
+                                        <Button type="button" icon="pi pi-trash" severity="secondary" text rounded :aria-label="`Eliminar código ${index + 1}`" v-tooltip.top="'Eliminar código'" :disabled="processing || specificationsLoading" @click="removeBarcode(index)" />
+                                    </div>
+                                </article>
+                            </div>
+                            <p v-else class="text-sm text-slate-500">Este producto todavía no tiene códigos comerciales. Puede seguir identificándose por SKU o QR.</p>
+                            <p v-if="fieldError('barcodes')" class="text-sm text-red-700" role="alert">{{ fieldError('barcodes') }}</p>
+                            <p class="text-xs text-slate-500">Admite EAN-13, EAN-8, UPC-A, UPC-E y Code 128. Los GTIN validan su dígito de control y conservan ceros iniciales.</p>
+                        </section>
                         <Field v-if="!isEditing" label="Cantidad inicial" :error="fieldError('cantidad_inicial')"><input v-model.number="form.cantidad_inicial" type="number" min="0" class="input" required></Field>
                         <Field v-if="!isEditing" label="Almacén inicial" :error="fieldError('warehouse_id')"><select v-model="form.warehouse_id" :required="form.cantidad_inicial > 0" class="input"><option value="">Seleccione un almacén</option><option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.name }} — {{ warehouse.branch?.name }}</option></select><small class="text-slate-500">Los cambios posteriores se realizan desde Inventario.</small></Field>
                         <Field label="Categoría" :error="fieldError('category_id')"><select v-model="form.category_id" class="input" :disabled="optionsLoading"><option value="">Sin categoría</option><option v-for="item in categoryOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/categories" class="text-xs text-blue-700">Administrar categorías</router-link></Field>
@@ -339,6 +360,14 @@ const imageStatusBusy = ref(false);
 const imageFollowupNeeded = ref(false);
 const imageSaved = ref(false);
 const specificationsLoading = ref(false);
+const barcodeRowSequence = ref(0);
+const barcodeFormatOptions = [
+    { label: 'EAN-13', value: 'ean13' },
+    { label: 'EAN-8', value: 'ean8' },
+    { label: 'UPC-A', value: 'upca' },
+    { label: 'UPC-E', value: 'upce' },
+    { label: 'Code 128', value: 'code128' },
+];
 const specificationsError = ref('');
 const specificationsFormError = ref('');
 const currentImageUrl = computed(() => selectedProduct.value?.image_url || null);
@@ -455,6 +484,43 @@ function specificationRows(values) {
         : [];
 }
 
+function barcodeRow(code = '', format = 'ean13', isPrimary = false, id = null) {
+    return { clientKey: `product-barcode-${++barcodeRowSequence.value}`, id, code, format, is_primary: Boolean(isPrimary) };
+}
+
+function barcodeRows(values) {
+    return Array.isArray(values) ? values.map(item => barcodeRow(item?.code || '', item?.format || 'ean13', item?.is_primary, item?.id || null)) : [];
+}
+
+function addBarcode() {
+    if (processing.value || specificationsLoading.value || form.value.barcodes.length >= 20) return;
+    form.value.barcodes.push(barcodeRow());
+}
+
+function removeBarcode(index) {
+    if (processing.value || specificationsLoading.value) return;
+    form.value.barcodes.splice(index, 1);
+    if (!form.value.barcodes.some(item => item.is_primary) && form.value.barcodes.length) form.value.barcodes[0].is_primary = true;
+    clearBarcodeErrors();
+}
+
+function setPrimaryBarcode(index) {
+    form.value.barcodes.forEach((item, itemIndex) => { item.is_primary = itemIndex === index; });
+}
+
+function clearBarcodeErrors() {
+    errors.value = Object.fromEntries(Object.entries(errors.value).filter(([key]) => key !== 'barcodes' && !key.startsWith('barcodes.')));
+}
+
+function barcodeFieldError(index) {
+    const value = errors.value[`barcodes.${index}.code`];
+    const messages = Array.isArray(value) ? value.join(' ') : typeof value === 'string' ? value : '';
+    if (messages.includes('asociado a otro producto')) return 'Este código ya está asociado a otro producto.';
+    if (messages.includes('repetido en este producto')) return 'Este código está repetido en la lista.';
+    if (messages.includes('dígito de control')) return 'Revisa el formato y el dígito de control del código.';
+    return messages ? 'Revisa el formato y el valor del código.' : '';
+}
+
 function addSpecification() {
     const specifications = form.value.specifications;
     if (!Array.isArray(specifications) || specifications.length >= 30 || processing.value || specificationsLoading.value) return;
@@ -557,9 +623,9 @@ async function openModal(product = null) {
     if (product) {
         preserveAssignedOption(categoryOptions.value, product.category, product.category_id);
         preserveAssignedOption(brandOptions.value, product.brand, product.brand_id);
-        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined };
+        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined, barcodes: [] };
     } else {
-        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', allow_reviews: true, images: [], specifications: [] };
+        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', allow_reviews: true, images: [], specifications: [], barcodes: [] };
     }
     showModal.value = true;
 
@@ -587,6 +653,7 @@ async function loadProductSpecifications(sequence = openingSequence, productId =
 
         selectedProduct.value = data;
         form.value.specifications = specificationRows(data.specifications);
+        form.value.barcodes = barcodeRows(data.barcodes);
     } catch {
         if (isCurrentOpening(sequence, productId, mode)) {
             specificationsError.value = 'No se pudieron cargar las especificaciones del producto.';
@@ -1026,6 +1093,7 @@ async function submitForm() {
         if (Array.isArray(formState.specifications)) {
             data.append('specifications', JSON.stringify(formState.specifications.map(({ name, value }) => ({ name, value }))));
         }
+        data.append('barcodes', JSON.stringify((formState.barcodes || []).map(({ id, code, format, is_primary }) => ({ ...(id ? { id } : {}), code, format, is_primary }))));
         let response;
         if (mode === 'edit') {
             data.append('_method', 'PUT');

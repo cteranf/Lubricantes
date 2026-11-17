@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Exceptions\InvalidProductImage;
+use App\Http\Requests\Admin\Concerns\NormalizesProductBarcodes;
 use App\Http\Requests\Admin\Concerns\NormalizesProductSpecifications;
 use App\Models\Product;
 use App\Services\ProductImageProcessor;
@@ -14,6 +15,7 @@ use Illuminate\Validation\Validator;
 
 class StoreProductRequest extends FormRequest
 {
+    use NormalizesProductBarcodes;
     use NormalizesProductSpecifications;
 
     public function authorize(): bool
@@ -27,11 +29,13 @@ class StoreProductRequest extends FormRequest
             $this->merge(['sku' => Product::normalizeSku($this->input('sku'))]);
         }
         $this->normalizeProductSpecifications();
+        $this->normalizeProductBarcodes();
     }
 
     public function withValidator(Validator $validator): void
     {
         $this->validateUniqueProductSpecificationNames($validator);
+        $this->validateProductBarcodes($validator);
     }
 
     public function rules(): array
@@ -54,6 +58,11 @@ class StoreProductRequest extends FormRequest
             'specifications.*' => ['required', 'array:name,value'],
             'specifications.*.name' => ['required', 'string', 'max:100'],
             'specifications.*.value' => ['required', 'string', 'max:500'],
+            'barcodes' => ['sometimes', 'array', 'max:20'],
+            'barcodes.*' => ['required', 'array:code,format,is_primary'],
+            'barcodes.*.code' => ['required', 'string', 'max:64'],
+            'barcodes.*.format' => ['required', 'string', 'in:ean13,ean8,upca,upce,code128'],
+            'barcodes.*.is_primary' => ['sometimes', 'boolean'],
             'viscosity' => ['nullable', 'string'],
             'image' => ['nullable', 'file', 'max:10240', function ($attribute, $value, $fail) {
                 if ($value === null || ! $value instanceof UploadedFile) {

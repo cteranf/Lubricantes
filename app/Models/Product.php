@@ -298,6 +298,11 @@ class Product extends Model
         return $this->hasMany(ProductSpecification::class)->orderBy('sort_order')->orderBy('id');
     }
 
+    public function barcodes()
+    {
+        return $this->hasMany(ProductBarcode::class)->orderByDesc('is_primary')->orderBy('id');
+    }
+
     public function reviews()
     {
         return $this->hasMany(ProductReview::class);

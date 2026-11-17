@@ -23,3 +23,7 @@ export function accumulateReceiptScan(lines, product, quantity, { maxLines = 100
     nextLines.push({ product_id: productId, product, quantity: units, sort_order: nextLines.length });
     return { ok: true, lines: nextLines };
 }
+
+export function scannerFormatName(name) {
+    return ({ QR_CODE: 'qr_code', EAN_13: 'ean13', EAN_8: 'ean8', UPC_A: 'upca', UPC_E: 'upce', CODE_128: 'code128' })[name] || null;
+}

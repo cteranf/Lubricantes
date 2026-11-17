@@ -31,6 +31,12 @@ class AdminProductListResource extends JsonResource
             'image_dimensions' => $this->image_dimensions,
             'images' => $this->whenLoaded('images', fn () => AdminProductImageResource::collection($this->images)->resolve($request)),
             'specifications' => $this->when($this->resource->relationLoaded('specifications'), fn () => ProductSpecificationResource::collection($this->resource->getRelation('specifications'))->resolve($request)),
+            'barcodes' => $this->when($this->resource->relationLoaded('barcodes'), fn () => $this->resource->getRelation('barcodes')->map(fn ($barcode) => [
+                'id' => (int) $barcode->id,
+                'code' => (string) $barcode->code,
+                'format' => (string) $barcode->format,
+                'is_primary' => (bool) $barcode->is_primary,
+            ])->values()->all()),
         ];
     }
 }
