@@ -6,15 +6,42 @@ use App\Exceptions\InventoryReceiptConflictException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreInventoryReceiptRequest;
 use App\Http\Requests\Admin\UpdateInventoryReceiptRequest;
+use App\Http\Requests\Admin\PreviewInventoryReceiptImportRequest;
 use App\Http\Resources\AdminInventoryReceiptResource;
 use App\Models\InventoryReceipt;
+use App\Services\InventoryReceiptImportService;
 use App\Services\InventoryReceiptService;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class InventoryReceiptController extends Controller
 {
-    public function __construct(private InventoryReceiptService $receipts) {}
+    public function __construct(private InventoryReceiptService $receipts, private InventoryReceiptImportService $imports) {}
+
+    public function importTemplate()
+    {
+        return response("\xEF\xBB\xBFsku,cantidad\r\n", Response::HTTP_OK, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename=plantilla-recepcion-inventario.csv',
+        ]);
+    }
+
+    public function importPreview(PreviewInventoryReceiptImportRequest $request)
+    {
+        try {
+            return response()->json($this->imports->preview(
+                $request->file('file'),
+                (int) $request->validated('warehouse_id'),
+                $request->validated('existing_lines')
+            ));
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json([
+                'can_import' => false,
+                'rows' => [],
+                'global_errors' => [$exception->getMessage()],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+    }
 
     public function index(Request $request)
     {

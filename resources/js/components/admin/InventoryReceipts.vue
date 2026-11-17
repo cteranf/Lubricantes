@@ -69,20 +69,53 @@
 
                         <div class="grid gap-4 sm:grid-cols-2">
                             <label class="block text-sm font-semibold text-slate-700">Almacén activo
-                                <Select v-model="form.warehouse_id" class="mt-1 w-full" :options="warehouseOptions" option-label="label" option-value="id" option-disabled="disabled" placeholder="Selecciona un almacén" :disabled="busy || statusLoading" />
+                                <Select v-model="form.warehouse_id" class="mt-1 w-full" :options="warehouseOptions" option-label="label" option-value="id" option-disabled="disabled" placeholder="Selecciona un almacén" :disabled="busy || statusLoading || importBusy" />
                             </label>
                             <label class="block text-sm font-semibold text-slate-700">Referencia externa (opcional)
-                                <InputText v-model="form.external_reference" class="mt-1 w-full" maxlength="100" :disabled="busy || statusLoading" placeholder="Orden de compra, guía, etc." />
+                                <InputText v-model="form.external_reference" class="mt-1 w-full" maxlength="100" :disabled="busy || statusLoading || importBusy" placeholder="Orden de compra, guía, etc." />
                             </label>
                         </div>
                         <label class="block text-sm font-semibold text-slate-700">Notas (opcional)
-                            <InputText v-model="form.notes" class="mt-1 w-full" maxlength="2000" :disabled="busy || statusLoading" placeholder="Observaciones de la recepción" />
+                            <InputText v-model="form.notes" class="mt-1 w-full" maxlength="2000" :disabled="busy || statusLoading || importBusy" placeholder="Observaciones de la recepción" />
                         </label>
+
+                        <section class="space-y-3 rounded-xl border border-blue-200 bg-blue-50/60 p-4" aria-labelledby="receipt-import-title">
+                            <div>
+                                <h4 id="receipt-import-title" class="font-bold text-slate-900">Importar productos</h4>
+                                <p class="mt-1 text-xs text-slate-600">CSV UTF-8 o Excel XLSX, máximo 2 MB, con las columnas sku y cantidad. La vista previa no guarda ni modifica existencias.</p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <Button type="button" label="Importar Excel o CSV" icon="pi pi-upload" severity="secondary" outlined :disabled="!form.warehouse_id || busy || statusLoading || importBusy" @click="openImportFilePicker" />
+                                <input ref="importFileInput" class="sr-only" type="file" accept=".xlsx,.csv" aria-label="Seleccionar archivo Excel o CSV" @change="onImportFileChange" />
+                                <Button type="button" label="Descargar plantilla" icon="pi pi-download" severity="secondary" text :disabled="importBusy" @click="downloadImportTemplate" />
+                                <Button v-if="importFile" type="button" label="Validar y previsualizar" icon="pi pi-search" :loading="importBusy" :disabled="!form.warehouse_id || busy || statusLoading" @click="previewImport" />
+                                <span v-if="importFile" class="text-xs text-slate-600" aria-live="polite">{{ importFile.name }} · {{ formatFileSize(importFile.size) }}</span>
+                            </div>
+                            <p v-if="importError" class="text-sm text-red-700" role="alert">{{ importError }}</p>
+                            <div v-if="importPreview" class="space-y-3" aria-live="polite">
+                                <p class="text-sm font-semibold text-slate-800">{{ importPreview.totals?.importable_products || 0 }} filas válidas · {{ importPreview.totals?.total_products || lines.length }} productos totales · {{ Number(importPreview.totals?.total_units || totalUnits).toLocaleString('es-PE') }} unidades totales</p>
+                                <ul v-if="importPreview.global_errors?.length" class="list-inside list-disc rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                                    <li v-for="(message, index) in importPreview.global_errors" :key="`import-global-${index}`">{{ message }}</li>
+                                </ul>
+                                <div v-if="importPreview.rows?.length" class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                                    <table class="min-w-full text-left text-sm">
+                                        <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th scope="col" class="px-3 py-2">Fila</th><th scope="col" class="px-3 py-2">SKU</th><th scope="col" class="px-3 py-2">Producto</th><th scope="col" class="px-3 py-2 text-right">Cantidad</th><th scope="col" class="px-3 py-2">Resultado</th></tr></thead>
+                                        <tbody class="divide-y divide-slate-100">
+                                            <tr v-for="row in importPreview.rows" :key="`import-row-${row.row}`" :class="row.errors?.length ? 'bg-red-50/70' : ''">
+                                                <td class="px-3 py-2 font-mono">{{ row.row }}</td><td class="px-3 py-2 font-mono">{{ row.sku || '—' }}</td><td class="px-3 py-2">{{ row.product_name || '—' }}</td><td class="px-3 py-2 text-right">{{ row.quantity ?? '—' }}</td><td class="px-3 py-2"><span v-if="row.errors?.length" class="text-red-700">{{ row.errors.join(' ') }}</span><span v-else class="text-emerald-700">Válida</span></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p v-if="!importPreview.can_import && importPreview.rows?.length" class="text-sm text-amber-800" role="status">Corrige los errores del archivo o del borrador. No se ha incorporado ninguna fila.</p>
+                                <Button v-if="importPreview.can_import" type="button" label="Incorporar filas al borrador" icon="pi pi-plus" severity="success" outlined :disabled="busy || importBusy" @click="appendImportedRows" />
+                            </div>
+                        </section>
 
                         <section class="rounded-xl border border-slate-200 bg-slate-50 p-4" aria-labelledby="receipt-product-search-title">
                             <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
                                 <label class="min-w-0 flex-1 text-sm font-semibold text-slate-700" for="receipt-product-search">Buscar productos por nombre o SKU
-                                    <InputText id="receipt-product-search" v-model="productSearch" class="mt-1 w-full" :disabled="busy || statusLoading || lines.length >= MAX_LINES" placeholder="Escribe al menos 2 caracteres" @input="scheduleProductSearch" />
+                                    <InputText id="receipt-product-search" v-model="productSearch" class="mt-1 w-full" :disabled="busy || statusLoading || importBusy || lines.length >= MAX_LINES" placeholder="Escribe al menos 2 caracteres" @input="scheduleProductSearch" />
                                 </label>
                                 <span class="text-xs text-slate-600">{{ lines.length }}/{{ MAX_LINES }} productos · {{ totalUnits }}/{{ MAX_TOTAL_UNITS }} unidades</span>
                             </div>
@@ -92,7 +125,7 @@
                             <ul v-else-if="productResults.length" class="mt-3 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white" aria-label="Resultados de productos">
                                 <li v-for="product in productResults" :key="product.id" class="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
                                     <span class="min-w-0"><b class="block truncate text-sm text-slate-900">{{ product.name }}</b><span class="font-mono text-xs text-slate-500">{{ product.sku || 'Sin SKU' }}</span></span>
-                                    <Button type="button" :label="isDuplicate(product.id) ? 'Ya agregado' : 'Agregar'" :icon="isDuplicate(product.id) ? 'pi pi-check' : 'pi pi-plus'" size="small" severity="secondary" outlined :disabled="busy || isDuplicate(product.id) || lines.length >= MAX_LINES" @click="addProduct(product)" />
+                                    <Button type="button" :label="isDuplicate(product.id) ? 'Ya agregado' : 'Agregar'" :icon="isDuplicate(product.id) ? 'pi pi-check' : 'pi pi-plus'" size="small" severity="secondary" outlined :disabled="busy || importBusy || isDuplicate(product.id) || lines.length >= MAX_LINES" @click="addProduct(product)" />
                                 </li>
                             </ul>
                             <p v-else-if="productSearch.trim().length >= 2" class="mt-3 text-sm text-slate-500">No se encontraron productos activos.</p>
@@ -105,8 +138,8 @@
                             <ul v-else class="space-y-2">
                                 <li v-for="(line, index) in lines" :key="`${line.product_id}-${index}`" class="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] items-center gap-2 rounded-xl border border-slate-200 p-3">
                                     <span class="min-w-0"><b class="block truncate text-sm text-slate-900">{{ line.product?.name || 'Producto no disponible' }}</b><span class="font-mono text-xs text-slate-500">{{ line.product?.sku || 'Sin SKU' }}</span></span>
-                                    <InputNumber v-model="line.quantity" :input-id="`receipt-quantity-${index}`" class="w-full" input-class="w-full" :min="1" :max="MAX_TOTAL_UNITS" :use-grouping="false" :disabled="busy" :invalid="!isPositiveInteger(line.quantity)" aria-label="Cantidad recibida" />
-                                    <Button type="button" icon="pi pi-trash" text rounded severity="danger" :aria-label="`Quitar ${line.product?.name || 'producto'} de la recepción`" :disabled="busy" @click="removeLine(index)" />
+                                    <InputNumber v-model="line.quantity" :input-id="`receipt-quantity-${index}`" class="w-full" input-class="w-full" :min="1" :max="MAX_TOTAL_UNITS" :use-grouping="false" :disabled="busy || importBusy" :invalid="!isPositiveInteger(line.quantity)" aria-label="Cantidad recibida" />
+                                    <Button type="button" icon="pi pi-trash" text rounded severity="danger" :aria-label="`Quitar ${line.product?.name || 'producto'} de la recepción`" :disabled="busy || importBusy" @click="removeLine(index)" />
                                 </li>
                             </ul>
                             <p v-if="totalUnits > MAX_TOTAL_UNITS" class="mt-2 text-sm text-red-700" role="alert">El total supera el máximo de {{ MAX_TOTAL_UNITS.toLocaleString('es-PE') }} unidades.</p>
@@ -114,9 +147,9 @@
                         </section>
 
                         <div class="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
-                            <Button label="Cerrar editor" severity="secondary" text :disabled="busy" @click="closeEditor" />
-                            <Button v-if="receipt?.status === 'draft'" label="Revisar y confirmar" icon="pi pi-check" severity="success" outlined :disabled="busy || statusLoading || isDirty || !receipt.lines?.length" @click="openConfirmation" />
-                            <Button label="Guardar borrador" icon="pi pi-save" :loading="busy && busyAction === 'save'" :disabled="!canSave || busy || statusLoading || statusUncertain || ambiguousCreate" @click="saveDraft" />
+                            <Button label="Cerrar editor" severity="secondary" text :disabled="busy || importBusy" @click="closeEditor" />
+                            <Button v-if="receipt?.status === 'draft'" label="Revisar y confirmar" icon="pi pi-check" severity="success" outlined :disabled="busy || importBusy || statusLoading || isDirty || !receipt.lines?.length" @click="openConfirmation" />
+                            <Button label="Guardar borrador" icon="pi pi-save" :loading="busy && busyAction === 'save'" :disabled="!canSave || busy || importBusy || statusLoading || statusUncertain || ambiguousCreate" @click="saveDraft" />
                         </div>
                         <p v-if="receipt?.status === 'draft' && isDirty" class="text-right text-xs text-amber-700">Guarda los cambios para habilitar la confirmación del contenido vigente.</p>
                     </section>
@@ -175,7 +208,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
 import InputNumber from 'primevue/inputnumber';
@@ -213,6 +246,11 @@ const retryConfirmAvailable = ref(false);
 const ambiguousCreate = ref(false);
 const ambiguousCreateListChecked = ref(false);
 const confirmationOpen = ref(false);
+const importFileInput = ref(null);
+const importFile = ref(null);
+const importPreview = ref(null);
+const importBusy = ref(false);
+const importError = ref('');
 let productSearchTimer = null;
 let productRequestSequence = 0;
 let listRequestSequence = 0;
@@ -248,6 +286,9 @@ const canSave = computed(() => Boolean(form.value.warehouse_id)
     && allQuantitiesValid.value
     && duplicateLineIds.value.length === 0
     && warehouses.value.some(warehouse => Number(warehouse.id) === Number(form.value.warehouse_id)));
+
+watch(() => Number(form.value.warehouse_id), clearImportPreview);
+watch(lines, clearImportPreview, { deep: true });
 
 function emptyForm() {
     return { warehouse_id: null, external_reference: '', notes: '' };
@@ -439,6 +480,87 @@ function payload() {
         notes: form.value.notes?.trim() || null,
         lines: lines.value.map(line => ({ product_id: Number(line.product_id), quantity: Number(line.quantity) })),
     };
+}
+
+function clearImportPreview() {
+    importPreview.value = null;
+    importError.value = '';
+}
+
+function openImportFilePicker() {
+    importFileInput.value?.click();
+}
+
+function onImportFileChange(event) {
+    importFile.value = event.target.files?.[0] || null;
+    event.target.value = '';
+    importPreview.value = null;
+    importError.value = '';
+}
+
+function formatFileSize(bytes) {
+    if (!Number.isFinite(Number(bytes)) || Number(bytes) < 0) return 'tamaño desconocido';
+    return Number(bytes) < 1024 * 1024
+        ? `${Math.max(1, Math.round(Number(bytes) / 1024))} KB`
+        : `${(Number(bytes) / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function downloadImportTemplate() {
+    try {
+        const { data } = await api.get('/admin/inventory-receipts/import-template', { responseType: 'blob' });
+        const url = URL.createObjectURL(data);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'plantilla-recepcion-inventario.csv';
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+        importError.value = errorMessage(error, 'No se pudo descargar la plantilla.');
+    }
+}
+
+async function previewImport() {
+    if (!importFile.value || !form.value.warehouse_id || importBusy.value || busy.value || statusLoading.value) return;
+    const formData = new FormData();
+    formData.append('warehouse_id', String(form.value.warehouse_id));
+    formData.append('file', importFile.value);
+    formData.append('existing_lines', JSON.stringify(lines.value.map(line => ({
+        product_id: Number(line.product_id),
+        quantity: Number(line.quantity),
+    }))));
+    importBusy.value = true;
+    importError.value = '';
+    importPreview.value = null;
+    try {
+        const { data } = await api.post('/admin/inventory-receipts/import-preview', formData);
+        importPreview.value = data?.data ?? data;
+    } catch (error) {
+        const body = error?.response?.data;
+        if (body && (Array.isArray(body.rows) || Array.isArray(body.global_errors))) {
+            importPreview.value = body;
+        } else {
+            importError.value = errorMessage(error, 'No se pudo validar el archivo.');
+        }
+    } finally {
+        importBusy.value = false;
+    }
+}
+
+function appendImportedRows() {
+    const preview = importPreview.value;
+    if (!preview?.can_import || busy.value || importBusy.value) return;
+    const imported = preview.rows.map((row, index) => ({
+        product_id: Number(row.product_id),
+        product: { id: Number(row.product_id), name: row.product_name, sku: row.sku },
+        quantity: Number(row.quantity),
+        sort_order: lines.value.length + index,
+    }));
+    lines.value.push(...imported);
+    importFile.value = null;
+    importPreview.value = null;
+    importError.value = '';
+    if (importFileInput.value) importFileInput.value.value = '';
+    toast.add({ severity: 'success', summary: 'Filas incorporadas', detail: 'Revisa las líneas y guarda el borrador para conservar los cambios.', life: 4000 });
 }
 
 async function saveDraft() {

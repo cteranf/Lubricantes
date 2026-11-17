@@ -20,6 +20,8 @@ class InventoryReceiptsFrontendTest extends TestCase
         $this->assertStringContainsString("const showReceiptHistory=()=>{tab.value='history';loadMovements()}", $inventory);
 
         $this->assertStringContainsString("api.get('/admin/inventory-receipts'", $component);
+        $this->assertStringContainsString("api.get('/admin/inventory-receipts/import-template'", $component);
+        $this->assertStringContainsString("api.post('/admin/inventory-receipts/import-preview', formData", $component);
         $this->assertStringContainsString('api.get(`/admin/inventory-receipts/${id}`)', $component);
         $this->assertStringContainsString("api.post('/admin/inventory-receipts', requestPayload)", $component);
         $this->assertStringContainsString('api.put(`/admin/inventory-receipts/${receiptId}`, { ...requestPayload, version: receipt.value.version })', $component);
@@ -50,6 +52,25 @@ class InventoryReceiptsFrontendTest extends TestCase
         $this->assertStringContainsString('if (!ambiguousCreate.value || !ambiguousCreateListChecked.value || listLoading.value) return;', $component);
         $this->assertStringContainsString('El formulario conserva el almacén, las líneas y las cantidades.', $component);
         $this->assertStringContainsString('Actualiza la lista para localizarlo', $component);
+
+        $this->assertStringContainsString('label="Importar Excel o CSV"', $component);
+        $this->assertStringContainsString('accept=".xlsx,.csv"', $component);
+        $this->assertStringContainsString('label="Descargar plantilla"', $component);
+        $this->assertStringContainsString('formData.append(\'existing_lines\'', $component);
+        $this->assertStringContainsString('label="Validar y previsualizar"', $component);
+        $this->assertStringContainsString('Fila</th><th scope="col" class="px-3 py-2">SKU</th>', $component);
+        $this->assertStringContainsString('label="Incorporar filas al borrador"', $component);
+        $this->assertStringContainsString('if (!preview?.can_import || busy.value || importBusy.value) return;', $component);
+        $this->assertStringContainsString('preview.rows.map((row, index)', $component);
+        $this->assertStringContainsString('Revisa las líneas y guarda el borrador', $component);
+        $previewStart = strpos($component, 'async function previewImport()');
+        $appendStart = strpos($component, 'function appendImportedRows()', $previewStart);
+        $this->assertNotFalse($previewStart);
+        $this->assertNotFalse($appendStart);
+        $previewBody = substr($component, $previewStart, $appendStart - $previewStart);
+        $this->assertStringContainsString("api.post('/admin/inventory-receipts/import-preview'", $previewBody);
+        $this->assertStringNotContainsString("api.post('/admin/inventory-receipts',", $previewBody);
+        $this->assertStringNotContainsString('/confirm', $previewBody);
 
         $this->assertStringContainsString("receipt?.status === 'draft'", $component);
         $this->assertStringContainsString('receipt.confirmed_by', $component);
