@@ -9,6 +9,7 @@ use App\Models\PaymentResolutionHistory;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
 use App\Models\PaymentTransaction;
+use App\Support\TransferPaymentInstallments;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Collection;
@@ -74,16 +75,19 @@ class TreasuryPaymentResolutionService
 
     private function openWithinTransaction(int $submissionId, int $actorId): PaymentResolutionCase
     {
-        // Keep the same financial lock direction as approval: submission, order,
-        // transaction keys, case, then reservations ordered by their primary key.
-        $submission = PaymentSubmission::query()->lockForUpdate()->find($submissionId);
-        if (! $submission) {
+        $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+        if (! $orderId) {
             $this->notFound();
         }
-
-        $order = Order::query()->lockForUpdate()->find($submission->order_id);
+        // All customer writes and Treasury decisions serialize order first.
+        $order = Order::query()->lockForUpdate()->find($orderId);
         if (! $order) {
             $this->conflict('El pedido asociado no está disponible.');
+        }
+        $submissions = PaymentSubmission::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+        $submission = $submissions->firstWhere('id', $submissionId);
+        if (! $submission) {
+            $this->notFound();
         }
 
         $transactionKey = $this->transactionKey($submission->id);
@@ -94,6 +98,7 @@ class TreasuryPaymentResolutionService
             ->where('order_id', $order->id)
             ->where('transaction_type', PaymentTransaction::PAYMENT)
             ->where('status', PaymentTransaction::APPROVED)
+            ->where('approved_scope_key', PaymentTransaction::approvedScopeKeyForOrder($order->id))
             ->lockForUpdate()
             ->first();
         $case = PaymentResolutionCase::query()->where('payment_submission_id', $submission->id)->lockForUpdate()->first();
@@ -120,7 +125,7 @@ class TreasuryPaymentResolutionService
             'payment_method' => 'transferencia',
             'transaction_type' => PaymentTransaction::PAYMENT,
             'status' => PaymentTransaction::RECEIVED,
-            'amount' => (string) $order->total,
+            'amount' => (string) ($submission->amount ?? $submission->expected_amount),
             'currency' => 'PEN',
             'collection_method' => $submission->channel,
             'confirmed_by' => $actorId,
@@ -137,7 +142,7 @@ class TreasuryPaymentResolutionService
             'received_payment_transaction_id' => $transaction->id,
             'type' => null,
             'status' => PaymentResolutionCase::OPEN,
-            'amount' => (string) $order->total,
+            'amount' => (string) ($submission->amount ?? $submission->expected_amount),
             'currency' => 'PEN',
             'reason' => self::RESOLUTION_REASON,
             'funds_received_at' => $now,
@@ -175,7 +180,7 @@ class TreasuryPaymentResolutionService
             'reason' => self::RESOLUTION_REASON,
             'safe_metadata' => [
                 'currency' => 'PEN',
-                'amount' => (string) $order->total,
+                'amount' => (string) ($submission->amount ?? $submission->expected_amount),
             ],
             'occurred_at' => $now,
         ]);
@@ -291,7 +296,7 @@ class TreasuryPaymentResolutionService
             && $linked->status === PaymentTransaction::RECEIVED
             && $linked->collection_method === $submission->channel
             && $linked->currency === 'PEN'
-            && $this->cents($linked->amount) === $this->cents($order->total)
+            && $this->cents($linked->amount) === $this->cents($submission->amount ?? $submission->expected_amount)
             && $linked->idempotency_key === $this->transactionKey($submission->id)
             && $linked->approved_scope_key === null
             && $linked->confirmed_at !== null
@@ -300,7 +305,7 @@ class TreasuryPaymentResolutionService
             && $case->type === null
             && $case->status === PaymentResolutionCase::OPEN
             && $case->currency === 'PEN'
-            && $this->cents($case->amount) === $this->cents($order->total)
+            && $this->cents($case->amount) === $this->cents($submission->amount ?? $submission->expected_amount)
             && $case->idempotency_key === $this->caseKey($submission->id)
             && $case->funds_received_at !== null
             && $case->requested_at !== null

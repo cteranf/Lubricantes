@@ -57,6 +57,39 @@ class InventoryService
         return $this->availableQuantity($product, $this->defaultWarehouse());
     }
 
+    /**
+     * Resolve sellable stock for a group of products with bounded queries.
+     * Expiration cleanup is grouped so callers never trigger it once per row.
+     */
+    public function sellableStockForProducts(iterable $products): array
+    {
+        $products = collect($products)->keyBy('id');
+        if ($products->isEmpty()) {
+            return [];
+        }
+        if (! Schema::hasTable('warehouse_inventories')) {
+            return $products->mapWithKeys(fn (Product $product) => [(int) $product->id => (int) $product->stock])->all();
+        }
+
+        $warehouse = $this->defaultWarehouse();
+        $productIds = $products->keys()->map(fn ($id) => (int) $id)->values()->all();
+        $this->reservationExpiration->expireDueReservations(null, $warehouse->id, $productIds);
+
+        $balances = WarehouseInventory::query()
+            ->where('warehouse_id', $warehouse->id)
+            ->whereIn('product_id', $productIds)
+            ->get(['product_id', 'quantity', 'reserved_quantity'])
+            ->keyBy('product_id');
+
+        return $products->mapWithKeys(function (Product $product) use ($balances): array {
+            $balance = $balances->get($product->id);
+
+            return [(int) $product->id => $balance
+                ? max(0, (int) $balance->quantity - (int) $balance->reserved_quantity)
+                : 0];
+        })->all();
+    }
+
     public function availableQuantity(Product $product, ?Warehouse $warehouse = null): int
     {
         if (! Schema::hasTable('warehouse_inventories')) {

@@ -47,6 +47,64 @@ class CustomerTransferPaymentOptionTest extends TestCase
         $this->get('/api/v1/orders/'.$order->id.'/payment-options/'.$bank->id.'/qr')->assertNotFound();
     }
 
+    public function test_single_bank_option_returns_instructions_account_and_cci_without_qr(): void
+    {
+        [$owner, $order] = $this->order();
+        $account = $this->account('BANK-ONLY', 'bank_transfer', true, true);
+        $account->update(['cci' => '00123456789012345678']);
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/v1/orders/'.$order->id.'/payment-options')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.channel', 'bank_transfer')
+            ->assertJsonPath('data.0.display_name', 'BANK-ONLY')
+            ->assertJsonPath('data.0.holder_name', 'Titular')
+            ->assertJsonPath('data.0.bank_name', 'Banco')
+            ->assertJsonPath('data.0.account_number', '123456')
+            ->assertJsonPath('data.0.cci', '00123456789012345678')
+            ->assertJsonPath('data.0.instructions', 'Transfiere el importe del abono que vas a registrar y conserva tu número de operación.')
+            ->assertJsonMissingPath('data.0.qr_url');
+    }
+
+    public function test_payment_options_are_hidden_when_no_new_installment_is_allowed_but_available_for_observed_correction(): void
+    {
+        [$owner, $order] = $this->order();
+        $this->account('BANK-ONLY', 'bank_transfer', true, true);
+        $submission = PaymentSubmission::create([
+            'order_id' => $order->id,
+            'channel' => 'bank_transfer',
+            'status' => PaymentSubmission::PENDING_REVIEW,
+            'expected_amount' => $order->total,
+            'amount' => $order->total,
+            'currency' => 'PEN',
+            'operation_number' => '001234567',
+            'normalized_operation_number' => '001234567',
+            'duplicate_fingerprint' => hash('sha256', 'option-accounting-'.$order->id),
+            'declared_paid_at' => now()->subMinute(),
+            'origin_bank' => 'Banco de origen',
+            'receiving_account_snapshot' => ['id' => 1, 'channel' => 'bank_transfer'],
+            'submitted_by' => $owner->id,
+            'submitted_at' => now(),
+            'idempotency_key' => 'option-accounting-'.$order->id,
+        ]);
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/v1/orders/'.$order->id.'/payment-options')
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'payment_installments_complete');
+
+        $submission->update(['status' => PaymentSubmission::REJECTED]);
+        $this->getJson('/api/v1/orders/'.$order->id.'/payment-options')
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'payment_reconciliation_required');
+
+        $submission->update(['status' => PaymentSubmission::OBSERVED]);
+        $this->getJson('/api/v1/orders/'.$order->id.'/payment-options')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+    }
+
     public function test_access_and_ineligible_reservations_are_rejected(): void
     {
         [$owner, $order] = $this->order();

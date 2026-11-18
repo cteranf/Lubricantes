@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\StoreProductRequest;
 use App\Http\Requests\Admin\UpdateProductRequest;
 use App\Http\Resources\AdminProductListResource;
 use App\Models\Product;
+use App\Models\ProductModel;
 use App\Models\Warehouse;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
@@ -15,6 +16,7 @@ use App\Services\ProductImageProcessingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
@@ -24,18 +26,20 @@ class ProductController extends Controller
     {
         $query = Product::query()
             ->select([
-                'products.id', 'products.category_id', 'products.brand_id', 'products.name',
-                'products.sku', 'products.price', 'products.is_active', 'products.image_path',
+                'products.id', 'products.category_id', 'products.brand_id', 'products.product_model_id', 'products.name',
+                'products.sku', 'products.presentation', 'products.price', 'products.is_active', 'products.image_path',
                 'products.stock', 'products.created_at', 'products.description', 'products.allow_reviews',
             ])
-            ->with(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status'])
+            ->with(['category:id,name', 'brand:id,name', 'productModel:id,brand_id,name,is_active', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status'])
             ->withSum('inventories as inventory_stock', 'quantity');
 
         $filters = $request->filters();
         $escapeLike = static fn (string $value): string => strtr($value, ['!' => '!!', '%' => '!%', '_' => '!_']);
         if (isset($filters['search'])) {
             $pattern = '%'.$escapeLike($filters['search']).'%';
-            $query->where(fn ($builder) => $builder->whereRaw("products.name LIKE ? ESCAPE '!'", [$pattern])->orWhereRaw("products.sku LIKE ? ESCAPE '!'", [$pattern]));
+            $query->where(fn ($builder) => $builder->whereRaw("products.name LIKE ? ESCAPE '!'", [$pattern])
+                ->orWhereRaw("products.sku LIKE ? ESCAPE '!'", [$pattern])
+                ->orWhereHas('productModel', fn ($models) => $models->whereRaw("product_models.name LIKE ? ESCAPE '!'", [$pattern])));
         }
         foreach (['sku' => 'products.sku', 'name' => 'products.name'] as $key => $column) {
             if (isset($filters[$key])) {
@@ -46,6 +50,9 @@ class ProductController extends Controller
             if (isset($filters[$key])) {
                 $query->where($column, '=', (int) $filters[$key]);
             }
+        }
+        if (isset($filters['product_model_id'])) {
+            $query->where('products.product_model_id', '=', (int) $filters['product_model_id']);
         }
         if (isset($filters['is_active'])) {
             $query->where('products.is_active', '=', $filters['is_active'] === '1');
@@ -73,6 +80,7 @@ class ProductController extends Controller
         $product->load([
             'category:id,name',
             'brand:id,name',
+            'productModel:id,brand_id,name,is_active',
             'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status',
             'specifications:id,product_id,name,value,sort_order',
             'barcodes:id,product_id,code,format,is_primary',
@@ -98,6 +106,7 @@ class ProductController extends Controller
         $validated['sku'] = Product::normalizeSku($validated['sku'] ?? null);
 
         $product = DB::transaction(function () use ($validated, $initialQuantity, $warehouse, $request, $specifications, $barcodes) {
+            $this->lockAndValidateModelAssignment($validated['brand_id'] ?? null, $validated['product_model_id'] ?? null);
             $product = Product::create($validated);
             $this->inventory->initializeProduct($product, $initialQuantity, $warehouse, $request->user());
             $this->replaceSpecifications($product, $specifications);
@@ -109,7 +118,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'productModel:id,brand_id,name,is_active', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data, 201);
@@ -131,6 +140,20 @@ class ProductController extends Controller
 
         DB::transaction(function () use ($validated, $product, $syncSpecifications, $specifications, $syncBarcodes, $barcodes) {
             $locked = Product::query()->whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $effectiveBrandId = array_key_exists('brand_id', $validated) ? $validated['brand_id'] : $locked->brand_id;
+            $effectiveModelId = array_key_exists('product_model_id', $validated) ? $validated['product_model_id'] : $locked->product_model_id;
+            if ((int) ($effectiveModelId ?? 0) !== (int) ($locked->product_model_id ?? 0)) {
+                $this->lockAndValidateModelAssignment($effectiveBrandId, $effectiveModelId);
+            } elseif ($effectiveModelId !== null && (int) ($effectiveBrandId ?? 0) !== (int) ($locked->brand_id ?? 0)) {
+                throw ValidationException::withMessages(['product_model_id' => 'Al cambiar de marca, selecciona un modelo compatible o elimina el modelo actual.']);
+            }
+            if (array_key_exists('price', $validated)) {
+                $invalidPromotion = $locked->promotions()->where('is_active', true)
+                    ->where('promotion_price', '>=', $validated['price'])->exists();
+                if ($invalidPromotion) {
+                    throw ValidationException::withMessages(['price' => 'El precio normal no puede quedar por debajo de una oferta habilitada para este producto.']);
+                }
+            }
             $locked->fill($validated)->save();
             if ($syncSpecifications) {
                 $this->replaceSpecifications($locked, $specifications);
@@ -151,7 +174,7 @@ class ProductController extends Controller
         if ($uploads !== []) {
             $this->imageProcessing->attachUploads($product, $uploads);
         }
-        $product->refresh()->load(['category:id,name', 'brand:id,name', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
+        $product->refresh()->load(['category:id,name', 'brand:id,name', 'productModel:id,brand_id,name,is_active', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status', 'specifications:id,product_id,name,value,sort_order', 'barcodes:id,product_id,code,format,is_primary']);
         $data = (new AdminProductListResource($product))->resolve($request);
 
         return response()->json($data);
@@ -180,6 +203,18 @@ class ProductController extends Controller
                 'value' => $specification['value'],
                 'sort_order' => $sortOrder,
             ]);
+        }
+    }
+
+    private function lockAndValidateModelAssignment(mixed $brandId, mixed $modelId): void
+    {
+        if ($modelId === null || $modelId === '') {
+            return;
+        }
+
+        $model = ProductModel::query()->whereKey($modelId)->lockForUpdate()->first();
+        if (! $model || ! $model->is_active || (int) $model->brand_id !== (int) $brandId) {
+            throw ValidationException::withMessages(['product_model_id' => 'El modelo no está disponible para la marca seleccionada.']);
         }
     }
 }

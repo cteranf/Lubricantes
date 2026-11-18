@@ -1097,6 +1097,12 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
             $originals[] = $reservation;
         }
 
+        if ($expireAutomatically) {
+            // This scenario represents a transfer reported only after the
+            // reservation expired and the order was safely canceled.
+            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
+        }
+
         $submission = PaymentSubmission::create([
             'order_id' => $order->id,
             'channel' => 'yape',
@@ -1113,9 +1119,6 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
             'idempotency_key' => 'reassignment-submission-'.Str::uuid(),
         ]);
 
-        if ($expireAutomatically) {
-            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
-        }
         $case = app(TreasuryPaymentResolutionService::class)->open($submission->id, $treasury->id);
         $transaction = PaymentTransaction::where('payment_submission_id', $submission->id)->firstOrFail();
 

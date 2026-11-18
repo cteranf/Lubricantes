@@ -11,6 +11,7 @@ use App\Models\OrderFulfillmentHistory;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentTransaction;
 use App\Models\User;
+use App\Support\EffectiveInventoryReservationStatus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -89,6 +90,26 @@ class OrderFulfillmentService
                 $this->invalid('La transferencia debe aprobarse antes de iniciar preparacion.');
             }
             if ($this->inventory->orderUsesReservationFlow($order)) {
+                $reservations = InventoryReservation::query()
+                    ->where('order_id', $order->id)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+                $itemsCount = $order->items()->count();
+                $reservationIsCurrent = $order->reserved_until
+                    && $order->reserved_until->isFuture()
+                    && $itemsCount > 0
+                    && $reservations->count() === $itemsCount
+                    && $reservations->every(fn (InventoryReservation $reservation): bool =>
+                        $reservation->status === InventoryReservation::ACTIVE
+                        && $reservation->expires_at !== null
+                        && $reservation->expires_at->isFuture()
+                    );
+
+                if (! $reservationIsCurrent) {
+                    $this->invalid('La reserva del pedido venció y no puede aprobarse.');
+                }
+
                 try {
                     $this->inventory->consumeOrderReservation($order, $user);
                 } catch (InventoryException $e) {
@@ -260,22 +281,31 @@ class OrderFulfillmentService
 
     public function present(Order $order): array
     {
-        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'paymentSubmission:id,order_id,status', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name', 'delivery:id,order_id,status']);
+        $order->load(['user', 'items.product.images', 'items.warehouse', 'items.reservation', 'paymentSubmission:payment_submissions.id,payment_submissions.order_id,payment_submissions.status', 'paymentSubmissions:id,order_id,status', 'preparedBy:id,name', 'readyBy:id,name', 'deliveredBy:id,name', 'fulfillmentHistory.user:id,name', 'delivery:id,order_id,status']);
         $state = $order->effectiveFulfillmentStatus();
         $legacy = ! $this->inventory->orderUsesReservationFlow($order);
         $canStart = $state === Order::FULFILLMENT_RESERVED && ($legacy || $order->payment_method === 'contra_entrega' || $order->payment_status === 'approved');
         $handling = $this->handling->getOperationalSummary($order);
         // getOperationalSummary may refresh the model; add these ephemeral,
         // safe presentation attributes only after that work has completed.
-        $hasPaymentSubmission = $order->paymentSubmission !== null;
+        $hasPaymentSubmission = $order->paymentSubmissions->isNotEmpty();
         $order->setAttribute('has_payment_submission', $hasPaymentSubmission);
         $order->append('payment_submission_status');
         $order->loadMissing('delivery:id,order_id,status');
         $handlingAllowsReady = ! ($handling['available'] ?? false) || ($handling['actions']['mark_ready'] ?? false);
         $hasDelivery = $order->delivery !== null;
         $canMarkReady = $state === Order::FULFILLMENT_PREPARING && $handlingAllowsReady;
-        $actions = ['approve_payment' => $state === Order::FULFILLMENT_RESERVED && $order->payment_method === 'transferencia' && $order->payment_status !== 'approved' && ! $hasPaymentSubmission, 'start_preparation' => $canStart, 'mark_ready' => $canMarkReady, 'mark_ready_for_pickup' => $canMarkReady && $order->isPickup(), 'mark_picked_up' => $state === Order::FULFILLMENT_READY && $order->isPickup(), 'mark_delivered' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && ! $order->delivery_flow_version, 'manage_delivery' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && (bool) $order->delivery_flow_version, 'cancel' => in_array($state, [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY], true) && ! $hasDelivery];
-        $reservationStatuses = $order->items->pluck('reservation.status')->filter()->unique()->values();
+        $reservationStatuses = $order->items
+            ->map(fn ($item) => EffectiveInventoryReservationStatus::forItem(
+                $order,
+                $item->reservation,
+                $order->paymentSubmission?->status
+            ))
+            ->filter()
+            ->unique()
+            ->values();
+        $hasExpiredReservation = $reservationStatuses->contains(InventoryReservation::EXPIRED);
+        $actions = ['approve_payment' => $state === Order::FULFILLMENT_RESERVED && $order->payment_method === 'transferencia' && $order->payment_status !== 'approved' && ! $hasPaymentSubmission && ! $hasExpiredReservation, 'start_preparation' => $canStart, 'mark_ready' => $canMarkReady, 'mark_ready_for_pickup' => $canMarkReady && $order->isPickup(), 'mark_picked_up' => $state === Order::FULFILLMENT_READY && $order->isPickup(), 'mark_delivered' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && ! $order->delivery_flow_version, 'manage_delivery' => $state === Order::FULFILLMENT_READY && ! $order->isPickup() && (bool) $order->delivery_flow_version, 'cancel' => in_array($state, [Order::FULFILLMENT_RESERVED, Order::FULFILLMENT_PREPARING, Order::FULFILLMENT_READY], true) && ! $hasDelivery];
 
         return ['order' => $order, 'fulfillment' => [
             'status' => $state, 'label' => $this->label($state), 'actions' => $actions,

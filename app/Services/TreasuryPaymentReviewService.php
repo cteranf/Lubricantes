@@ -3,9 +3,9 @@
 namespace App\Services;
 
 use App\Models\InventoryReservation;
-use App\Models\Order;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
+use App\Models\Order;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 
@@ -16,14 +16,22 @@ class TreasuryPaymentReviewService
     public function observe(int $submissionId, int $actorId, string $reason): PaymentSubmission
     {
         return DB::transaction(function () use ($submissionId, $actorId, $reason): PaymentSubmission {
-            $submission = PaymentSubmission::query()->lockForUpdate()->find($submissionId);
+            $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+            if (! $orderId) {
+                $this->notFound();
+            }
+            $order = Order::query()->lockForUpdate()->find($orderId);
+            $submissions = PaymentSubmission::query()->where('order_id', $orderId)->orderBy('id')->lockForUpdate()->get();
+            $submission = $submissions->firstWhere('id', $submissionId);
             if (! $submission) {
                 $this->notFound();
             }
             if (! $this->treasury->canTransition($submission->status, PaymentSubmission::OBSERVED)) {
                 $this->conflict('La presentación ya no permite esta decisión.');
             }
-            $order = Order::query()->lockForUpdate()->find($submission->order_id);
+            if (! $order) {
+                $this->notFound();
+            }
             $reservations = InventoryReservation::query()->where('order_id', $order->id)->where('status', InventoryReservation::ACTIVE)->lockForUpdate()->get();
             if (! $order->reserved_until || $order->reserved_until->isPast() || $reservations->isEmpty() || $reservations->contains(fn ($r) => $r->expires_at->isPast())) {
                 $this->conflict('La reserva de este pedido no está vigente.');
@@ -55,7 +63,13 @@ class TreasuryPaymentReviewService
     private function transition(int $submissionId, int $actorId, string $to, string $reason, string $event): PaymentSubmission
     {
         return DB::transaction(function () use ($submissionId, $actorId, $to, $reason, $event): PaymentSubmission {
-            $submission = PaymentSubmission::query()->lockForUpdate()->find($submissionId);
+            $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+            if (! $orderId) {
+                $this->notFound();
+            }
+            Order::query()->lockForUpdate()->findOrFail($orderId);
+            $submissions = PaymentSubmission::query()->where('order_id', $orderId)->orderBy('id')->lockForUpdate()->get();
+            $submission = $submissions->firstWhere('id', $submissionId);
             if (! $submission) {
                 $this->notFound();
             }

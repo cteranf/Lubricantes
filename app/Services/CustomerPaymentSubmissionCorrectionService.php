@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\PaymentReceivingAccount;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
+use App\Support\TransferPaymentInstallments;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -19,20 +20,28 @@ class CustomerPaymentSubmissionCorrectionService
 
     public function correct(Order $order, int $userId, array $input, string $key): PaymentSubmission
     {
-        // Approval/review lock the submission before its order. Keep correction in
-        // that same order to avoid an Order <-> PaymentSubmission deadlock cycle.
-        $submissionId = PaymentSubmission::query()->where('order_id', $order->id)->value('id');
+        $submissionId = isset($input['submission_id']) ? (int) $input['submission_id'] : null;
 
         try {
             return DB::transaction(function () use ($order, $submissionId, $userId, $input, $key): PaymentSubmission {
-                $submission = $submissionId ? PaymentSubmission::query()->lockForUpdate()->find($submissionId) : null;
+                $lockedOrder = Order::query()->lockForUpdate()->find($order->id);
+                if (! $lockedOrder || (int) $lockedOrder->user_id !== $userId) {
+                    $this->notFound();
+                }
+                $submissions = PaymentSubmission::query()->where('order_id', $lockedOrder->id)->orderBy('id')->lockForUpdate()->get();
+                $observedCandidates = $submissions->where('status', PaymentSubmission::OBSERVED);
+                $submission = $submissionId !== null
+                    ? $submissions->firstWhere('id', $submissionId)
+                    : ($observedCandidates->count() === 1 ? $observedCandidates->first() : null);
                 if (! $submission) {
+                    if ($submissionId === null && $observedCandidates->count() > 1) {
+                        $this->conflict('Selecciona el abono observado que deseas corregir.');
+                    }
                     $this->notFound();
                 }
-                $order = Order::query()->lockForUpdate()->find($submission->order_id);
-                if (! $order || (int) $order->user_id !== $userId) {
-                    $this->notFound();
-                }
+                $order = $lockedOrder;
+                $input['amount'] ??= (string) ($submission->amount ?? $submission->expected_amount);
+                $input['submission_id'] = (int) $submission->id;
                 $normalized = $this->normalized($input);
                 if ($submission->idempotency_key === $key && $this->same($submission, $normalized)) {
                     return $submission;
@@ -42,6 +51,7 @@ class CustomerPaymentSubmissionCorrectionService
                 if ($submission->status !== PaymentSubmission::OBSERVED) {
                     $this->conflict('La presentación ya no permite una corrección.');
                 }
+                TransferPaymentInstallments::assertCanAdd($order, $submissions, $normalized['amount_cents'], (int) $submission->id);
                 if (PaymentSubmission::query()->where('idempotency_key', $key)->whereKeyNot($submission->id)->lockForUpdate()->exists()) {
                     $this->conflict('La clave de idempotencia ya fue utilizada.');
                 }
@@ -57,7 +67,7 @@ class CustomerPaymentSubmissionCorrectionService
                 $expiry = $this->extend($order, $reservations, $now, config('treasury.reservation_extension_minutes'));
                 $from = $submission->status;
                 $submission->update([
-                    'channel' => $normalized['channel'], 'status' => PaymentSubmission::PENDING_REVIEW, 'expected_amount' => $order->total, 'currency' => 'PEN',
+                    'channel' => $normalized['channel'], 'status' => PaymentSubmission::PENDING_REVIEW, 'expected_amount' => $order->total, 'amount' => TransferPaymentInstallments::decimal($normalized['amount_cents']), 'currency' => 'PEN',
                     'operation_number' => $normalized['operation'], 'normalized_operation_number' => $normalized['operation'], 'duplicate_fingerprint' => $fingerprint,
                     'declared_paid_at' => $normalized['paid_at'], 'origin_phone_last4' => $normalized['last4'], 'origin_bank' => $normalized['bank'],
                     'receiving_account_snapshot' => $this->snapshot($account, $expiry), 'idempotency_key' => $key, 'submitted_at' => $now,
@@ -97,12 +107,21 @@ class CustomerPaymentSubmissionCorrectionService
             $this->invalid('La fecha declarada no puede estar en el futuro.');
         }
 
-        return ['account_id' => (int) $input['receiving_account_id'], 'operation' => $operation, 'channel' => $rules['channel'], 'last4' => $rules['last4'], 'bank' => $rules['bank'], 'paid_at' => $paidAt];
+        try {
+            $amountCents = TransferPaymentInstallments::cents((string) $input['amount']);
+        } catch (\InvalidArgumentException) {
+            $this->invalid('El importe debe ser positivo y tener como máximo dos decimales.');
+        }
+        if ($amountCents <= 0) {
+            $this->invalid('El abono debe ser mayor que cero.');
+        }
+
+        return ['submission_id' => (int) $input['submission_id'], 'amount_cents' => $amountCents, 'account_id' => (int) $input['receiving_account_id'], 'operation' => $operation, 'channel' => $rules['channel'], 'last4' => $rules['last4'], 'bank' => $rules['bank'], 'paid_at' => $paidAt];
     }
 
     private function same(PaymentSubmission $s, array $i): bool
     {
-        return $s->channel === $i['channel'] && $s->normalized_operation_number === $i['operation'] && $s->declared_paid_at?->format('Y-m-d H:i:s') === $i['paid_at']->format('Y-m-d H:i:s') && $s->origin_phone_last4 === $i['last4'] && $s->origin_bank === $i['bank'] && (int) data_get($s->receiving_account_snapshot, 'id') === $i['account_id'];
+        return $s->channel === $i['channel'] && ($s->amount === null || TransferPaymentInstallments::cents((string) $s->amount) === $i['amount_cents']) && $s->normalized_operation_number === $i['operation'] && $s->declared_paid_at?->format('Y-m-d H:i:s') === $i['paid_at']->format('Y-m-d H:i:s') && $s->origin_phone_last4 === $i['last4'] && $s->origin_bank === $i['bank'] && (int) data_get($s->receiving_account_snapshot, 'id') === $i['account_id'];
     }
 
     private function extend(Order $order, $reservations, Carbon $now, int $minutes): Carbon

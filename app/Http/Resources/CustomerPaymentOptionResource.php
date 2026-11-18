@@ -13,6 +13,6 @@ class CustomerPaymentOptionResource extends JsonResource
             return $base + ['has_qr' => true, 'qr_url' => url("/api/v1/orders/{$request->route('order')->id}/payment-options/{$this->id}/qr"), 'instructions' => 'Escanea el QR y conserva tu número de operación.'];
         }
 
-        return $base + ['bank_name' => $this->bank_name, 'account_number' => $this->account_number, 'cci' => $this->cci, 'instructions' => 'Transfiere el importe exacto del pedido.'];
+        return $base + ['bank_name' => $this->bank_name, 'account_number' => $this->account_number, 'cci' => $this->cci, 'instructions' => 'Transfiere el importe del abono que vas a registrar y conserva tu número de operación.'];
     }
 }

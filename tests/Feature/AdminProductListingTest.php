@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Models\ProductModel;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
@@ -48,7 +49,7 @@ class AdminProductListingTest extends TestCase
 
         $rows = collect($response->json('data'))->keyBy('id');
         $this->assertSame([
-            'id', 'name', 'sku', 'description', 'price', 'is_active', 'allow_reviews', 'category', 'brand',
+            'id', 'name', 'sku', 'presentation', 'description', 'price', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
             'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images',
         ], array_keys($rows[$product->id]));
         $this->assertIsArray($rows[$product->id]['image_variants']);
@@ -199,7 +200,8 @@ class AdminProductListingTest extends TestCase
         Sanctum::actingAs($this->admin());
         $category = Category::create(['name' => 'Categoría común', 'slug' => 'categoria-comun-list']);
         $brand = Brand::create(['name' => 'Marca común', 'slug' => 'marca-comun-list']);
-        $this->product(['category_id' => $category->id, 'brand_id' => $brand->id]);
+        $model = ProductModel::create(['brand_id' => $brand->id, 'name' => 'Modelo compartido', 'normalized_name' => 'MODELO COMPARTIDO', 'is_active' => true]);
+        $this->product(['category_id' => $category->id, 'brand_id' => $brand->id, 'product_model_id' => $model->id]);
         $queries = [];
         DB::listen(function ($query) use (&$queries): void {
             $normalized = strtolower($query->sql);
@@ -216,7 +218,7 @@ class AdminProductListingTest extends TestCase
         $firstRequestQueries = array_slice($queries, $start);
 
         for ($index = 0; $index < 9; $index++) {
-            $this->product(['category_id' => $category->id, 'brand_id' => $brand->id]);
+            $this->product(['category_id' => $category->id, 'brand_id' => $brand->id, 'product_model_id' => $model->id]);
         }
 
         $start = count($queries);
@@ -235,6 +237,8 @@ class AdminProductListingTest extends TestCase
                     $purpose = 'category_relation';
                 } elseif (str_contains($sql, ' from brands')) {
                     $purpose = 'brand_relation';
+                } elseif (str_contains($sql, ' from product_models')) {
+                    $purpose = 'product_model_relation';
                 } elseif (str_contains($sql, ' from product_images')) {
                     $purpose = 'product_images';
                 } else {
@@ -259,6 +263,7 @@ class AdminProductListingTest extends TestCase
             'products_rows' => 'one product rows query',
             'category_relation' => 'one eager-loaded category query',
             'brand_relation' => 'one eager-loaded brand query',
+            'product_model_relation' => 'one eager-loaded product model query',
             'product_images' => 'one eager-loaded product_images query',
         ] as $purpose => $message) {
             $this->assertSame(1, $firstPurposes[$purpose] ?? 0, 'The first request must use '.$message.'.');
@@ -266,6 +271,14 @@ class AdminProductListingTest extends TestCase
         }
         $this->assertSame(0, $firstPurposes['other_select'] ?? 0, 'The first request issued an unexpected SELECT: '.json_encode($firstPurposes));
         $this->assertSame(0, $secondPurposes['other_select'] ?? 0, 'The second request issued an unexpected SELECT: '.json_encode($secondPurposes));
+
+        $modelSelects = static fn (array $statements): array => array_values(array_filter(
+            $statements,
+            static fn (string $sql): bool => str_contains($sql, ' from product_models'),
+        ));
+        $this->assertCount(1, $modelSelects($firstRequestQueries));
+        $this->assertCount(1, $modelSelects($secondRequestQueries));
+        $this->assertMatchesRegularExpression('/\bwhere\s+(?:product_models\s*\.\s*)?id\s+in\s*\(/', $modelSelects($secondRequestQueries)[0]);
 
         $imageSelects = static fn (array $statements): array => array_values(array_filter(
             $statements,

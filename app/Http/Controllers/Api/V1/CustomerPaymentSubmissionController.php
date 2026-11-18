@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\PaymentSubmission;
 use App\Services\CustomerPaymentSubmissionCorrectionService;
 use App\Services\CustomerPaymentSubmissionService;
+use App\Support\TransferPaymentInstallments;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -39,10 +40,9 @@ class CustomerPaymentSubmissionController extends Controller
         $submission = \App\Models\PaymentSubmission::query()
             ->with($this->customerReservationRelations())
             ->where('order_id', $order->id)
-            ->where('submitted_by', $request->user()->id)
-            ->first();
+            ->orderByDesc('id')->get();
 
-        if (! $submission) {
+        if ($submission->isEmpty()) {
             return response()->json([
                 'message' => 'Aún no se ha registrado una presentación de pago para este pedido.',
                 'code' => 'payment_submission_not_found',
@@ -51,10 +51,12 @@ class CustomerPaymentSubmissionController extends Controller
                 ->header('Pragma', 'no-cache');
         }
 
-        return (new CustomerPaymentSubmissionResource($submission))
-            ->response()
-            ->header('Cache-Control', 'no-store, private')
-            ->header('Pragma', 'no-cache');
+        return response()->json([
+            'data' => [
+                'submissions' => CustomerPaymentSubmissionResource::collection($submission)->resolve($request),
+                'accounting' => TransferPaymentInstallments::summary($order, $submission),
+            ],
+        ])->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache');
     }
 
     public function correct(CorrectCustomerPaymentSubmissionRequest $request, Order $order)

@@ -14,7 +14,7 @@ class Product extends Model
     use HasFactory;
 
     protected $fillable = [
-        'category_id', 'brand_id', 'name', 'slug', 'sku', 'description',
+        'category_id', 'brand_id', 'product_model_id', 'name', 'slug', 'sku', 'description',
         'price', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured', 'allow_reviews',
     ];
 
@@ -286,6 +286,28 @@ class Product extends Model
     public function brand()
     {
         return $this->belongsTo(Brand::class);
+    }
+
+    public function productModel()
+    {
+        return $this->belongsTo(ProductModel::class, 'product_model_id');
+    }
+
+    public function promotions()
+    {
+        return $this->hasMany(ProductPromotion::class)->orderByDesc('starts_at')->orderByDesc('id');
+    }
+
+    public function activePromotion()
+    {
+        $now = now();
+
+        return $this->hasOne(ProductPromotion::class)
+            ->where('is_active', true)
+            ->where('starts_at', '<=', $now)
+            ->where('ends_at', '>', $now)
+            ->orderByDesc('starts_at')
+            ->orderByDesc('id');
     }
 
     public function images()

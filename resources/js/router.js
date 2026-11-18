@@ -63,6 +63,7 @@ const routes = [
     { path: '/admin/contact-inquiries', component: () => import('@/views/admin/ContactInquiries.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/reports/management', name: 'admin-management-reports', component: () => import('@/views/admin/ManagementReports.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/products', component: AdminProducts, meta: { requiresAdmin: true } },
+    { path: '/admin/product-promotions', name: 'admin-product-promotions', component: () => import('@/views/admin/ProductPromotions.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/product-reviews', name: 'admin-product-reviews', component: () => import('@/views/admin/ProductReviews.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/branches', component: () => import('@/views/admin/Branches.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/locations', component: () => import('@/views/admin/Territories.vue'), meta: { requiresAdmin: true } },

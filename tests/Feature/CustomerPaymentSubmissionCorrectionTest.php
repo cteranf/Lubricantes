@@ -31,9 +31,9 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $account = $this->account('yape');
         $before = [$order->reserved_until->format('c'), $inventory->only(['quantity', 'reserved_quantity'])];
         Sanctum::actingAs($owner);
-        $payload = ['channel' => 'yape', 'receiving_account_id' => $account->id, 'operation_number' => '001234568', 'paid_at' => now()->subMinute()->toIso8601String(), 'origin_phone_last_four' => '0140'];
-        $this->withHeader('Idempotency-Key', 'correction-key')->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', $payload)
-            ->assertOk()->assertJsonPath('data.status', PaymentSubmission::PENDING_REVIEW)->assertJsonPath('data.operation_number_masked', '•••••4568');
+        $payload = ['submission_id' => $submission->id, 'amount' => '20.00', 'channel' => 'yape', 'receiving_account_id' => $account->id, 'operation_number' => '001234568', 'paid_at' => now()->subMinute()->toIso8601String(), 'origin_phone_last_four' => '0140'];
+        $response = $this->withHeader('Idempotency-Key', 'correction-key')->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', $payload);
+        $response->assertOk()->assertJsonPath('data.status', PaymentSubmission::PENDING_REVIEW)->assertJsonPath('data.amount', '20.00')->assertJsonPath('data.operation_number_masked', '•••••4568');
         $submission->refresh();
         $this->assertSame('001234568', $submission->operation_number);
         $this->assertNull($submission->decision_reason);
@@ -60,7 +60,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         Sanctum::actingAs($owner);
         $this->withHeader('Idempotency-Key', 'hostile')->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', array_merge($payload, ['status' => 'approved']))->assertUnprocessable();
         $submission->update(['status' => PaymentSubmission::REJECTED]);
-        $this->withHeader('Idempotency-Key', 'terminal')->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', $payload)->assertConflict();
+        $this->withHeader('Idempotency-Key', 'terminal')->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', array_merge($payload, ['submission_id' => $submission->id]))->assertConflict();
     }
 
     public function test_plin_and_bank_corrections_clear_incompatible_origin_fields(): void
@@ -174,7 +174,11 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
             $order->update([$field => $value === 'past' ? now()->subMinute() : $value]);
         }
         Sanctum::actingAs($owner);
-        $this->withHeader('Idempotency-Key', 'ineligible-'.$field)->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', ['channel' => 'yape', 'receiving_account_id' => $account->id, 'operation_number' => '001234568', 'paid_at' => now()->subMinute()->toIso8601String(), 'origin_phone_last_four' => '0140'])->assertConflict();
+        $payload = ['channel' => 'yape', 'receiving_account_id' => $account->id, 'operation_number' => '001234568', 'paid_at' => now()->subMinute()->toIso8601String(), 'origin_phone_last_four' => '0140'];
+        if ($field === 'submission.status') {
+            $payload['submission_id'] = $submission->id;
+        }
+        $this->withHeader('Idempotency-Key', 'ineligible-'.$field)->putJson('/api/v1/orders/'.$order->id.'/payment-submission/correction', $payload)->assertConflict();
         $this->assertSame(1, PaymentSubmissionHistory::count());
     }
 
@@ -201,7 +205,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
             $first->assertJsonPath('data.id', $submission->id);
             $before = $this->persistentCorrectionState($submission, $order, $reservation);
 
-            $equivalent = $this->correctionPayload('yape', $account->id, '001234567', $paidAt->setTimezone('UTC')->toIso8601String());
+            $equivalent = array_merge($this->correctionPayload('yape', $account->id, '001234567', $paidAt->setTimezone('UTC')->toIso8601String()), ['submission_id' => $submission->id]);
             $second = $this->withHeader('Idempotency-Key', $key)->putJson($this->correctionUrl($order), $equivalent)->assertOk();
             $second->assertJsonPath('data.id', $submission->id)->assertJsonPath('data.status', PaymentSubmission::PENDING_REVIEW);
 
@@ -226,11 +230,11 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $this->withHeader('Idempotency-Key', $key)->putJson($this->correctionUrl($order), $payload)->assertOk();
         $before = $this->persistentCorrectionState($submission, $order, $reservation);
         $changed = match ($field) {
-            'operation_number' => array_merge($payload, ['operation_number' => (string) $value]),
-            'paid_at' => array_merge($payload, ['paid_at' => now()->subMinutes(2)->toIso8601String()]),
-            'channel' => ['channel' => 'plin', 'receiving_account_id' => $plin->id, 'operation_number' => $payload['operation_number'], 'paid_at' => $payload['paid_at'], 'origin_phone_last_four' => '0140'],
-            'receiving_account_id' => array_merge($payload, ['receiving_account_id' => $alternate->id]),
-            'origin_phone_last_four' => array_merge($payload, ['origin_phone_last_four' => '9999']),
+            'operation_number' => array_merge($payload, ['operation_number' => (string) $value, 'submission_id' => $submission->id]),
+            'paid_at' => array_merge($payload, ['paid_at' => now()->subMinutes(2)->toIso8601String(), 'submission_id' => $submission->id]),
+            'channel' => ['submission_id' => $submission->id, 'channel' => 'plin', 'receiving_account_id' => $plin->id, 'operation_number' => $payload['operation_number'], 'paid_at' => $payload['paid_at'], 'origin_phone_last_four' => '0140'],
+            'receiving_account_id' => array_merge($payload, ['receiving_account_id' => $alternate->id, 'submission_id' => $submission->id]),
+            'origin_phone_last_four' => array_merge($payload, ['origin_phone_last_four' => '9999', 'submission_id' => $submission->id]),
             default => throw new \LogicException('Variante no reconocida.'),
         };
         $response = $this->withHeader('Idempotency-Key', $key)->putJson($this->correctionUrl($order), $changed)->assertConflict();
@@ -258,6 +262,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $payload = ['channel' => 'bank_transfer', 'receiving_account_id' => $bank->id, 'operation_number' => '001234567', 'paid_at' => now()->subMinute()->toIso8601String(), 'origin_bank' => 'Banco Origen'];
         $this->withHeader('Idempotency-Key', $key)->putJson($this->correctionUrl($order), $payload)->assertOk();
         $before = $this->persistentCorrectionState($submission, $order, $reservation);
+        $payload['submission_id'] = $submission->id;
         $response = $this->withHeader('Idempotency-Key', $key)->putJson($this->correctionUrl($order), array_merge($payload, ['origin_bank' => ' banco origen ']))->assertConflict();
         $this->assertSafeCorrectionConflict($response, [$key, 'Banco Origen', 'banco origen']);
         $this->assertSame($before, $this->persistentCorrectionState($submission, $order, $reservation));
@@ -275,7 +280,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $this->withHeader('Idempotency-Key', str_repeat('a', 101))->putJson($url, $payload)->assertUnprocessable();
         $this->withHeader('Idempotency-Key', 'header-key')->putJson($url, array_merge($payload, ['idempotency_key' => 'body-key']))->assertUnprocessable();
         $this->withHeader('Idempotency-Key', str_repeat('a', 100))->putJson($url, $payload)->assertOk();
-        $this->withHeader('Idempotency-Key', 'new-key')->putJson($url, $payload)->assertConflict();
+        $this->withHeader('Idempotency-Key', 'new-key')->putJson($url, array_merge($payload, ['submission_id' => $submission->id]))->assertConflict();
         $this->assertSame(1, PaymentSubmissionHistory::where('event', 'corrected')->count());
         $this->assertSame(PaymentSubmission::PENDING_REVIEW, $submission->fresh()->status);
     }

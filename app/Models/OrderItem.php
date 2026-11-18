@@ -18,6 +18,8 @@ class OrderItem extends Model
         'warehouse_id',
         'quantity',
         'price',
+        'regular_price',
+        'promotion_id',
         'subtotal',
     ];
 
@@ -29,6 +31,11 @@ class OrderItem extends Model
     public function product()
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function promotion()
+    {
+        return $this->belongsTo(ProductPromotion::class, 'promotion_id');
     }
 
     public function warehouse()

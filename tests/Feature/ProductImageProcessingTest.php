@@ -502,8 +502,8 @@ class ProductImageProcessingTest extends TestCase
         $this->assertArrayNotHasKey('image_processing_status', $payload);
         $this->assertTrue($payload['allow_reviews']);
         $this->assertSame([
-            'id', 'name', 'sku', 'description', 'price', 'is_active', 'allow_reviews', 'category', 'brand',
-            'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images', 'specifications',
+            'id', 'name', 'sku', 'presentation', 'description', 'price', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
+            'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images', 'specifications', 'barcodes',
         ], array_keys($payload));
         $this->assertSame([], $payload['specifications']);
         $affectedImage = collect($payload['images'])->firstWhere('id', $imageId);

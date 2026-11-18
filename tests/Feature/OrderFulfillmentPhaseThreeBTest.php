@@ -10,6 +10,7 @@ use App\Models\OrderFulfillmentHistory;
 use App\Models\OrderHandlingItem;
 use App\Models\OrderHandlingProcess;
 use App\Models\OrderItem;
+use App\Models\PaymentSubmission;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\WarehouseInventory;
@@ -82,6 +83,112 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $this->postJson($this->url($transfer, 'start-preparation'))->assertOk();
         $this->assertSame($before, $this->inventory($transferProduct)->quantity);
         $this->assertSame(1, InventoryMovement::where('reference_id', (string) $transfer->id)->where('type', 'sale')->count());
+    }
+
+    public function test_expired_transfer_is_consistent_across_tracking_and_admin_and_cannot_be_approved(): void
+    {
+        $admin = $this->admin();
+        $product = $this->product(10);
+        $order = $this->createOrder($product, 2, 'transferencia');
+        $owner = User::findOrFail($order->user_id);
+        $order->update(['reserved_until' => now()->subMinute()]);
+        InventoryReservation::where('order_id', $order->id)->update(['expires_at' => now()->subMinute()]);
+
+        $inventoryBefore = $this->inventory($product)->fresh();
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/v1/admin/orders?order_id='.$order->id)
+            ->assertOk()
+            ->assertJsonPath('data.0.reservation_status', InventoryReservation::EXPIRED);
+        $this->getJson('/api/v1/admin/orders?order_id='.$order->id.'&reservation_status=expired')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1);
+        $this->getJson('/api/v1/admin/orders?order_id='.$order->id.'&reservation_status=active')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0);
+        $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')
+            ->assertOk()
+            ->assertJsonPath('fulfillment.reservation_status', InventoryReservation::EXPIRED)
+            ->assertJsonPath('fulfillment.actions.approve_payment', false)
+            ->assertJsonPath('order.items.0.reservation.status', InventoryReservation::EXPIRED);
+
+        $this->postJson($this->url($order, 'approve-transfer'))->assertUnprocessable();
+        $this->assertDatabaseHas('orders', ['id' => $order->id, 'payment_status' => 'pending']);
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $order->id, 'status' => InventoryReservation::ACTIVE]);
+        $this->assertSame((int) $inventoryBefore->quantity, (int) $this->inventory($product)->quantity);
+        $this->assertSame((int) $inventoryBefore->reserved_quantity, (int) $this->inventory($product)->reserved_quantity);
+
+        Sanctum::actingAs($owner);
+        $this->getJson('/api/v1/orders/'.$order->id.'/tracking')
+            ->assertOk()
+            ->assertJsonPath('order.reservation_status', InventoryReservation::EXPIRED)
+            ->assertJsonPath('order.payment_submission_status', null)
+            ->assertJsonPath('order.items.0.reservation.status', InventoryReservation::EXPIRED);
+
+        $expiration = app(\App\Services\InventoryReservationExpirationService::class);
+        $firstRun = $expiration->expireDueReservations($order->id);
+        $this->assertSame(1, $firstRun['processed']);
+        $releasedInventory = $this->inventory($product)->fresh();
+        $this->assertSame((int) $inventoryBefore->quantity, (int) $releasedInventory->quantity);
+        $this->assertSame(0, (int) $releasedInventory->reserved_quantity);
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $order->id, 'status' => InventoryReservation::EXPIRED]);
+
+        $secondRun = $expiration->expireDueReservations($order->id);
+        $this->assertSame(0, $secondRun['processed']);
+        $this->assertSame(0, (int) $this->inventory($product)->fresh()->reserved_quantity);
+        $this->assertSame(1, OrderFulfillmentHistory::where('order_id', $order->id)->where('idempotency_key', 'reservation-expired-order-'.$order->id)->count());
+    }
+
+    public function test_expired_transfer_with_payment_submission_in_review_keeps_reservation_for_review(): void
+    {
+        $admin = $this->admin();
+        $product = $this->product(10);
+        $order = $this->createOrder($product, 1, 'transferencia');
+        $owner = User::findOrFail($order->user_id);
+        $order->update(['reserved_until' => now()->subMinute()]);
+        InventoryReservation::where('order_id', $order->id)->update(['expires_at' => now()->subMinute()]);
+        PaymentSubmission::create([
+            'order_id' => $order->id,
+            'channel' => 'yape',
+            'status' => PaymentSubmission::PENDING_REVIEW,
+            'expected_amount' => $order->total,
+            'currency' => 'PEN',
+            'operation_number' => 'QA-'.Str::random(8),
+            'normalized_operation_number' => 'QA-'.Str::random(8),
+            'duplicate_fingerprint' => hash('sha256', Str::uuid()),
+            'declared_paid_at' => now()->subMinutes(2),
+            'receiving_account_snapshot' => ['id' => 1, 'channel' => 'yape'],
+            'submitted_by' => $owner->id,
+            'submitted_at' => now()->subMinute(),
+            'idempotency_key' => (string) Str::uuid(),
+        ]);
+
+        $beforeReserved = (int) $this->inventory($product)->reserved_quantity;
+        $result = app(\App\Services\InventoryReservationExpirationService::class)->expireDueReservations($order->id);
+        $this->assertSame(1, $result['skipped']);
+        $this->assertDatabaseHas('inventory_reservations', ['order_id' => $order->id, 'status' => InventoryReservation::ACTIVE]);
+        $this->assertSame($beforeReserved, (int) $this->inventory($product)->fresh()->reserved_quantity);
+
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/v1/admin/orders?order_id='.$order->id.'&reservation_status=active')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1);
+        $this->getJson('/api/v1/admin/orders?order_id='.$order->id.'&reservation_status=expired')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0);
+        $this->getJson('/api/v1/admin/orders/'.$order->id.'/fulfillment')
+            ->assertOk()
+            ->assertJsonPath('fulfillment.reservation_status', InventoryReservation::ACTIVE)
+            ->assertJsonPath('fulfillment.actions.approve_payment', false)
+            ->assertJsonPath('order.payment_submission_status', PaymentSubmission::PENDING_REVIEW);
+        $this->postJson($this->url($order, 'approve-transfer'))
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'treasury_approval_required');
+
+        Sanctum::actingAs($owner);
+        $this->getJson('/api/v1/orders/'.$order->id.'/tracking')
+            ->assertOk()
+            ->assertJsonPath('order.reservation_status', InventoryReservation::ACTIVE)
+            ->assertJsonPath('order.payment_submission_status', PaymentSubmission::PENDING_REVIEW);
     }
 
     public function test_ready_and_delivered_require_order_and_do_not_change_inventory_and_cod_becomes_paid(): void
@@ -209,6 +316,7 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         ]);
 
         $order->refresh();
+        $order->items()->firstOrFail()->update(['regular_price' => '12.00']);
         Sanctum::actingAs($order->user);
         $imageQueries = [];
         DB::listen(static function ($query) use (&$imageQueries): void {
@@ -222,6 +330,7 @@ class OrderFulfillmentPhaseThreeBTest extends TestCase
         $payment = collect($timeline)->last();
 
         $response->assertJsonPath('order.items.0.image_url', Storage::disk('public')->url($legacyImagePath));
+        $this->assertSame('12.00', number_format((float) $response->json('order.items.0.regular_price'), 2, '.', ''));
         $this->assertCount(1, $imageQueries, 'Tracking must eager-load product_images once across order items.');
         foreach (['original_path', 'pending_original_path', 'generation_id'] as $privateKey) {
             $response->assertJsonMissingPath('order.items.0.'.$privateKey);

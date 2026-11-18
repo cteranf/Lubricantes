@@ -80,6 +80,60 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(1, PaymentSubmissionHistory::where('payment_submission_id', $submission->id)->where('event', 'approved')->count());
     }
 
+    public function test_order_is_settled_only_when_approved_installments_cover_the_exact_total(): void
+    {
+        [$first, $order, $reservation, $inventory, $product] = $this->fixture();
+        $order->update(['total' => '600.00']);
+        $first->update(['amount' => '300.00', 'expected_amount' => '600.00']);
+        $second = PaymentSubmission::create([
+            'order_id' => $order->id,
+            'channel' => 'plin',
+            'status' => PaymentSubmission::PENDING_REVIEW,
+            'expected_amount' => '600.00',
+            'amount' => '300.00',
+            'currency' => 'PEN',
+            'operation_number' => '000124',
+            'normalized_operation_number' => '000124',
+            'duplicate_fingerprint' => hash('sha256', 'second-installment-'.$order->id),
+            'declared_paid_at' => now(),
+            'origin_phone_last4' => '4321',
+            'receiving_account_snapshot' => ['id' => 2],
+            'submitted_by' => $first->submitted_by,
+            'submitted_at' => now(),
+            'idempotency_key' => 'second-installment-'.$order->id,
+        ]);
+        $treasury = User::factory()->create(['role' => 'treasury']);
+        Sanctum::actingAs($treasury);
+
+        $this->patchJson($this->url($first))->assertOk()->assertJsonPath('data.order.payment_status', 'pending');
+        $this->assertSame('pending', $order->fresh()->payment_status);
+        $this->assertNull($order->fresh()->paid_at);
+        $this->assertSame(InventoryReservation::ACTIVE, $reservation->fresh()->status);
+        $this->assertSame(['quantity' => 2, 'reserved_quantity' => 1], $inventory->fresh()->only(['quantity', 'reserved_quantity']));
+        $this->assertSame(1, PaymentTransaction::where('order_id', $order->id)->count());
+        $this->assertSame(0, PaymentTransaction::where('order_id', $order->id)->whereNotNull('approved_scope_key')->count());
+        $this->assertSame(0, InventoryMovement::where('reference_id', (string) $order->id)->count());
+
+        $this->patchJson($this->url($second))->assertOk()->assertJsonPath('data.order.payment_status', 'approved');
+        $this->assertSame('approved', $order->fresh()->payment_status);
+        $this->assertNotNull($order->fresh()->paid_at);
+        $this->assertSame(InventoryReservation::CONSUMED, $reservation->fresh()->status);
+        $this->assertSame(['quantity' => 1, 'reserved_quantity' => 0], $inventory->fresh()->only(['quantity', 'reserved_quantity']));
+        $this->assertSame(1, (int) $product->fresh()->stock);
+        $this->assertSame(1, InventoryMovement::where('reference_id', (string) $order->id)->count());
+        $transactions = PaymentTransaction::where('order_id', $order->id)->orderBy('id')->get();
+        $this->assertSame(['300.00', '300.00'], $transactions->pluck('amount')->all());
+        $this->assertSame(1, $transactions->where('approved_scope_key', PaymentTransaction::approvedScopeKeyForOrder($order->id))->count());
+
+        $paidAt = $order->fresh()->paid_at?->toIso8601String();
+        $movementCount = InventoryMovement::where('reference_id', (string) $order->id)->count();
+        $this->patchJson($this->url($second))->assertOk();
+        $this->assertSame($paidAt, $order->fresh()->paid_at?->toIso8601String());
+        $this->assertSame(2, PaymentTransaction::where('order_id', $order->id)->count());
+        $this->assertSame($movementCount, InventoryMovement::where('reference_id', (string) $order->id)->count());
+        $this->assertSame(['quantity' => 1, 'reserved_quantity' => 0], $inventory->fresh()->only(['quantity', 'reserved_quantity']));
+    }
+
     public function transferChannels(): array
     {
         return [['yape'], ['plin'], ['bank_transfer']];

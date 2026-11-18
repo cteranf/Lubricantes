@@ -10,6 +10,8 @@
                         <span aria-hidden="true">·</span>
                         {{ cartStore.items.length }} {{ cartStore.items.length === 1 ? 'producto' : 'productos' }}
                     </p>
+                    <p v-if="priceSyncing" class="mt-2 text-xs text-slate-500" role="status" aria-live="polite">Actualizando precios y ofertas…</p>
+                    <p v-else-if="priceSyncMessage" class="mt-2 text-xs text-amber-800" role="status" aria-live="polite">{{ priceSyncMessage }}</p>
                 </div>
                 <router-link to="/catalog" class="hidden min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-bold text-blue-800 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 sm:inline-flex">
                     <i class="pi pi-arrow-left" aria-hidden="true"></i> Seguir comprando
@@ -46,7 +48,11 @@
                                     <div class="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end sm:gap-5">
                                         <div class="min-w-0">
                                             <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Precio unitario</p>
-                                            <p class="mt-1 text-sm font-bold text-slate-800">{{ formatPen(item.price) }}</p>
+                                            <p class="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm">
+                                                <span v-if="itemPriceBreakdown(item).hasDiscount" class="text-xs text-slate-500 line-through">{{ formatPen(itemPriceBreakdown(item).regularPrice) }}</span>
+                                                <strong class="font-bold text-slate-900">{{ formatPen(itemPriceBreakdown(item).appliedPrice) }}</strong>
+                                            </p>
+                                            <p v-if="itemPriceBreakdown(item).hasDiscount" class="mt-1 text-xs font-semibold text-emerald-700">Ahorras {{ formatPen(itemPriceBreakdown(item).unitSavings) }} por unidad</p>
                                         </div>
                                         <div class="col-span-2 sm:col-span-1">
                                             <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500" :for="`cart-quantity-${item.product_id}`">Cantidad</label>
@@ -81,9 +87,19 @@
                                 <dt class="text-slate-600">Productos</dt>
                                 <dd class="text-right font-semibold text-slate-900">{{ cartStore.count }} {{ cartStore.count === 1 ? 'unidad' : 'unidades' }}</dd>
                             </div>
+                            <template v-if="cartPriceSummary.hasSavings">
+                                <div class="flex items-start justify-between gap-4 border-t border-slate-100 pt-4 text-sm">
+                                    <dt class="text-slate-600">Subtotal sin ofertas</dt>
+                                    <dd class="text-right font-semibold text-slate-900">{{ formatPen(cartPriceSummary.regularSubtotal) }}</dd>
+                                </div>
+                                <div class="flex items-start justify-between gap-4 text-sm">
+                                    <dt class="text-emerald-800">Ahorro en ofertas</dt>
+                                    <dd class="text-right font-bold text-emerald-800">− {{ formatPen(cartPriceSummary.savings) }}</dd>
+                                </div>
+                            </template>
                             <div class="flex items-start justify-between gap-4 border-t border-slate-100 pt-4 text-sm">
-                                <dt class="text-slate-600">Subtotal actual</dt>
-                                <dd class="text-right text-lg font-black text-slate-950">{{ formatPen(cartStore.total) }}</dd>
+                                <dt class="text-slate-600">Subtotal de productos</dt>
+                                <dd class="text-right text-lg font-black text-slate-950">{{ formatPen(cartPriceSummary.productSubtotal) }}</dd>
                             </div>
                         </dl>
                         <div class="mt-5 rounded-xl bg-slate-50 p-4">
@@ -107,19 +123,27 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import api from '@/api';
 import { useCartStore } from '@/stores/cart';
+import { useAuthStore } from '@/stores/auth';
 import { cartQuantityLimit, normalizeCartQuantity } from '@/utils/cartQuantity';
+import { cartItemPriceBreakdown, summarizeCartPrices } from '@/utils/cartPricing.mjs';
 import { formatPen } from '@/utils/productPresentation';
 import { useToast } from 'primevue/usetoast';
 import AppLayout from '@/layouts/AppLayout.vue';
 
 const cartStore = useCartStore();
+const authStore = useAuthStore();
 const toast = useToast();
 const failedImages = ref(new Set());
 const announcement = ref('');
+const priceSyncing = ref(false);
+const priceSyncMessage = ref('');
+const cartPriceSummary = computed(() => summarizeCartPrices(cartStore.items));
+const itemPriceBreakdown = cartItemPriceBreakdown;
 
-const lineSubtotal = item => Number(item.price || 0) * Number(item.quantity || 0);
+const lineSubtotal = item => summarizeCartPrices([item]).productSubtotal;
 const productPath = item => item.product?.slug ? `/product/${encodeURIComponent(item.product.slug)}` : null;
 const hasStockSnapshot = item => item.product?.stock !== null && item.product?.stock !== undefined && item.product?.stock !== '' && Number.isFinite(Number(item.product.stock));
 const unavailable = item => hasStockSnapshot(item) && cartQuantityLimit(item) < 1;
@@ -129,6 +153,26 @@ const commercialDetails = item => [item.product?.presentation, item.product?.vis
     .filter(value => typeof value === 'string' && value.trim())
     .filter((value, index, values) => values.findIndex(candidate => candidate.trim().toLocaleLowerCase() === value.trim().toLocaleLowerCase()) === index)
     .slice(0, 3);
+
+let priceSyncSequence = 0;
+async function syncCartPrices() {
+    if (!authStore.isAuthenticated || !cartStore.items.length) return;
+    const sequence = ++priceSyncSequence;
+    priceSyncing.value = true;
+    priceSyncMessage.value = '';
+    try {
+        const response = await api.post('/cart', { items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })) });
+        if (sequence !== priceSyncSequence || !Array.isArray(response.data?.items)) return;
+        cartStore.applyPriceQuotes(response.data.items);
+    } catch {
+        if (sequence === priceSyncSequence) priceSyncMessage.value = 'No pudimos actualizar los precios. Se confirmarán nuevamente durante el checkout.';
+    } finally {
+        if (sequence === priceSyncSequence) priceSyncing.value = false;
+    }
+}
+
+onMounted(syncCartPrices);
+onBeforeUnmount(() => { priceSyncSequence++; });
 
 function updateQuantity(item, rawValue) {
     if (isLineBusy(item) || unavailable(item)) return;

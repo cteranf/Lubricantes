@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductModel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -43,6 +44,50 @@ class PublicProductCatalogPaginationTest extends TestCase
             ->assertOk()->assertJsonCount(0, 'data')->assertJsonPath('meta.total', 0);
         $this->getJson('/api/v1/products?search=Filtro%20otra')
             ->assertOk()->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_public_catalog_search_matches_product_model_name_without_breaking_other_search_or_filters(): void
+    {
+        $oils = $this->category('Aceites', 'aceites');
+        $filters = $this->category('Filtros', 'filtros');
+        $castrol = $this->brand('Castrol', 'castrol');
+        $otherBrand = $this->brand('Marca Dos', 'marca-dos');
+        $topc = $this->model($castrol, 'TOPC');
+        $otherTopc = $this->model($otherBrand, 'TOPC');
+        $codeModel = $this->model($castrol, 'ABC-00123');
+
+        $oneLitre = $this->product($oils, $castrol, 'Castrol Edge 1 L', 'CASTROL-EDGE-1L', $topc->id);
+        $fiveLitres = $this->product($oils, $castrol, 'Castrol Edge 5 L', 'CASTROL-EDGE-5L', $topc->id);
+        $otherCategory = $this->product($filters, $castrol, 'Castrol cabin filter', 'CASTROL-FILTER', $topc->id);
+        $otherBrandProduct = $this->product($oils, $otherBrand, 'Other brand product', 'OTHER-TOPC-SKU', $otherTopc->id);
+        $hidden = $this->product($oils, $castrol, 'Hidden product', 'HIDDEN-TOPC-SKU', $topc->id, false);
+        $codeProduct = $this->product($filters, $castrol, 'Filtro de habitáculo', 'CABIN-FILTER-001', $codeModel->id);
+        $plainNameProduct = $this->product($filters, $castrol, 'Filtro de cabina de carbón', 'CABIN-CARBON-002');
+        $plainSkuProduct = $this->product($filters, $castrol, 'Elemento filtrante', 'FILTRO-7788');
+
+        $this->getJson('/api/v1/products?search=TOPC')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 4)
+            ->assertJsonFragment(['id' => $oneLitre->id])
+            ->assertJsonFragment(['id' => $fiveLitres->id])
+            ->assertJsonFragment(['id' => $otherCategory->id])
+            ->assertJsonFragment(['id' => $otherBrandProduct->id])
+            ->assertJsonMissing(['id' => $hidden->id]);
+
+        $this->getJson('/api/v1/products?search=TOPC&category=aceites&brand=castrol&sort=newest&page=1')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 2)
+            ->assertJsonFragment(['id' => $oneLitre->id])
+            ->assertJsonFragment(['id' => $fiveLitres->id])
+            ->assertJsonMissing(['id' => $otherCategory->id])
+            ->assertJsonMissing(['id' => $otherBrandProduct->id]);
+
+        $this->getJson('/api/v1/products?search=ABC-00123')
+            ->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $codeProduct->id);
+        $this->getJson('/api/v1/products?search=Filtro%20de%20cabina%20de%20carb%C3%B3n')
+            ->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $plainNameProduct->id);
+        $this->getJson('/api/v1/products?search=FILTRO-7788')
+            ->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $plainSkuProduct->id);
     }
 
     public function test_catalog_and_option_query_counts_do_not_grow_with_products_categories_or_brands(): void
@@ -96,15 +141,26 @@ class PublicProductCatalogPaginationTest extends TestCase
         return Brand::create(['name' => $name, 'slug' => $slug, 'is_active' => true]);
     }
 
-    private function product(Category $category, Brand $brand, string $name): Product
+    private function product(Category $category, Brand $brand, string $name, ?string $sku = null, ?int $productModelId = null, bool $isActive = true): Product
     {
         return Product::create([
             'category_id' => $category->id,
             'brand_id' => $brand->id,
+            'product_model_id' => $productModelId,
             'name' => $name,
             'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
-            'sku' => Str::upper(Str::random(12)),
+            'sku' => $sku ?? Str::upper(Str::random(12)),
             'price' => '10.00',
+            'is_active' => $isActive,
+        ]);
+    }
+
+    private function model(Brand $brand, string $name): ProductModel
+    {
+        return ProductModel::create([
+            'brand_id' => $brand->id,
+            'name' => $name,
+            'normalized_name' => ProductModel::normalizeName($name),
             'is_active' => true,
         ]);
     }

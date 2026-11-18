@@ -9,7 +9,7 @@ use Illuminate\Validation\Validator;
 
 class ListAdminProductsRequest extends FormRequest
 {
-    private const FILTER_KEYS = ['search', 'sku', 'name', 'category_id', 'brand_id', 'is_active', 'price_min', 'price_max'];
+    private const FILTER_KEYS = ['search', 'sku', 'name', 'category_id', 'brand_id', 'product_model_id', 'is_active', 'price_min', 'price_max'];
 
     private const QUERY_KEYS = ['page', 'per_page', 'sort', 'direction', ...self::FILTER_KEYS];
 
@@ -68,6 +68,7 @@ class ListAdminProductsRequest extends FormRequest
             'name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'category_id' => ['sometimes', 'nullable', 'string', 'regex:/\A[1-9][0-9]*\z/D', 'max:19'],
             'brand_id' => ['sometimes', 'nullable', 'string', 'regex:/\A[1-9][0-9]*\z/D', 'max:19'],
+            'product_model_id' => ['sometimes', 'nullable', 'string', 'regex:/\A[1-9][0-9]*\z/D', 'max:19'],
             'is_active' => ['sometimes', 'nullable', 'string', Rule::in(['0', '1'])],
             'price_min' => ['sometimes', 'nullable', 'string', 'regex:/\A(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?\z/D'],
             'price_max' => ['sometimes', 'nullable', 'string', 'regex:/\A(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?\z/D'],
@@ -97,7 +98,7 @@ class ListAdminProductsRequest extends FormRequest
                 }
             }
 
-            foreach (['page', 'category_id', 'brand_id'] as $key) {
+            foreach (['page', 'category_id', 'brand_id', 'product_model_id'] as $key) {
                 $this->validateIntegerRange($validator, $data[$key] ?? null, $key);
             }
 

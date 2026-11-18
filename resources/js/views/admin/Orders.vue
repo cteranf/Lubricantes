@@ -535,7 +535,7 @@ function stateClass(status) { return ({ preparing: 'order-state--preparing', rea
 function paymentStatusLabel(status) { return ({ pending: 'Pendiente', approved: 'Aprobado', rejected: 'Rechazado', refund_pending: 'Reembolso pendiente', refunded: 'Reembolsado' })[status] || 'Estado no disponible'; }
 function paymentStatusSeverity(status) { return ({ pending: 'warn', approved: 'success', rejected: 'danger', refund_pending: 'warn', refunded: 'secondary' })[status] || 'secondary'; }
 function paymentMethodLabel(method) { return ({ card: 'Tarjeta', transferencia: 'Transferencia bancaria', contra_entrega: 'Pago contraentrega', pago_en_sede: 'Pago en sede', mercadopago: 'Mercado Pago' })[method] || 'Método no disponible'; }
-function reservationLabel(status) { return ({ active: 'Activa', expired: 'Expirada', consumed: 'Consumida', released: 'Liberada' })[status] || (status ? 'Estado no disponible' : 'Histórica'); }
+function reservationLabel(status) { return ({ active: 'Activa', expired: 'Vencida', consumed: 'Consumida', released: 'Liberada' })[status] || (status ? 'Estado no disponible' : 'Histórica'); }
 function reservationSeverity(status) { return ({ active: 'info', expired: 'warn', consumed: 'success', released: 'secondary' })[status] || 'secondary'; }
 function moneyLabel(value) { const amount = Number(value); return Number.isFinite(amount) ? new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(amount) : 'S/ —'; }
 function deliveryLabel(order) { return order.delivery_type === 'pickup' ? `Recojo en sede · ${order.pickup_branch_name_snapshot || 'Sede histórica'}` : 'Envío a domicilio'; }

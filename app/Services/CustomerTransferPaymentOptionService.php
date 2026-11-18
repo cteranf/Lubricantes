@@ -16,7 +16,17 @@ class CustomerTransferPaymentOptionService
         if ($order->payment_method !== 'transferencia' || $order->payment_status !== 'pending' || in_array($order->status, ['canceled', 'rejected', 'delivered'], true) || $order->tracking_status === 'picked_up') {
             $this->invalid();
         }
-        if (! $order->reserved_until || $order->reserved_until->isPast() || ! $order->reservations()->where('status', InventoryReservation::ACTIVE)->where('expires_at', '>', now())->exists()) {
+        $items = $order->items()->with('currentReservation')->get();
+        $itemCount = $items->count();
+        $allReservationsCurrent = $itemCount > 0
+            && $items->every(fn ($item): bool =>
+                $item->currentReservation instanceof InventoryReservation
+                && $item->currentReservation->status === InventoryReservation::ACTIVE
+                && $item->currentReservation->expires_at !== null
+                && $item->currentReservation->expires_at->isFuture()
+            );
+
+        if (! $order->reserved_until || $order->reserved_until->isPast() || ! $allReservationsCurrent) {
             $this->reservationExpired();
         }
     }

@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
+use App\Support\TransferPaymentInstallments;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -22,6 +23,8 @@ use Tests\TestCase;
 class CustomerPaymentSubmissionTest extends TestCase
 {
     use RefreshDatabase;
+
+    private string $currentOrderTotal = '10.00';
 
     /** @dataProvider channels */
     public function test_customer_can_submit_each_supported_transfer_channel(string $channel): void
@@ -287,7 +290,14 @@ class CustomerPaymentSubmissionTest extends TestCase
         $reservation->update(['expires_at' => now()->subMinute()]);
         $account->update(['is_active' => false]);
         $response = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertHeader('Pragma', 'no-cache');
-        $response->assertJsonPath('data.id', $submission->id)->assertJsonMissingPath('data.operation_number')->assertJsonMissingPath('data.normalized_operation_number')->assertJsonMissingPath('data.origin_phone_last4')->assertJsonMissingPath('data.duplicate_fingerprint')->assertJsonMissingPath('data.idempotency_key')->assertJsonMissingPath('data.receiving_account_snapshot');
+        $response->assertJsonPath('data.submissions.0.id', $submission->id)
+            ->assertJsonPath('data.submissions.0.amount_not_recorded', false)
+            ->assertJsonMissingPath('data.submissions.0.operation_number')
+            ->assertJsonMissingPath('data.submissions.0.normalized_operation_number')
+            ->assertJsonMissingPath('data.submissions.0.origin_phone_last4')
+            ->assertJsonMissingPath('data.submissions.0.duplicate_fingerprint')
+            ->assertJsonMissingPath('data.submissions.0.idempotency_key')
+            ->assertJsonMissingPath('data.submissions.0.receiving_account_snapshot');
         $this->assertSame($before[2], $inventory->fresh()->only(['quantity', 'reserved_quantity']));
         $this->assertSame($before[3], PaymentSubmissionHistory::count());
 
@@ -335,13 +345,14 @@ class CustomerPaymentSubmissionTest extends TestCase
         Sanctum::actingAs($owner);
         $response = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk();
         $response
-            ->assertJsonPath('data.status', PaymentSubmission::OBSERVED)
-            ->assertJsonPath('data.reason', 'Prueba')
-            ->assertJsonPath('data.reservation_expires_at', $currentOrder->reserved_until->toIso8601String())
-            ->assertJsonMissingPath('data.metadata')
-            ->assertJsonMissingPath('data.receiving_account_snapshot')
-            ->assertJsonMissingPath('data.duplicate_fingerprint')
-            ->assertJsonMissingPath('data.idempotency_key');
+            ->assertJsonPath('data.submissions.0.status', PaymentSubmission::OBSERVED)
+            ->assertJsonPath('data.submissions.0.reason', 'Prueba')
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', $currentOrder->reserved_until->toIso8601String())
+            ->assertJsonMissingPath('data.submissions.0.metadata')
+            ->assertJsonMissingPath('data.submissions.0.receiving_account_snapshot')
+            ->assertJsonMissingPath('data.submissions.0.duplicate_fingerprint')
+            ->assertJsonMissingPath('data.submissions.0.idempotency_key')
+            ->assertJsonPath('data.accounting.observed_amount', '22.00');
 
         $this->assertSame($beforeRead['order_updated_at'], $order->fresh()->updated_at->format('c'));
         $this->assertSame($beforeRead['reservation_updated_at'], $reservation->fresh()->updated_at->format('c'));
@@ -366,14 +377,16 @@ class CustomerPaymentSubmissionTest extends TestCase
         Sanctum::actingAs($owner);
         $response = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk();
         $response
-            ->assertJsonPath('data.status', PaymentSubmission::APPROVED)
-            ->assertJsonPath('data.message', 'Pago validado por Tesorería.')
-            ->assertJsonPath('data.validated_at', PaymentSubmission::firstOrFail()->reviewed_at->toIso8601String())
-            ->assertJsonMissingPath('data.transaction')
-            ->assertJsonMissingPath('data.payment_transaction')
-            ->assertJsonMissingPath('data.idempotency_key')
-            ->assertJsonMissingPath('data.approved_scope_key')
-            ->assertJsonMissingPath('data.receiving_account_snapshot');
+            ->assertJsonPath('data.submissions.0.status', PaymentSubmission::APPROVED)
+            ->assertJsonPath('data.submissions.0.message', 'Pago validado por Tesorería.')
+            ->assertJsonPath('data.submissions.0.validated_at', PaymentSubmission::firstOrFail()->reviewed_at->toIso8601String())
+            ->assertJsonPath('data.accounting.approved_amount', '22.00')
+            ->assertJsonPath('data.accounting.remaining_amount', '0.00')
+            ->assertJsonMissingPath('data.submissions.0.transaction')
+            ->assertJsonMissingPath('data.submissions.0.payment_transaction')
+            ->assertJsonMissingPath('data.submissions.0.idempotency_key')
+            ->assertJsonMissingPath('data.submissions.0.approved_scope_key')
+            ->assertJsonMissingPath('data.submissions.0.receiving_account_snapshot');
     }
 
     public function test_operation_number_mask_is_safe_for_short_long_and_normalized_values(): void
@@ -400,18 +413,122 @@ class CustomerPaymentSubmissionTest extends TestCase
         $this->assertStringNotContainsString('1111', (new PaymentSubmission(['operation_number' => '1111']))->maskedOperationNumber());
     }
 
+    /** @dataProvider acceptedInstallmentSequences */
+    public function test_installment_sequences_respect_exact_balance_and_operation_policy(string $total, array $amounts): void
+    {
+        [$owner, $order] = $this->order($total);
+        $account = $this->account('yape', true, true);
+        Sanctum::actingAs($owner);
+
+        foreach ($amounts as $index => $amount) {
+            $payload = $this->payload('yape', $account->id, $amount, '0012345'.(string) ($index + 1));
+            $this->postSubmission($order, $payload, 'installment-'.$index)->assertCreated();
+        }
+
+        $response = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk();
+        $this->assertSame((string) count($amounts), (string) count($response->json('data.submissions')));
+        $this->assertSame('0.00', $response->json('data.accounting.remaining_amount'));
+        $this->assertTrue($response->json('data.accounting.payment_complete_in_review'));
+        $this->assertSame(count($amounts), $response->json('data.accounting.operations_used'));
+        $this->assertSame(TransferPaymentInstallments::limits(TransferPaymentInstallments::cents($total))['max_operations'], $response->json('data.accounting.max_operations'));
+        $this->assertSame(
+            $response->json('data.accounting.max_operations') - count($amounts),
+            $response->json('data.accounting.slots_left')
+        );
+        $beforeBlockedAttempt = PaymentSubmission::where('order_id', $order->id)->count();
+        $this->postSubmission($order, $this->payload('yape', $account->id, '1.00', '00999999'.(string) ($beforeBlockedAttempt + 1)), 'blocked-after-full-'.count($amounts))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+        $this->assertSame($beforeBlockedAttempt, PaymentSubmission::where('order_id', $order->id)->count());
+        $this->assertSame(InventoryReservation::ACTIVE, InventoryReservation::whereOrderId($order->id)->value('status'));
+        $this->assertSame('pending', $order->fresh()->payment_status);
+    }
+
+    public static function acceptedInstallmentSequences(): array
+    {
+        return [
+            'two equal installments' => ['600.00', ['300.00', '300.00']],
+            'three mixed installments' => ['600.00', ['200.00', '250.00', '150.00']],
+            'full amount in one operation' => ['600.00', ['600.00']],
+            'last installment may be below minimum' => ['600.00', ['599.00', '1.00']],
+            'full amount below minimum' => ['35.00', ['35.00']],
+            'high total allows more than three installments' => ['10000.00', ['2500.00', '2500.00', '2500.00', '2500.00']],
+        ];
+    }
+
+    public function test_small_initial_abono_is_rejected_and_last_slot_requires_exact_remaining_amount(): void
+    {
+        [$owner, $order] = $this->order('600.00');
+        $account = $this->account('bank_transfer', true, true);
+        Sanctum::actingAs($owner);
+
+        $this->postSubmission($order, $this->payload('bank_transfer', $account->id, '1.00', '001234501'), 'below-minimum')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+        $this->assertSame(0, PaymentSubmission::where('order_id', $order->id)->count());
+
+        foreach (['200.00', '250.00'] as $index => $amount) {
+            $this->postSubmission($order, $this->payload('bank_transfer', $account->id, $amount, '00123450'.($index + 2)), 'partial-'.$index)->assertCreated();
+        }
+
+        $this->postSubmission($order, $this->payload('bank_transfer', $account->id, '100.00', '001234504'), 'wrong-last-amount')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+        $this->postSubmission($order, $this->payload('bank_transfer', $account->id, '150.00', '001234505'), 'exact-last-amount')->assertCreated();
+
+        $this->assertSame(3, PaymentSubmission::where('order_id', $order->id)->count());
+        $accounting = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk()->json('data.accounting');
+        $this->assertSame('600.00', $accounting['in_review_amount']);
+        $this->assertSame('0.00', $accounting['remaining_amount']);
+        $this->assertTrue($accounting['payment_complete_in_review']);
+    }
+
+    public function test_installment_policy_has_exact_thresholds(): void
+    {
+        $this->assertSame(['max_operations' => 3, 'minimum_cents' => 5000], TransferPaymentInstallments::limits(100000));
+        $this->assertSame(['max_operations' => 5, 'minimum_cents' => 10000], TransferPaymentInstallments::limits(100001));
+        $this->assertSame(['max_operations' => 5, 'minimum_cents' => 10000], TransferPaymentInstallments::limits(500000));
+        $this->assertSame(['max_operations' => 10, 'minimum_cents' => 20000], TransferPaymentInstallments::limits(500001));
+    }
+
+    public function test_rejected_reported_funds_keep_balance_free_but_block_another_transfer_until_review(): void
+    {
+        [$owner, $order] = $this->order('600.00');
+        $account = $this->account('yape', true, true);
+        Sanctum::actingAs($owner);
+        $this->postSubmission($order, $this->payload('yape', $account->id, '100.00', '001239999'), 'reported-then-rejected')->assertCreated();
+        $submission = PaymentSubmission::firstOrFail();
+        $submission->update(['status' => PaymentSubmission::REJECTED, 'decision_reason' => 'Datos del comprobante incorrectos']);
+        Sanctum::actingAs($owner);
+
+        $response = $this->getJson('/api/v1/orders/'.$order->id.'/payment-submission')->assertOk();
+        $this->assertSame('600.00', $response->json('data.accounting.remaining_amount'));
+        $this->assertSame('0.00', $response->json('data.accounting.approved_amount'));
+        $this->assertSame('100.00', $response->json('data.accounting.reported_rejected_amount'));
+        $this->assertTrue($response->json('data.accounting.requires_manual_reconciliation'));
+
+        $this->postSubmission($order, $this->payload('yape', $account->id, '500.00', '001230000'), 'blocked-second-transfer')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+        $this->getJson('/api/v1/orders/'.$order->id.'/payment-options')
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'payment_reconciliation_required');
+        $this->assertSame(1, PaymentSubmission::where('order_id', $order->id)->count());
+    }
+
     private function postSubmission(Order $order, array $payload, string $key)
     {
         return $this->withHeader('Idempotency-Key', $key)
             ->postJson('/api/v1/orders/'.$order->id.'/payment-submission', $payload);
     }
 
-    private function payload(string $channel, int $accountId): array
+    private function payload(string $channel, int $accountId, ?string $amount = null, string $operationNumber = '001234567'): array
     {
         return array_filter([
             'channel' => $channel,
+            'amount' => $amount ?? $this->currentOrderTotal,
             'receiving_account_id' => $accountId,
-            'operation_number' => '001234567',
+            'operation_number' => $operationNumber,
             'paid_at' => now()->subMinute()->toIso8601String(),
             'origin_phone_last_four' => in_array($channel, ['yape', 'plin'], true) ? '0140' : null,
             'origin_bank' => $channel === 'bank_transfer' ? 'Banco de origen' : null,
@@ -420,6 +537,7 @@ class CustomerPaymentSubmissionTest extends TestCase
 
     private function order(string $total = '10.00', bool $returnRelated = false): array
     {
+        $this->currentOrderTotal = $total;
         $suffix = (string) (Order::count() + 1);
         $owner = User::factory()->create();
         $branch = Branch::create(['code' => 'B'.$suffix, 'name' => 'B', 'address' => 'Dirección', 'is_active' => true]);

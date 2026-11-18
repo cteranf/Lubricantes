@@ -65,6 +65,33 @@ class TreasuryPaymentsFrontendTest extends TestCase
         }
     }
 
+    public function test_treasury_detail_shows_channel_origin_data_safely_with_historical_fallback(): void
+    {
+        $view = file_get_contents(resource_path('js/views/treasury/TreasuryPayments.vue'));
+
+        $this->assertStringContainsString("const originDetails = computed(() =>", $view);
+        $this->assertStringContainsString("['yape', 'plin'].includes(detail.value?.channel)", $view);
+        $this->assertStringContainsString("label: 'Celular del pagador'", $view);
+        $this->assertStringContainsString('`•••• ${digits}`', $view);
+        $this->assertStringContainsString("label: 'Banco de origen'", $view);
+        $this->assertSame(2, substr_count($view, "'No registrado'"));
+        $this->assertStringContainsString('...originDetails.value', $view);
+        $this->assertStringNotContainsString('detail.value.origin_phone_last4 ||', $view);
+    }
+
+    public function test_treasury_detail_distinguishes_registered_operations_from_available_operations(): void
+    {
+        $view = file_get_contents(resource_path('js/views/treasury/TreasuryPayments.vue'));
+
+        $this->assertStringContainsString("label: 'Operaciones registradas'", $view);
+        $this->assertStringContainsString('`${operationsUsed} de ${accounting.max_operations}`', $view);
+        $this->assertStringContainsString("Number(accounting.remaining_amount) > 0", $view);
+        $this->assertStringContainsString("label: 'Operaciones disponibles'", $view);
+        $this->assertStringContainsString('accounting.slots_left', $view);
+        $this->assertStringContainsString("label: 'Estado del importe', value: 'Importe completo en revisión'", $view);
+        $this->assertStringNotContainsString("label: 'Cupos restantes'", $view);
+    }
+
     public function test_treasury_approval_is_statically_guarded_confirmed_and_safe(): void
     {
         $view = file_get_contents(resource_path('js/views/treasury/TreasuryPayments.vue'));

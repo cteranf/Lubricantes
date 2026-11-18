@@ -68,7 +68,8 @@ class ProductCardCartDrawerFrontendTest extends TestCase
         $this->assertStringContainsString('cartStore.count', $navbar);
         $this->assertStringContainsString('cartStore.count', $cart);
         $this->assertStringContainsString('cartStore.count', $drawer);
-        $this->assertStringContainsString('cartStore.total', $cart);
+        $this->assertStringContainsString('cartPriceSummary.productSubtotal', $cart);
+        $this->assertStringContainsString('summarizeCartPrices(cartStore.items)', $cart);
         $this->assertStringContainsString('cartStore.total', $checkout);
         $this->assertStringContainsString('cartStore.total', $drawer);
         $this->assertStringContainsString('normalizeCartQuantity', $store);

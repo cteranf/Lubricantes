@@ -146,6 +146,56 @@ class TreasuryPaymentReviewTest extends TestCase
             ->assertJsonMissingPath('data.0.operation_number');
     }
 
+    public function test_treasury_detail_returns_origin_data_for_mobile_bank_and_legacy_submissions(): void
+    {
+        $yape = $this->submission(['channel' => 'yape', 'origin_phone_last4' => '0140', 'origin_bank' => null]);
+        $plin = $this->submission(['channel' => 'plin', 'origin_phone_last4' => '9876', 'origin_bank' => null]);
+        $bank = $this->submission(['channel' => 'bank_transfer', 'origin_phone_last4' => null, 'origin_bank' => 'Interbank']);
+        $legacy = $this->submission(['channel' => 'bank_transfer', 'origin_phone_last4' => null, 'origin_bank' => null]);
+
+        Sanctum::actingAs($this->treasury());
+
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$yape->id)->assertOk()
+            ->assertJsonPath('data.channel', 'yape')
+            ->assertJsonPath('data.origin_phone_last4', '0140')
+            ->assertJsonPath('data.origin_bank', null);
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$plin->id)->assertOk()
+            ->assertJsonPath('data.channel', 'plin')
+            ->assertJsonPath('data.origin_phone_last4', '9876')
+            ->assertJsonPath('data.origin_bank', null);
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$bank->id)->assertOk()
+            ->assertJsonPath('data.channel', 'bank_transfer')
+            ->assertJsonPath('data.origin_phone_last4', null)
+            ->assertJsonPath('data.origin_bank', 'Interbank');
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$legacy->id)->assertOk()
+            ->assertJsonPath('data.channel', 'bank_transfer')
+            ->assertJsonPath('data.origin_phone_last4', null)
+            ->assertJsonPath('data.origin_bank', null);
+    }
+
+    public function test_treasury_detail_projects_registered_and_available_operations_for_full_and_partial_payments(): void
+    {
+        $full = $this->submission(['amount' => '600.00', 'expected_amount' => '600.00']);
+        $full->order->update(['total' => '600.00']);
+        $partial = $this->submission(['amount' => '200.00', 'expected_amount' => '600.00']);
+        $partial->order->update(['total' => '600.00']);
+
+        Sanctum::actingAs($this->treasury());
+
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$full->id)->assertOk()
+            ->assertJsonPath('data.order_accounting.operations_used', 1)
+            ->assertJsonPath('data.order_accounting.max_operations', 3)
+            ->assertJsonPath('data.order_accounting.slots_left', 2)
+            ->assertJsonPath('data.order_accounting.remaining_amount', '0.00')
+            ->assertJsonPath('data.order_accounting.payment_complete_in_review', true);
+        $this->getJson('/api/v1/treasury/payment-submissions/'.$partial->id)->assertOk()
+            ->assertJsonPath('data.order_accounting.operations_used', 1)
+            ->assertJsonPath('data.order_accounting.max_operations', 3)
+            ->assertJsonPath('data.order_accounting.slots_left', 2)
+            ->assertJsonPath('data.order_accounting.remaining_amount', '400.00')
+            ->assertJsonPath('data.order_accounting.payment_complete_in_review', false);
+    }
+
     public function test_detail_and_history_are_safe_chronological_and_control_missing_resources(): void
     {
         $submission = $this->submission();
@@ -226,15 +276,15 @@ class TreasuryPaymentReviewTest extends TestCase
         $observed = $this->submission(['status' => PaymentSubmission::OBSERVED, 'decision_reason' => 'Verifique el número informado.']);
         Sanctum::actingAs($observed->submitter);
         $this->getJson('/api/v1/orders/'.$observed->order_id.'/payment-submission')
-            ->assertOk()->assertJsonPath('data.status', PaymentSubmission::OBSERVED)
-            ->assertJsonPath('data.message', 'Tesorería solicitó revisar los datos del pago.')
-            ->assertJsonPath('data.reason', 'Verifique el número informado.')
-            ->assertJsonMissingPath('data.idempotency_key');
+            ->assertOk()->assertJsonPath('data.submissions.0.status', PaymentSubmission::OBSERVED)
+            ->assertJsonPath('data.submissions.0.message', 'Tesorería solicitó revisar los datos del pago.')
+            ->assertJsonPath('data.submissions.0.reason', 'Verifique el número informado.')
+            ->assertJsonMissingPath('data.submissions.0.idempotency_key');
         $rejected = $this->submission(['status' => PaymentSubmission::REJECTED, 'decision_reason' => 'La operación no corresponde al importe.']);
         Sanctum::actingAs($rejected->submitter);
         $this->getJson('/api/v1/orders/'.$rejected->order_id.'/payment-submission')
-            ->assertOk()->assertJsonPath('data.message', 'La presentación del pago fue rechazada.')
-            ->assertJsonPath('data.reason', 'La operación no corresponde al importe.');
+            ->assertOk()->assertJsonPath('data.submissions.0.message', 'La presentación del pago fue rechazada.')
+            ->assertJsonPath('data.submissions.0.reason', 'La operación no corresponde al importe.');
     }
 
     public function test_failed_history_write_rolls_back_the_decision(): void

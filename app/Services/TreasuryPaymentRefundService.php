@@ -237,10 +237,10 @@ class TreasuryPaymentRefundService
      */
     private function lockFinancialState(int $orderId, int $actorId, ?int $completionRefundId = null, ?int $accountingId = null): array
     {
+        $order = Order::query()->whereKey($orderId)->lockForUpdate()->first();
         $submissions = PaymentSubmission::query()->where('order_id', $orderId)->orderBy('id')->lockForUpdate()->get();
         $this->assertSubmissions($submissions);
         $submission = $submissions->first();
-        $order = Order::query()->whereKey($orderId)->lockForUpdate()->first();
         $this->assertLocatedOrder($orderId, $order, $submission);
         if ($completionRefundId !== null) {
             $this->afterCompletionOrderLocked($order);

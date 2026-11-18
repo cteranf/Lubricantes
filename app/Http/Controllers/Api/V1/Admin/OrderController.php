@@ -7,6 +7,8 @@ use App\Http\Requests\Admin\ListAdminOrdersRequest;
 use App\Http\Resources\AdminOrderListResource;
 use App\Models\Order;
 use App\Models\OrderHandlingIncident;
+use App\Models\InventoryReservation;
+use App\Models\PaymentSubmission;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
 use App\Services\OrderFulfillmentService;
@@ -52,8 +54,9 @@ class OrderController extends Controller
                     'inventory_reservations.id',
                     'inventory_reservations.order_item_id',
                     'inventory_reservations.status',
+                    'inventory_reservations.expires_at',
                 ]),
-                'paymentSubmission:id,order_id,status',
+                'paymentSubmission:payment_submissions.id,payment_submissions.order_id,payment_submissions.status',
                 'delivery:id,order_id,status',
             ])
             ->withExists(['paymentSubmission as has_payment_submission'])
@@ -144,7 +147,36 @@ class OrderController extends Controller
             $status = $filters['reservation_status'];
             $query->whereHas('items', function ($items) use ($status): void {
                 $items->whereRaw('order_items.id = (SELECT MIN(first_order_items.id) FROM order_items AS first_order_items WHERE first_order_items.order_id = order_items.order_id)')
-                    ->whereHas('currentReservation', fn ($reservation) => $reservation->where('inventory_reservations.status', $status));
+                    ->whereHas('currentReservation', function ($reservation) use ($status): void {
+                        if ($status === InventoryReservation::EXPIRED) {
+                            $reservation->where(function ($effective): void {
+                                $effective->where('inventory_reservations.status', InventoryReservation::EXPIRED)
+                                    ->orWhere(function ($active): void {
+                                        $active->where('inventory_reservations.status', InventoryReservation::ACTIVE)
+                                            ->where(function ($due): void {
+                                                $due->where('inventory_reservations.expires_at', '<=', now())
+                                                    ->orWhere(function ($orderDue): void {
+                                                        $orderDue->whereNotNull('orders.reserved_until')
+                                                            ->where('orders.reserved_until', '<=', now());
+                                                    });
+                                            });
+                                    });
+                            })->whereDoesntHave('order.paymentSubmission', fn ($submission) => $submission->whereIn('status', [PaymentSubmission::PENDING_REVIEW, PaymentSubmission::OBSERVED]));
+                        } elseif ($status === InventoryReservation::ACTIVE) {
+                            $reservation->where('inventory_reservations.status', InventoryReservation::ACTIVE)
+                                ->where(function ($currentOrReview): void {
+                                    $currentOrReview->where(function ($current): void {
+                                        $current->where('inventory_reservations.expires_at', '>', now())
+                                            ->where(function ($orderCurrent): void {
+                                                $orderCurrent->whereNull('orders.reserved_until')
+                                                    ->orWhere('orders.reserved_until', '>', now());
+                                            });
+                                    })->orWhereHas('order.paymentSubmission', fn ($submission) => $submission->whereIn('status', [PaymentSubmission::PENDING_REVIEW, PaymentSubmission::OBSERVED]));
+                                });
+                        } else {
+                            $reservation->where('inventory_reservations.status', $status);
+                        }
+                    });
             });
         }
 
@@ -197,6 +229,10 @@ class OrderController extends Controller
             $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
             $oldStatus = $lockedOrder->status;
             $newStatus = $validated['status'];
+            if ($newStatus === 'confirmed' && $lockedOrder->payment_method === 'transferencia'
+                && \App\Models\PaymentSubmission::query()->where('order_id', $lockedOrder->id)->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['status' => ['Este pedido tiene abonos registrados; Tesorería debe conciliarlos antes de aprobar el pago.']]);
+            }
             $usesReservations = $this->inventoryService->orderUsesReservationFlow($lockedOrder);
 
             $updatedOrder = $this->orderStateService->transitionCommercial($lockedOrder, $newStatus);
@@ -260,6 +296,10 @@ class OrderController extends Controller
         $order = DB::transaction(function () use ($id, $validated, $request) {
             $lockedOrder = Order::whereKey($id)->lockForUpdate()->firstOrFail();
             $oldStatus = $lockedOrder->status;
+            if ($validated['tracking_status'] === 'confirmed' && $lockedOrder->payment_method === 'transferencia'
+                && \App\Models\PaymentSubmission::query()->where('order_id', $lockedOrder->id)->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['tracking_status' => ['Este pedido tiene abonos registrados; Tesorería debe conciliarlos antes de aprobar el pago.']]);
+            }
             $usesReservations = $this->inventoryService->orderUsesReservationFlow($lockedOrder);
 
             $updatedOrder = $this->orderStateService->transitionTracking(

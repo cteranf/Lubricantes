@@ -165,7 +165,12 @@ class Order extends Model
 
     public function paymentSubmission()
     {
-        return $this->hasOne(PaymentSubmission::class);
+        return $this->hasOne(PaymentSubmission::class)->latestOfMany('id');
+    }
+
+    public function paymentSubmissions()
+    {
+        return $this->hasMany(PaymentSubmission::class)->orderBy('id');
     }
 
     /**

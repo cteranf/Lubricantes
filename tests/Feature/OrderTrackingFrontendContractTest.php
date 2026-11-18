@@ -10,11 +10,14 @@ class OrderTrackingFrontendContractTest extends TestCase
 
     private string $transferPanel;
 
+    private string $cartStore;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->source = file_get_contents(resource_path('js/views/OrderTracking.vue'));
         $this->transferPanel = file_get_contents(resource_path('js/components/CustomerTransferPaymentPanel.vue'));
+        $this->cartStore = file_get_contents(resource_path('js/stores/cart.js'));
     }
 
     public function test_tracking_view_presents_real_timeline_accessibly_and_responsively(): void
@@ -54,6 +57,12 @@ class OrderTrackingFrontendContractTest extends TestCase
             'order.paid_at',
             'Información del pago',
             'CustomerTransferPaymentPanel',
+            'order.payment_status === \'approved\' ? \'Total pagado\' : \'Total a pagar\'',
+            'Subtotal sin ofertas',
+            'Ahorro en ofertas',
+            'Costo de envío',
+            'regular_price',
+            'summarizeOrderPriceSnapshots',
         ] as $visibleContract) {
             $this->assertStringContainsString($visibleContract, $this->source);
         }
@@ -78,6 +87,15 @@ class OrderTrackingFrontendContractTest extends TestCase
         $this->assertStringNotContainsString('{{ submission.id }}', $this->transferPanel);
         $this->assertStringNotContainsString('{{ submission.operation_number }}', $this->transferPanel);
         $this->assertStringContainsString('submission.operation_number_masked', $this->transferPanel);
+        $this->assertStringContainsString('role="tablist" aria-label="Alternativas de pago"', $this->transferPanel);
+        $this->assertStringContainsString('role="tab"', $this->transferPanel);
+        $this->assertStringContainsString(':aria-selected="selected?.id === item.id"', $this->transferPanel);
+        $this->assertStringContainsString('role="tabpanel"', $this->transferPanel);
+        $this->assertStringContainsString('selectOptionFromKeyboard', $this->transferPanel);
+        $this->assertStringContainsString('copy(selected.account_number)', $this->transferPanel);
+        $this->assertStringContainsString('copy(selected.cci)', $this->transferPanel);
+        $this->assertStringContainsString('submitCorrection', $this->transferPanel);
+        $this->assertStringContainsString('@submit.prevent="submit"', $this->transferPanel);
     }
 
     public function test_payment_messages_follow_pending_operational_final_and_canceled_states(): void
@@ -94,6 +112,37 @@ class OrderTrackingFrontendContractTest extends TestCase
         $this->assertNotFalse($operational);
         $this->assertLessThan($operational, $finished, 'Completed and collected orders must be handled before operational preparation messaging.');
         $this->assertStringNotContainsString('Tu pedido continuará con preparación y entrega.', $this->source.$this->transferPanel);
+    }
+
+    public function test_expired_reservation_hides_new_payment_instructions_but_keeps_existing_proof_review(): void
+    {
+        $this->assertStringContainsString("order.reservation_status !== 'expired' || ['pending_review', 'observed'].includes(order.payment_submission_status)", $this->source);
+        $this->assertStringContainsString("order.value?.reservation_status === 'expired' && status !== 'approved'", $this->source);
+        $this->assertStringContainsString('Reserva vencida. Las instrucciones de pago ya no están disponibles.', $this->source);
+    }
+
+    public function test_expired_transfer_without_proof_can_requote_and_add_order_lines_to_existing_cart(): void
+    {
+        foreach ([
+            "order.value?.payment_method === 'transferencia'",
+            "order.value?.payment_status === 'pending'",
+            "order.value?.reservation_status === 'expired'",
+            '!order.value?.payment_submission_status',
+            'label="Volver a comprar"',
+            'api.get(`/orders/${encodeURIComponent(route.params.id)}/repurchase-quote`)',
+            'repurchaseHasUnavailable',
+            'line.available_quantity < (line.quantity + cartQuantity(line.product_id))',
+            'Agregar disponibles y revisar carrito',
+            "router.push('/cart')",
+            'cartStore.mergeRepurchaseItems(repurchaseQuote.value.items)',
+        ] as $contract) {
+            $this->assertStringContainsString($contract, $this->source);
+        }
+        $this->assertStringContainsString('mergeRepurchaseItems(items)', $this->cartStore);
+        $this->assertStringContainsString('Number(item.product_id) === productId', $this->cartStore);
+        $this->assertStringContainsString('existing.quantity = Math.max(1, Math.trunc(Number(existing.quantity) || 0)) + quantity', $this->cartStore);
+        $this->assertStringContainsString('this.save()', $this->cartStore);
+        $this->assertStringNotContainsString('reservations()->create', $this->source.$this->cartStore);
     }
 
     public function test_pickup_and_delivery_render_only_available_real_details(): void
@@ -120,7 +169,8 @@ class OrderTrackingFrontendContractTest extends TestCase
         foreach ([
             '{{ item.name }}',
             '{{ item.quantity }}',
-            '{{ formatMoney(item.price) }}',
+            'itemPriceBreakdown(item).regularPrice',
+            'itemPriceBreakdown(item).appliedPrice',
             'item.subtotal ?? (Number(item.quantity) * Number(item.price))',
             'Sin imagen para',
             'Opinión pendiente de revisión',

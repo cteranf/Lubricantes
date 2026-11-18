@@ -16,6 +16,8 @@ class CustomerPaymentSubmissionResource extends JsonResource
             'status' => $this->status,
             'channel' => $this->channel,
             'expected_amount' => $this->expected_amount,
+            'amount' => $this->amount,
+            'amount_not_recorded' => $this->amount === null,
             'currency' => $this->currency,
             'operation_number_masked' => $this->resource->maskedOperationNumber(),
             'declared_paid_at' => optional($this->declared_paid_at)->toIso8601String(),

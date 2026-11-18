@@ -5,6 +5,7 @@ namespace App\Http\Requests\Admin;
 use App\Exceptions\InvalidProductImage;
 use App\Http\Requests\Admin\Concerns\NormalizesProductBarcodes;
 use App\Http\Requests\Admin\Concerns\NormalizesProductSpecifications;
+use App\Http\Requests\Admin\Concerns\ValidatesProductModelAssignment;
 use App\Models\Product;
 use App\Services\ProductImageProcessor;
 use Illuminate\Foundation\Http\FormRequest;
@@ -17,6 +18,7 @@ class StoreProductRequest extends FormRequest
 {
     use NormalizesProductBarcodes;
     use NormalizesProductSpecifications;
+    use ValidatesProductModelAssignment;
 
     public function authorize(): bool
     {
@@ -36,14 +38,17 @@ class StoreProductRequest extends FormRequest
     {
         $this->validateUniqueProductSpecificationNames($validator);
         $this->validateProductBarcodes($validator);
+        $this->validateProductModelAssignment($validator);
     }
 
     public function rules(): array
     {
         return [
             'name' => ['required', 'string', 'max:255'],
+            'presentation' => ['nullable', 'string', 'max:100'],
             'category_id' => ['nullable', Rule::exists('categories', 'id')->where(fn ($q) => Schema::hasColumn('categories', 'is_active') ? $q->where('is_active', true) : $q)],
             'brand_id' => ['nullable', Rule::exists('brands', 'id')->where(fn ($q) => Schema::hasColumn('brands', 'is_active') ? $q->where('is_active', true) : $q)],
+            'product_model_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'price' => ['required', 'numeric', 'min:0'],
             'cantidad_inicial' => ['required', 'integer', 'min:0'],
             'warehouse_id' => [

@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\PaymentReceivingAccount;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
+use App\Support\TransferPaymentInstallments;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -28,6 +29,7 @@ class CustomerPaymentSubmissionService
             return DB::transaction(function () use ($order, $userId, $normalized, $idempotencyKey): array {
                 $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
                 $this->options->eligibleOrder($lockedOrder, $userId);
+                $submissions = PaymentSubmission::query()->where('order_id', $lockedOrder->id)->orderBy('id')->lockForUpdate()->get();
                 $reservations = InventoryReservation::query()
                     ->where('order_id', $lockedOrder->id)
                     ->where('status', InventoryReservation::ACTIVE)
@@ -41,16 +43,13 @@ class CustomerPaymentSubmissionService
                 if ($existing) {
                     return [$this->resolveIdempotent($existing, $lockedOrder, $userId, $normalized), false];
                 }
-                if (PaymentSubmission::query()->where('order_id', $lockedOrder->id)->lockForUpdate()->exists()) {
-                    $this->conflict('Este pedido ya tiene una presentación de pago.');
-                }
-
                 $account = PaymentReceivingAccount::query()->lockForUpdate()->findOrFail($normalized['receiving_account_id']);
                 $this->assertEligibleAccount($lockedOrder, $account, $normalized['channel']);
                 $fingerprint = $this->treasury->duplicateFingerprint($normalized['channel'], $account->code, $normalized['operation_number']);
                 if (PaymentSubmission::query()->where('duplicate_fingerprint', $fingerprint)->lockForUpdate()->exists()) {
                     $this->conflict('La operación ya fue presentada para otro pedido.');
                 }
+                TransferPaymentInstallments::assertCanAdd($lockedOrder, $submissions, $normalized['amount_cents']);
 
                 $now = now();
                 $newExpiry = $this->extendedExpiry($lockedOrder, $reservations, $now);
@@ -69,6 +68,7 @@ class CustomerPaymentSubmissionService
                     'channel' => $normalized['channel'],
                     'status' => PaymentSubmission::PENDING_REVIEW,
                     'expected_amount' => $lockedOrder->total,
+                    'amount' => TransferPaymentInstallments::decimal($normalized['amount_cents']),
                     'currency' => 'PEN',
                     'operation_number' => $normalized['operation_number'],
                     'normalized_operation_number' => $normalized['operation_number'],
@@ -125,7 +125,16 @@ class CustomerPaymentSubmissionService
             $this->invalid('La fecha declarada no puede estar en el futuro.');
         }
 
-        return ['receiving_account_id' => $id, 'operation_number' => $operation, 'channel' => $rules['channel'], 'last4' => $rules['last4'], 'bank' => $rules['bank'], 'paid_at' => $paidAt];
+        try {
+            $amountCents = TransferPaymentInstallments::cents((string) $input['amount']);
+        } catch (\InvalidArgumentException) {
+            $this->invalid('El importe debe ser positivo y tener como máximo dos decimales.');
+        }
+        if ($amountCents <= 0) {
+            $this->invalid('El abono debe ser mayor que cero.');
+        }
+
+        return ['receiving_account_id' => $id, 'operation_number' => $operation, 'channel' => $rules['channel'], 'last4' => $rules['last4'], 'bank' => $rules['bank'], 'paid_at' => $paidAt, 'amount_cents' => $amountCents];
     }
 
     private function assertEligibleAccount(Order $order, PaymentReceivingAccount $account, string $channel): void
@@ -140,6 +149,7 @@ class CustomerPaymentSubmissionService
         $same = $existing->order_id === $order->id
             && $existing->submitted_by === $userId
             && $existing->channel === $input['channel']
+            && ($existing->amount === null || TransferPaymentInstallments::cents((string) $existing->amount) === $input['amount_cents'])
             && $existing->normalized_operation_number === $input['operation_number']
             && $existing->declared_paid_at?->format('Y-m-d H:i:s') === $input['paid_at']->format('Y-m-d H:i:s')
             && $existing->origin_phone_last4 === $input['last4']

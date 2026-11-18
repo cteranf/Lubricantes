@@ -106,13 +106,42 @@
                             {{ startingNewPurchase ? 'Revalidando…' : 'Iniciar una nueva compra' }}
                         </button>
                     </div>
-                    <button :disabled="processing || !canSubmit" class="min-h-12 w-full rounded-xl bg-green-600 px-4 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">{{ processing ? 'Procesando…' : 'Confirmar pedido' }}</button>
+                    <section v-if="priceChangePrompt" class="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950" role="alert" aria-live="polite">
+                        <h2 class="font-bold">El precio cambió</h2>
+                        <p class="text-sm">El total que revisaste era S/ {{ priceChangePrompt.previousTotal }}. El nuevo total es <strong>S/ {{ priceChangePrompt.total }}</strong>. Revisa los precios actualizados antes de continuar.</p>
+                        <button type="button" class="min-h-11 rounded-lg bg-amber-800 px-4 font-bold text-white disabled:opacity-50" :disabled="processing" @click="acceptUpdatedPrice">{{ processing ? 'Actualizando pedido…' : 'Confirmar el nuevo total' }}</button>
+                    </section>
+                    <button :disabled="processing || !canSubmit || Boolean(priceChangePrompt)" class="min-h-12 w-full rounded-xl bg-green-600 px-4 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">{{ processing ? 'Procesando…' : 'Confirmar pedido' }}</button>
                 </form>
 
                 <aside class="bg-slate-50 p-5 md:p-8">
                     <h2 class="mb-5 text-lg font-bold">Tu pedido</h2>
-                    <div class="max-h-64 space-y-3 overflow-y-auto"><div v-for="item in cartStore.items" :key="item.product_id" class="flex items-center justify-between gap-3 text-sm"><span class="flex min-w-0 items-center gap-2"><img v-if="item.image" :src="item.image" :srcset="item.image_srcset" :sizes="item.image_sizes || '160px'" :width="item.image_dimensions?.width" :height="item.image_dimensions?.height" :alt="item.name" loading="lazy" class="h-10 w-10 rounded object-contain"><span>{{ item.quantity }}× {{ item.name }}</span></span><b>S/ {{ lineMoney(item.price, item.quantity) }}</b></div></div>
-                    <div class="mt-6 space-y-2 border-t pt-5 text-sm"><div class="flex justify-between"><span>Subtotal de productos</span><span>S/ {{ money(cartStore.total) }}</span></div><div class="flex justify-between"><span>Descuentos comerciales</span><span>− S/ 0.00</span></div><div class="flex justify-between"><span>Costo de envío</span><b :class="form.delivery_type === 'pickup' || quote?.has_coverage ? 'text-emerald-700' : 'text-slate-600'">{{ shippingLabel }}</b></div><div class="mt-4 flex justify-between border-t pt-4 text-xl font-bold"><span>Total actual</span><span>S/ {{ money(quotedTotal) }}</span></div><p v-if="form.delivery_type === 'delivery'" class="text-xs text-slate-500">Laravel recalculará precios, stock y tarifa al confirmar.</p></div>
+                    <div class="max-h-64 space-y-3 overflow-y-auto">
+                        <div v-for="item in cartStore.items" :key="item.product_id" class="flex items-start justify-between gap-3 text-sm">
+                            <span class="flex min-w-0 items-start gap-2">
+                                <img v-if="item.image" :src="item.image" :srcset="item.image_srcset" :sizes="item.image_sizes || '160px'" :width="item.image_dimensions?.width" :height="item.image_dimensions?.height" :alt="item.name" loading="lazy" class="h-10 w-10 shrink-0 rounded object-contain">
+                                <span class="min-w-0">
+                                    <span class="block">{{ item.quantity }}× {{ item.name }}</span>
+                                    <span class="mt-1 flex flex-wrap items-center gap-x-2 text-xs">
+                                        <span v-if="itemPriceBreakdown(item).hasDiscount" class="text-slate-500 line-through">S/ {{ money(itemPriceBreakdown(item).regularPrice) }}</span>
+                                        <strong class="text-slate-800">S/ {{ money(itemPriceBreakdown(item).appliedPrice) }} c/u</strong>
+                                    </span>
+                                    <span v-if="itemPriceBreakdown(item).hasDiscount" class="mt-1 block text-xs font-semibold text-emerald-700">Ahorras S/ {{ money(itemPriceBreakdown(item).unitSavings) }} por unidad</span>
+                                </span>
+                            </span>
+                            <b class="shrink-0">S/ {{ lineMoney(itemPriceBreakdown(item).appliedPrice, item.quantity) }}</b>
+                        </div>
+                    </div>
+                    <div class="mt-6 space-y-2 border-t pt-5 text-sm">
+                        <template v-if="checkoutPriceSummary.hasSavings">
+                            <div class="flex justify-between"><span>Subtotal sin ofertas</span><span>S/ {{ money(checkoutPriceSummary.regularSubtotal) }}</span></div>
+                            <div class="flex justify-between text-emerald-700"><span>Ahorro en ofertas</span><span>− S/ {{ money(checkoutPriceSummary.savings) }}</span></div>
+                        </template>
+                        <div class="flex justify-between"><span>Subtotal de productos</span><span>S/ {{ money(checkoutPriceSummary.productSubtotal) }}</span></div>
+                        <div class="flex justify-between"><span>Costo de envío</span><b :class="form.delivery_type === 'pickup' || quote?.has_coverage ? 'text-emerald-700' : 'text-slate-600'">{{ shippingLabel }}</b></div>
+                        <div class="mt-4 flex justify-between border-t pt-4 text-xl font-bold"><span>Total actual</span><span>S/ {{ money(quotedTotal) }}</span></div>
+                        <p v-if="form.delivery_type === 'delivery'" class="text-xs text-slate-500">Laravel recalculará precios, stock y tarifa al confirmar.</p>
+                    </div>
                 </aside>
             </div>
         </div>
@@ -127,6 +156,7 @@ import api from '@/api';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useCartStore } from '@/stores/cart';
+import { cartItemPriceBreakdown, summarizeCartPrices } from '@/utils/cartPricing.mjs';
 
 const cartStore = useCartStore();
 const authStore = useAuthStore();
@@ -140,6 +170,8 @@ const processing = ref(false);
 const startingNewPurchase = ref(false);
 const retryAttempted = ref(false);
 const reservationExpiredMessage = ref('');
+const priceChangePrompt = ref(null);
+const acceptedPriceConfirmationToken = ref(null);
 const addresses = ref([]), legacyAddresses = ref([]), legacyConfirmationRequired = ref(false), legacyUnrecognizedCount = ref(0), addressesLoading = ref(true), showAddressForm = ref(false), savingAddress = ref(false);
 const departments = ref([]), provinces = ref([]), districts = ref([]);
 const territoryLoading = ref({ departments: false, provinces: false, districts: false });
@@ -157,7 +189,9 @@ const canSubmitDelivery = computed(() => form.value.delivery_type === 'delivery'
 const canSubmitPickup = computed(() => form.value.delivery_type === 'pickup' && pickupAvailable.value && Boolean(selectedBranch.value));
 const hasPaymentMethod = computed(() => Boolean(form.value.payment_method && paymentMethods.value.some(m => m.value === form.value.payment_method)));
 const canSubmit = computed(() => cartStore.items.length > 0 && hasPaymentMethod.value && (canSubmitDelivery.value || canSubmitPickup.value));
-const quotedTotal = computed(() => fromMinor(toMinor(cartStore.total) + (form.value.delivery_type === 'delivery' && quote.value?.has_coverage ? toMinor(quote.value.shipping_amount) : 0)));
+const checkoutPriceSummary = computed(() => summarizeCartPrices(cartStore.items));
+const itemPriceBreakdown = cartItemPriceBreakdown;
+const quotedTotal = computed(() => fromMinor(toMinor(checkoutPriceSummary.value.productSubtotal) + (form.value.delivery_type === 'delivery' && quote.value?.has_coverage ? toMinor(quote.value.shipping_amount) : 0)));
 const shippingLabel = computed(() => form.value.delivery_type === 'pickup' ? 'S/ 0.00' : quoteLoading.value ? 'Calculando…' : quote.value?.has_coverage ? `S/ ${money(quote.value.shipping_amount)}` : 'No calculado');
 const estimatedDays = computed(() => quote.value?.estimated_days_min === quote.value?.estimated_days_max ? `${quote.value.estimated_days_min} día(s)` : `${quote.value?.estimated_days_min}–${quote.value?.estimated_days_max} días`);
 const toMinor = value => { const [whole = '0', decimal = ''] = String(value ?? '0').split('.'); return (Number(whole) * 100) + Number(`${decimal}00`.slice(0, 2)); };
@@ -182,6 +216,7 @@ async function startNewPurchase() {
     startingNewPurchase.value = true;
     try {
         const response = await api.post('/cart', { items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })) });
+        cartStore.applyPriceQuotes(response.data?.items);
         const invalidItem = response.data?.items?.find(item => !item.available);
         if (invalidItem || response.data?.valid === false) {
             toast.add({ severity: 'warn', summary: 'Stock no disponible', detail: 'La disponibilidad del carrito cambió. Revisa las cantidades antes de confirmar.', life: 6000 });
@@ -216,6 +251,8 @@ async function loadPaymentMethods(deliveryType) {
 
 function selectDelivery(type) {
     if (type === 'pickup' && !pickupAvailable.value) return;
+    priceChangePrompt.value = null;
+    acceptedPriceConfirmationToken.value = null;
     form.value.delivery_type = type;
     loadPaymentMethods(type);
     if (type === 'delivery') requestQuote(form.value.address_id);
@@ -254,12 +291,14 @@ async function requestQuote(addressId) { const current = ++quoteRequest; quote.v
  */
 async function submitOrder(isRetry = false) {
     if (!authStore.isAuthenticated) return router.push('/login?redirect=/checkout');
-    if (!canSubmit.value || processing.value) return;
+    if (!canSubmit.value || processing.value || priceChangePrompt.value) return;
     processing.value = true;
     reservationExpiredMessage.value = '';
     try {
         const payload = {
             checkout_token: checkoutTokenValue.value,
+            expected_total: money(quotedTotal.value),
+            ...(acceptedPriceConfirmationToken.value ? { price_confirmation_token: acceptedPriceConfirmationToken.value } : {}),
             items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })),
             address_id: form.value.delivery_type === 'delivery' ? form.value.address_id : null,
             shipping_info: form.value.delivery_type === 'delivery' ? {} : { phone: form.value.phone },
@@ -272,6 +311,25 @@ async function submitOrder(isRetry = false) {
         try {
             orderResponse = await api.post('/orders', payload);
         } catch (orderError) {
+            if (orderError.response?.status === 409 && orderError.response?.data?.code === 'price_changed') {
+                const body = orderError.response.data;
+                const previousTotal = money(quotedTotal.value);
+                priceChangePrompt.value = {
+                    previousTotal,
+                    total: money(body.total),
+                    confirmationToken: body.confirmation_token,
+                };
+                acceptedPriceConfirmationToken.value = null;
+                cartStore.applyPriceQuotes((body.items || []).map(line => ({
+                    product_id: line.product_id,
+                    regular_price: line.regular_price,
+                    applied_price: line.price,
+                })));
+                if (quote.value && form.value.delivery_type === 'delivery') {
+                    quote.value = { ...quote.value, shipping_amount: body.shipping_amount };
+                }
+                return;
+            }
             // Handle 409 reservation_expired from /orders endpoint
             if (orderError.response?.status === 409 && orderError.response?.data?.code === 'reservation_expired') {
                 if (isRetry) {
@@ -341,12 +399,14 @@ async function submitOrder(isRetry = false) {
                 throw payError;
             }
             sessionStorage.removeItem('checkout:idempotency-token');
+            acceptedPriceConfirmationToken.value = null;
             cartStore.clear();
             window.location.href = paymentResponse.data.checkout_url;
             return;
         }
 
         sessionStorage.removeItem('checkout:idempotency-token');
+        acceptedPriceConfirmationToken.value = null;
         cartStore.clear();
         router.push({ name: 'OrderSuccess', params: { id: order.id } });
     } catch (error) {
@@ -359,6 +419,13 @@ async function submitOrder(isRetry = false) {
     } finally {
         processing.value = false;
     }
+}
+
+function acceptUpdatedPrice() {
+    if (processing.value || !priceChangePrompt.value?.confirmationToken) return;
+    acceptedPriceConfirmationToken.value = priceChangePrompt.value.confirmationToken;
+    priceChangePrompt.value = null;
+    submitOrder(false);
 }
 
 watch(() => form.value.address_id, addressId => requestQuote(addressId));

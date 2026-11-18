@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { normalizeCartQuantity } from '@/utils/cartQuantity';
-import { productImageDimensions, productImageSrcset, productImageVariants, resolveProductImages } from '@/utils/productPresentation';
+import { applyCartPriceQuotes } from '@/utils/cartPricing.mjs';
+import { productImageDimensions, productImageSrcset, productImageVariants, productPrice, resolveProductImages } from '@/utils/productPresentation';
 
 export const useCartStore = defineStore('cart', {
     state: () => ({
@@ -48,11 +49,15 @@ export const useCartStore = defineStore('cart', {
             try {
                 if (existing) {
                     existing.quantity = normalizeCartQuantity(existing.quantity + requested, existing).quantity;
+                    existing.price = productPrice(product);
+                    existing.regular_price = Number(product.price || existing.price);
+                    existing.product = product;
                 } else {
                     const item = {
                         product_id: product.id,
                         name: product.name,
-                        price: product.sale_price || product.price,
+                        price: productPrice(product),
+                        regular_price: Number(product.price || productPrice(product)),
                         image: productImageVariants(product).find(image => image.key === 'thumbnail')?.url
                             || productImageVariants(product).find(image => image.key === 'card')?.url
                             || resolveProductImages(product)[0] || null,
@@ -76,6 +81,45 @@ export const useCartStore = defineStore('cart', {
             } finally {
                 this.addingProducts[product.id] = false;
             }
+        },
+        mergeRepurchaseItems(items) {
+            const restorable = (Array.isArray(items) ? items : []).filter(item => item?.product_available && Number.isInteger(Number(item.product_id)) && Number(item.product_id) > 0);
+            for (const row of restorable) {
+                const productId = Number(row.product_id);
+                const quantity = Math.max(1, Math.trunc(Number(row.quantity) || 1));
+                const product = {
+                    id: productId,
+                    name: row.name,
+                    slug: row.slug,
+                    price: Number(row.regular_price),
+                    stock: Number(row.available_quantity),
+                    image_url: row.image_url || null,
+                };
+                const existing = this.items.find(item => Number(item.product_id) === productId);
+                if (existing) {
+                    existing.quantity = Math.max(1, Math.trunc(Number(existing.quantity) || 0)) + quantity;
+                    existing.name = row.name;
+                    existing.price = Number(row.price);
+                    existing.regular_price = Number(row.regular_price);
+                    existing.image = row.image_url || existing.image || null;
+                    existing.product = { ...(existing.product || {}), ...product };
+                } else {
+                    this.items.push({
+                        product_id: productId,
+                        name: row.name,
+                        price: Number(row.price),
+                        regular_price: Number(row.regular_price),
+                        image: row.image_url || null,
+                        image_srcset: null,
+                        image_sizes: '160px',
+                        image_dimensions: null,
+                        quantity,
+                        product,
+                    });
+                }
+            }
+            this.save();
+            return restorable.length;
         },
         removeItem(productId) {
             if (this.lineOperations[productId]) return false;
@@ -110,6 +154,10 @@ export const useCartStore = defineStore('cart', {
             } finally {
                 this.lineOperations[productId] = false;
             }
+        },
+        applyPriceQuotes(quotes) {
+            applyCartPriceQuotes(this.items, Array.isArray(quotes) ? quotes : []);
+            this.save();
         },
         clear() {
             this.items = [];

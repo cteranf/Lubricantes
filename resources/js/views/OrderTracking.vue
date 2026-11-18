@@ -59,23 +59,51 @@
                     </div>
                 </section>
 
-                <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="payment-title" aria-live="polite">
+                <div class="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 lg:gap-6">
+                    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="payment-title" aria-live="polite">
+                        <div class="p-5 sm:p-6">
                             <div class="flex items-start gap-3">
-                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-800"><i class="pi pi-wallet" aria-hidden="true"></i></span>
+                                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-800"><i class="pi pi-wallet" aria-hidden="true"></i></span>
                                 <div class="min-w-0 flex-1">
-                                    <h2 id="payment-title" class="font-bold text-slate-950">Información del pago</h2>
+                                    <h2 id="payment-title" class="text-lg font-bold text-slate-950">Información del pago</h2>
                                     <p class="mt-1 text-sm text-slate-600">{{ paymentMethodLabel }}</p>
-                                    <p class="mt-2 text-sm font-semibold" :class="paymentStatusClass">{{ paymentStatusLabel }}</p>
+                                    <Tag :value="paymentStatusLabel" :severity="paymentStatusSeverity" class="mt-2" />
                                 </div>
                             </div>
-                            <div class="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
-                                <span class="text-sm text-slate-600">{{ amountLabel }}</span>
-                                <span class="text-lg font-extrabold tabular-nums text-slate-950">{{ formatMoney(order.total) }}</span>
+                            <div class="mt-5 flex items-center justify-between gap-4 rounded-xl bg-slate-50 px-4 py-3">
+                                <span class="text-sm font-medium text-slate-600">{{ amountLabel }}</span>
+                                <span class="text-xl font-extrabold tabular-nums text-slate-950">{{ formatMoney(order.total) }}</span>
                             </div>
                             <p v-if="order.payment_status === 'approved' && order.paid_at" class="mt-3 text-sm text-slate-600">Confirmado el <time :datetime="order.paid_at">{{ formatDateTime(order.paid_at) }}</time></p>
                             <p v-if="paymentProgressMessage" class="mt-3 text-sm text-slate-700">{{ paymentProgressMessage }}</p>
-                            <CustomerTransferPaymentPanel v-if="order.payment_method === 'transferencia'" :key="order.id" :order="order" :show-expected-amount="false" />
+                        </div>
+                        <CustomerTransferPaymentPanel v-if="order.payment_method === 'transferencia' && (order.reservation_status !== 'expired' || ['pending_review', 'observed'].includes(order.payment_submission_status))" :key="order.id" :order="order" :show-expected-amount="false" />
+                        <div v-if="canRepurchase" class="border-t border-slate-100 p-5 sm:p-6">
+                            <Button label="Volver a comprar" icon="pi pi-shopping-cart" :loading="repurchaseLoading" :disabled="repurchaseLoading" @click="loadRepurchaseQuote" />
+                            <p class="mt-2 text-sm text-slate-600">Revisa la disponibilidad y los precios actuales antes de iniciar un nuevo checkout. El pedido original y su historial se conservan.</p>
+                            <p v-if="repurchaseError" class="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900" role="alert">{{ repurchaseError }}</p>
+                            <div v-if="repurchaseQuote" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4" aria-live="polite">
+                                <h3 class="font-bold text-slate-950">Revisa los productos y precios vigentes</h3>
+                                <ul class="mt-3 divide-y divide-slate-200">
+                                    <li v-for="(line, index) in repurchaseQuote.items" :key="`${line.product_id || 'unavailable'}-${index}`" class="py-3 text-sm">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="font-semibold text-slate-900">{{ line.name }}</p>
+                                                <p class="mt-1 text-slate-600">{{ line.quantity }} {{ line.quantity === 1 ? 'unidad' : 'unidades' }} · {{ line.price !== null ? formatMoney(line.price) : 'Sin precio vigente' }} por unidad</p>
+                                                <p v-if="line.product_available && line.available_quantity < (line.quantity + cartQuantity(line.product_id))" class="mt-1 font-medium text-amber-800" role="status">Disponibles: {{ line.available_quantity }}. En el carrito quedarán {{ line.quantity + cartQuantity(line.product_id) }} para que ajustes la cantidad antes de continuar.</p>
+                                                <p v-else-if="!line.product_available" class="mt-1 font-medium text-rose-800" role="status">Este producto ya no está disponible y no se agregará.</p>
+                                                <p v-if="line.product_available && line.price !== null && line.price < line.regular_price" class="mt-1 text-emerald-800">Oferta vigente: {{ formatMoney(line.regular_price) }} → {{ formatMoney(line.price) }}</p>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ul>
+                                <p v-if="repurchaseHasUnavailable" class="mt-3 text-sm text-amber-900">Los productos no disponibles se omitirán. Revisa el carrito; el stock y el precio volverán a validarse antes de confirmar.</p>
+                                <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                                    <Button label="Cancelar" severity="secondary" outlined @click="repurchaseQuote = null" />
+                                    <Button :label="repurchaseAdded ? 'Productos agregados' : 'Agregar disponibles y revisar carrito'" icon="pi pi-arrow-right" :loading="repurchaseAdding" :disabled="!repurchaseHasAvailable || repurchaseAdding || repurchaseAdded" @click="addRepurchaseItems" />
+                                </div>
+                            </div>
+                        </div>
                     </section>
 
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="destination-title">
@@ -125,7 +153,11 @@
                                 <span v-else class="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400" role="img" :aria-label="`Sin imagen para ${item.name}`"><i class="pi pi-image text-xl" aria-hidden="true"></i></span>
                                 <div class="min-w-0 flex-1">
                                     <p class="font-semibold text-slate-950">{{ item.name }}</p>
-                                    <p class="mt-1 text-sm text-slate-600">{{ item.quantity }} × {{ formatMoney(item.price) }}</p>
+                                    <p class="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm text-slate-600">
+                                        <span v-if="itemPriceBreakdown(item).hasDiscount" class="text-xs text-slate-500 line-through">{{ formatMoney(itemPriceBreakdown(item).regularPrice) }}</span>
+                                        <span>{{ item.quantity }} × {{ formatMoney(itemPriceBreakdown(item).appliedPrice) }}</span>
+                                    </p>
+                                    <p v-if="itemPriceBreakdown(item).hasDiscount" class="mt-1 text-xs font-semibold text-emerald-700">Ahorras {{ formatMoney(itemPriceBreakdown(item).unitSavings) }} por unidad</p>
                                     <div v-if="reviewAction(item)" class="mt-2">
                                         <Tag v-if="item.review_access.existing_review_status === 'pending'" value="Opinión pendiente de revisión" severity="info" />
                                         <Button v-else type="button" size="small" outlined icon="pi pi-star" :label="reviewAction(item)" class="!min-h-10 w-full sm:w-auto" :aria-label="`${reviewAction(item)}: ${item.name}`" @click="openProductReviews(item)" />
@@ -135,10 +167,12 @@
                             </li>
                         </ul>
                         <dl class="ml-auto max-w-sm space-y-2 border-t border-slate-100 pt-4 text-sm">
-                            <div class="flex justify-between gap-4"><dt class="text-slate-600">Subtotal</dt><dd class="font-medium tabular-nums text-slate-900">{{ formatMoney(order.subtotal) }}</dd></div>
-                            <div class="flex justify-between gap-4"><dt class="text-slate-600">Descuentos</dt><dd class="font-medium tabular-nums text-slate-900">− {{ formatMoney(order.discount_total) }}</dd></div>
-                            <div class="flex justify-between gap-4"><dt class="text-slate-600">Envío</dt><dd class="font-medium tabular-nums text-slate-900">{{ formatMoney(order.shipping_amount) }}</dd></div>
-                            <div class="flex justify-between gap-4 border-t border-slate-100 pt-3 text-base"><dt class="font-bold text-slate-950">{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total del pedido' }}</dt><dd class="font-extrabold tabular-nums text-blue-900">{{ formatMoney(order.total) }}</dd></div>
+                            <div v-if="orderPriceSummary.hasSavings" class="flex justify-between gap-4"><dt class="text-slate-600">Subtotal sin ofertas</dt><dd class="font-medium tabular-nums text-slate-900">{{ formatMoney(orderPriceSummary.regularSubtotal) }}</dd></div>
+                            <div v-if="orderPriceSummary.hasSavings" class="flex justify-between gap-4 text-emerald-700"><dt>Ahorro en ofertas</dt><dd class="font-semibold tabular-nums">− {{ formatMoney(orderPriceSummary.savings) }}</dd></div>
+                            <div class="flex justify-between gap-4"><dt class="text-slate-600">Subtotal de productos</dt><dd class="font-medium tabular-nums text-slate-900">{{ formatMoney(order.subtotal ?? orderPriceSummary.productSubtotal) }}</dd></div>
+                            <div v-if="Number(order.discount_total) > 0" class="flex justify-between gap-4"><dt class="text-slate-600">Descuentos comerciales</dt><dd class="font-medium tabular-nums text-slate-900">− {{ formatMoney(order.discount_total) }}</dd></div>
+                            <div v-if="Number(order.shipping_amount) > 0" class="flex justify-between gap-4"><dt class="text-slate-600">Costo de envío</dt><dd class="font-medium tabular-nums text-slate-900">{{ formatMoney(order.shipping_amount) }}</dd></div>
+                            <div class="flex justify-between gap-4 border-t border-slate-100 pt-3 text-base"><dt class="font-bold text-slate-950">{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total a pagar' }}</dt><dd class="font-extrabold tabular-nums text-blue-900">{{ formatMoney(order.total) }}</dd></div>
                         </dl>
                     </section>
                 </div>
@@ -155,7 +189,9 @@ import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 import api from '@/api';
 import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
+import { cartItemPriceBreakdown, summarizeOrderPriceSnapshots } from '@/utils/cartPricing.mjs';
 import CustomerTransferPaymentPanel from '@/components/CustomerTransferPaymentPanel.vue';
+import { useCartStore } from '@/stores/cart';
 
 const route = useRoute();
 const router = useRouter();
@@ -165,6 +201,13 @@ const delivery = ref(null);
 const loading = ref(true);
 const error = ref(null);
 const brokenImages = ref({});
+const cartStore = useCartStore();
+const repurchaseQuote = ref(null);
+const repurchaseLoading = ref(false);
+const repurchaseAdding = ref(false);
+const repurchaseAdded = ref(false);
+const repurchaseError = ref('');
+let repurchaseSequence = 0;
 let requestController = null;
 let requestSequence = 0;
 
@@ -179,6 +222,8 @@ const safeTrackingUrl = computed(() => {
 const activeStep = computed(() => timeline.value.find(step => step.active));
 const currentStatusLabel = computed(() => activeStep.value?.label || 'Estado en actualización');
 const currentStatusSeverity = computed(() => activeStep.value?.status === 'canceled' ? 'danger' : activeStep.value?.status === 'delivered' ? 'success' : 'info');
+const orderPriceSummary = computed(() => summarizeOrderPriceSnapshots(order.value?.items || []));
+const itemPriceBreakdown = item => cartItemPriceBreakdown({ ...item, regular_price: item?.regular_price ?? item?.price });
 const paymentMethodLabel = computed(() => ({
     transferencia: 'Transferencia bancaria',
     bank_transfer: 'Transferencia bancaria',
@@ -198,7 +243,7 @@ const paymentStatusLabel = computed(() => {
         refund_pending: 'Reembolso en proceso',
     }[order.value?.payment_status] || 'Estado de pago en actualización');
 });
-const paymentStatusClass = computed(() => order.value?.payment_status === 'approved' ? 'text-emerald-800' : 'text-amber-800');
+const paymentStatusSeverity = computed(() => order.value?.payment_status === 'approved' ? 'success' : ['rejected', 'refunded'].includes(order.value?.payment_status) ? 'danger' : 'warn');
 const paymentProgressMessage = computed(() => {
     const status = order.value?.payment_status;
     const fulfillment = order.value?.fulfillment_status;
@@ -209,6 +254,7 @@ const paymentProgressMessage = computed(() => {
 
     if (status === 'refunded') return 'Pago reembolsado.';
     if (status === 'refund_pending') return 'Reembolso en proceso.';
+    if (order.value?.reservation_status === 'expired' && status !== 'approved') return 'Reserva vencida. Las instrucciones de pago ya no están disponibles.';
     if (canceled) return '';
     if (status !== 'approved') {
         if (['contra_entrega', 'pago_en_sede'].includes(order.value?.payment_method)) return 'El pago queda pendiente al recibir o recoger.';
@@ -219,6 +265,14 @@ const paymentProgressMessage = computed(() => {
 
     return 'Pago confirmado correctamente.';
 });
+const canRepurchase = computed(() => order.value?.payment_method === 'transferencia'
+    && order.value?.payment_status === 'pending'
+    && order.value?.reservation_status === 'expired'
+    && !order.value?.payment_submission_status
+    && !['rejected', 'delivered'].includes(order.value?.status)
+    && !['delivered', 'picked_up'].includes(order.value?.tracking_status));
+const repurchaseHasAvailable = computed(() => repurchaseQuote.value?.items?.some(line => line.product_available) || false);
+const repurchaseHasUnavailable = computed(() => repurchaseQuote.value?.items?.some(line => !line.product_available) || false);
 
 const reviewAction = item => {
     const access = item.review_access;
@@ -237,6 +291,40 @@ const openProductReviews = item => {
 };
 
 const formatMoney = value => `S/ ${Number(value || 0).toFixed(2)}`;
+const cartQuantity = productId => Number(cartStore.items.find(item => Number(item.product_id) === Number(productId))?.quantity || 0);
+
+async function loadRepurchaseQuote() {
+    if (!canRepurchase.value || repurchaseLoading.value) return;
+    const sequence = ++repurchaseSequence;
+    repurchaseLoading.value = true;
+    repurchaseError.value = '';
+    repurchaseQuote.value = null;
+    try {
+        const response = await api.get(`/orders/${encodeURIComponent(route.params.id)}/repurchase-quote`);
+        if (sequence !== repurchaseSequence || String(route.params.id) !== String(order.value?.id)) return;
+        if (!Array.isArray(response.data?.items)) throw new TypeError('Respuesta de recompra inválida.');
+        repurchaseQuote.value = response.data;
+    } catch (exception) {
+        if (sequence !== repurchaseSequence) return;
+        repurchaseError.value = exception.response?.data?.message || 'No pudimos revisar los precios y la disponibilidad actuales.';
+    } finally {
+        if (sequence === repurchaseSequence) repurchaseLoading.value = false;
+    }
+}
+
+async function addRepurchaseItems() {
+    if (!repurchaseHasAvailable.value || repurchaseAdding.value || repurchaseAdded.value) return;
+    repurchaseAdding.value = true;
+    cartStore.mergeRepurchaseItems(repurchaseQuote.value.items);
+    repurchaseAdded.value = true;
+    try {
+        await router.push('/cart');
+    } catch {
+        repurchaseError.value = 'Los productos se agregaron. Revisa el carrito antes de continuar.';
+    } finally {
+        repurchaseAdding.value = false;
+    }
+}
 const deliveryMethodLabel = value => ({ store_pickup: 'Recojo en tienda', own_delivery: 'Reparto propio', external_courier: 'Courier externo' }[value] || 'Entrega');
 const deliveryStatusLabel = value => ({ pending: 'Pendiente', scheduled: 'Programado', assigned: 'Asignado', dispatched: 'Despachado', out_for_delivery: 'En camino', awaiting_pickup: 'Esperando recojo', failed_attempt: 'Intento no completado', rescheduled: 'Reprogramado', delivered: 'Entregado', canceled: 'Cancelado' }[value] || 'En actualización');
 
@@ -263,6 +351,10 @@ async function fetchTracking() {
     requestController = controller;
     const sequence = ++requestSequence;
     order.value = null;
+    repurchaseSequence++;
+    repurchaseQuote.value = null;
+    repurchaseError.value = '';
+    repurchaseAdded.value = false;
     timeline.value = [];
     delivery.value = null;
     brokenImages.value = {};

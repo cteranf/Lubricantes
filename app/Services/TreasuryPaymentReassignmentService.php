@@ -75,9 +75,18 @@ class TreasuryPaymentReassignmentService
         $actorId = (int) $actor->id;
 
         return DB::transaction(function () use ($submissionId, $actorId): PaymentResolutionCase {
-            // Canonical financial order: submission, order, transaction, case.
-            // InventoryService owns every lock from OrderItem onward.
-            $lockedSubmission = PaymentSubmission::query()->lockForUpdate()->find($submissionId);
+            $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+            if (! $orderId) {
+                $this->conflict('La presentación de pago no existe.');
+            }
+            // Shared lock order with customer submission and Treasury approval:
+            // order, all submissions by id, financial rows, then inventory.
+            $order = Order::query()->lockForUpdate()->find($orderId);
+            if (! $order) {
+                $this->conflict('El pedido de la presentación no existe.');
+            }
+            $submissions = PaymentSubmission::query()->where('order_id', $order->id)->orderBy('id')->lockForUpdate()->get();
+            $lockedSubmission = $submissions->firstWhere('id', $submissionId);
             if (! $lockedSubmission) {
                 $this->conflict('La presentación de pago no existe.');
             }
@@ -85,11 +94,6 @@ class TreasuryPaymentReassignmentService
             $actor = User::query()->find($actorId);
             if (! $actor || ! $actor->is_active || ! $actor->isTreasury()) {
                 $this->conflict('El actor no está autorizado para resolver la reasignación.');
-            }
-
-            $order = Order::query()->lockForUpdate()->find($lockedSubmission->order_id);
-            if (! $order) {
-                $this->conflict('El pedido de la presentación no existe.');
             }
 
             $scopeKey = PaymentTransaction::approvedScopeKeyForOrder($order->id);

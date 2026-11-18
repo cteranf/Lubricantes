@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
+use App\Support\EffectiveInventoryReservationStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,7 @@ class InventoryReservationExpirationService
     public function expireDueReservations(?int $orderId = null, ?int $warehouseId = null, array $productIds = [], int $limit = 100): array
     {
         $query = Order::query()
+            ->with('paymentSubmissions:id,order_id,status')
             ->where(function ($query) {
                 $query->whereNotNull('reserved_until')->where('reserved_until', '<=', now())
                     ->orWhereHas('reservations', fn ($reservations) => $reservations->where('status', InventoryReservation::ACTIVE)->where('expires_at', '<=', now()));
@@ -57,6 +59,7 @@ class InventoryReservationExpirationService
     {
         return DB::transaction(function () use ($orderId, $warehouseId, $productIds) {
             $order = Order::whereKey($orderId)->lockForUpdate()->firstOrFail();
+            $order->load('paymentSubmissions:id,order_id,status');
             $reservations = InventoryReservation::where('order_id', $order->id)
                 ->where('status', InventoryReservation::ACTIVE)
                 ->when($warehouseId, fn ($query) => $query->where('warehouse_id', $warehouseId))
@@ -123,6 +126,7 @@ class InventoryReservationExpirationService
     public function previewDueReservations(?int $orderId = null, ?int $warehouseId = null, array $productIds = [], int $limit = 100): Collection
     {
         return InventoryReservation::query()->with('order:id,status,payment_status,paid_at,reserved_until,payment_method,payment_data')
+            ->with('order.paymentSubmissions:id,order_id,status')
             ->where('status', InventoryReservation::ACTIVE)->whereHas('order', function ($orders) use ($orderId) {
                 $orders->where(function ($query) {
                     $query->whereNotNull('reserved_until')->where('reserved_until', '<=', now())->orWhereHas('reservations', fn ($reservations) => $reservations->where('status', InventoryReservation::ACTIVE)->where('expires_at', '<=', now()));
@@ -153,13 +157,21 @@ class InventoryReservationExpirationService
 
     private function transferProofPending(Order $order): bool
     {
-        $data = $order->payment_data ?? [];
-        $status = strtolower((string) ($data['transfer_proof_status'] ?? $data['proof_status'] ?? $data['comprobante_status'] ?? ''));
-        if (in_array($status, ['submitted', 'pending', 'under_review', 'received', 'en_revision', 'pendiente'], true)) {
-            return true;
+        if ($order->relationLoaded('paymentSubmissions')) {
+            return $order->paymentSubmissions->contains(fn ($submission) => in_array($submission->status, [
+                \App\Models\PaymentSubmission::PENDING_REVIEW,
+                \App\Models\PaymentSubmission::OBSERVED,
+                \App\Models\PaymentSubmission::APPROVED,
+                \App\Models\PaymentSubmission::MANUAL_RESOLUTION_REQUIRED,
+            ], true)) || EffectiveInventoryReservationStatus::hasProofUnderReview($order);
         }
 
-        return (bool) array_intersect(array_keys($data), ['transfer_proof', 'proof_url', 'receipt_url', 'voucher_url', 'comprobante_url']);
+        $hasOpenPayment = \App\Models\PaymentSubmission::query()
+            ->where('order_id', $order->id)
+            ->whereIn('status', [\App\Models\PaymentSubmission::PENDING_REVIEW, \App\Models\PaymentSubmission::OBSERVED, \App\Models\PaymentSubmission::APPROVED, \App\Models\PaymentSubmission::MANUAL_RESOLUTION_REQUIRED])
+            ->exists();
+
+        return $hasOpenPayment || EffectiveInventoryReservationStatus::hasProofUnderReview($order);
     }
 
     private function isDue(Order $order, Collection $reservations): bool

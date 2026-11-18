@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
+use App\Support\EffectiveInventoryReservationStatus;
 
 class AdminOrderFulfillmentResource extends JsonResource
 {
@@ -37,7 +38,7 @@ class AdminOrderFulfillmentResource extends JsonResource
                 'id' => $item->getAttribute('id'),
                 'product' => $this->product($item),
                 'warehouse' => $this->namedRelation($item, 'warehouse'),
-                'reservation' => $this->statusRelation($item, 'reservation'),
+                'reservation' => $this->reservation($order, $item),
                 'quantity' => $item->getAttribute('quantity'),
                 'price' => $item->getAttribute('price'),
             ])->values()->all(),
@@ -271,14 +272,18 @@ class AdminOrderFulfillmentResource extends JsonResource
             : ($item->getAttribute('product_name') ?: 'Producto no disponible')];
     }
 
-    private function statusRelation(Model $model, string $relation): ?array
+    private function reservation(Model $order, Model $item): ?array
     {
-        $related = $this->loadedRelation($model, $relation);
-        if (! $related instanceof Model) {
+        $reservation = $this->loadedRelation($item, 'reservation');
+        if (! $reservation instanceof Model) {
             return null;
         }
 
-        return ['status' => $related->getAttribute('status')];
+        return ['status' => EffectiveInventoryReservationStatus::forItem(
+            $order,
+            $reservation,
+            $order->getAttribute('payment_submission_status')
+        )];
     }
 
     private function named(mixed $value): ?array

@@ -9,6 +9,9 @@ class CatalogFiltersFrontendTest extends TestCase
     public function test_results_summary_uses_the_paginator_meta_total_and_handles_loading_singular_plural_and_empty_states(): void
     {
         $source = file_get_contents(resource_path('js/views/Catalog.vue'));
+        $this->assertStringContainsString('placeholder="Nombre, modelo o SKU del producto"', $source);
+        $this->assertStringContainsString('search: firstString(route.query.search).trim()', $source);
+        $this->assertStringContainsString('const submitSearch = () => updateQuery({ search: searchDraft.value.trim() || undefined, page: undefined }, true)', $source);
         preg_match('/const resultsSummary\s*=\s*computed\(\(\)\s*=>\s*\{(?<body>[\s\S]*?)\n\}\);/', $source, $summaryMatch);
         $summary = $summaryMatch['body'] ?? '';
 

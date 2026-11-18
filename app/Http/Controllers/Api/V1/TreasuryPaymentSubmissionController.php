@@ -39,10 +39,11 @@ class TreasuryPaymentSubmissionController extends Controller
     {
         $data = $request->validated();
         $query = PaymentSubmission::query()->with([
-            'order:id,user_id,reserved_until',
+            'order:id,user_id,reserved_until,total',
             'order.user:id,name,email',
             'order.items:id,order_id',
             'order.items.currentReservation:inventory_reservations.id,inventory_reservations.order_item_id,inventory_reservations.status,inventory_reservations.expires_at',
+            'order.paymentSubmissions:id,order_id,status,amount,expected_amount',
         ]);
 
         if (! empty($data['search'])) {
@@ -98,7 +99,7 @@ class TreasuryPaymentSubmissionController extends Controller
 
     public function show(string $submission)
     {
-        $model = $this->submission($submission, ['order.user', 'order.items.currentReservation', 'reviewer', 'histories.actor', 'paymentTransaction.confirmer', 'resolutionCase']);
+        $model = $this->submission($submission, ['order.user', 'order.items.currentReservation', 'order.paymentSubmissions:id,order_id,status,amount,expected_amount', 'reviewer', 'histories.actor', 'paymentTransaction.confirmer', 'resolutionCase']);
         $canOpenResolution = $this->resolutions->canOpen($model);
         $canReassignAndApprove = $this->reassignments->canReassignAndApprove($model);
 

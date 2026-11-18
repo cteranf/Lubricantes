@@ -12,10 +12,12 @@ class AdminProductListResource extends JsonResource
             'id' => (int) $this->id,
             'name' => (string) $this->name,
             'sku' => $this->sku,
+            'presentation' => $this->presentation,
             'description' => $this->description,
             'price' => (string) $this->price,
             'is_active' => (bool) $this->is_active,
             'allow_reviews' => (bool) $this->allow_reviews,
+            'product_model_id' => $this->product_model_id === null ? null : (int) $this->product_model_id,
             'category' => $this->whenLoaded('category', fn () => $this->category ? [
                 'id' => (int) $this->category->id,
                 'name' => (string) $this->category->name,
@@ -23,6 +25,11 @@ class AdminProductListResource extends JsonResource
             'brand' => $this->whenLoaded('brand', fn () => $this->brand ? [
                 'id' => (int) $this->brand->id,
                 'name' => (string) $this->brand->name,
+            ] : null),
+            'product_model' => $this->whenLoaded('productModel', fn () => $this->productModel ? [
+                'id' => (int) $this->productModel->id,
+                'name' => (string) $this->productModel->name,
+                'is_active' => (bool) $this->productModel->is_active,
             ] : null),
             'physical_stock' => (int) ($this->inventory_stock ?? $this->stock ?? 0),
             'image_url' => $this->image_url,

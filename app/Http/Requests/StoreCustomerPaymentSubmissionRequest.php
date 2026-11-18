@@ -17,12 +17,12 @@ class StoreCustomerPaymentSubmissionRequest extends FormRequest
     {
         return [
             'channel' => ['required', 'string', Rule::in(PaymentSubmission::CHANNELS)],
+            'amount' => ['required', 'string', 'max:13', 'regex:/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/'],
             'receiving_account_id' => ['required', 'integer'],
             'operation_number' => ['required', 'string', 'max:'.config('treasury.operation_number_max_length')],
             'paid_at' => ['required', 'date'],
             'origin_phone_last_four' => ['nullable', 'string', 'regex:/^\d{4}$/'],
             'origin_bank' => ['nullable', 'string', 'max:'.config('treasury.origin_bank_max_length')],
-            'amount' => ['prohibited'],
             'currency' => ['prohibited'],
             'order_id' => ['prohibited'],
             'user_id' => ['prohibited'],

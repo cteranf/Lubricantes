@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\InventoryReservation;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Support\TransferPaymentInstallments;
 
 class TreasuryPaymentSubmissionListResource extends JsonResource
 {
@@ -18,6 +19,11 @@ class TreasuryPaymentSubmissionListResource extends JsonResource
             ]),
             'channel' => $this->channel,
             'expected_amount' => $this->expected_amount,
+            'amount' => $this->amount,
+            'amount_not_recorded' => $this->amount === null,
+            'order_accounting' => $this->whenLoaded('order', fn () => $this->order->relationLoaded('paymentSubmissions')
+                ? TransferPaymentInstallments::summary($this->order, $this->order->paymentSubmissions)
+                : null),
             'currency' => $this->currency,
             'operation_number_masked' => $this->resource->maskedOperationNumber(),
             'receiving_account' => $this->receivingAccount(),

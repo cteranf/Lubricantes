@@ -20,7 +20,7 @@ class CartPageFrontendTest extends TestCase
         $this->assertStringNotContainsString('ref([])', $view);
         $this->assertStringNotContainsString('<table', $view);
         $this->assertStringContainsString('cartStore.count', $view);
-        $this->assertStringContainsString('formatPen(cartStore.total)', $view);
+        $this->assertStringContainsString('formatPen(cartPriceSummary.productSubtotal)', $view);
         $this->assertStringContainsString('count: (state) => state.items.reduce((acc, item) => acc + item.quantity, 0)', $store);
         $this->assertStringContainsString('total: (state) => state.items.reduce((acc, item) => acc + (item.price * item.quantity), 0)', $store);
         $this->assertStringContainsString('cartStore.count', $navbar);
@@ -42,7 +42,7 @@ class CartPageFrontendTest extends TestCase
         $this->assertStringContainsString('role="img"', $item);
         $this->assertStringContainsString('Imagen no disponible', $item);
         $this->assertStringContainsString('productPath(item)', $item);
-        $this->assertStringContainsString('formatPen(item.price)', $item);
+        $this->assertStringContainsString('formatPen(itemPriceBreakdown(item).appliedPrice)', $item);
         $this->assertStringContainsString('formatPen(lineSubtotal(item))', $item);
         $this->assertStringContainsString('@input="validateQuantity(item, $event)"', $item);
         $this->assertStringContainsString('cartQuantityLimit(item)', $item);
@@ -65,9 +65,9 @@ class CartPageFrontendTest extends TestCase
         $empty = $this->sourceBetween($view, '<section v-else class="mx-auto', '</section>');
 
         $this->assertStringContainsString('Resumen del pedido', $summary);
-        $this->assertStringContainsString('Subtotal actual', $summary);
+        $this->assertStringContainsString('Subtotal de productos', $summary);
         $this->assertStringContainsString('cartStore.count', $summary);
-        $this->assertStringContainsString('cartStore.total', $summary);
+        $this->assertStringContainsString('cartPriceSummary.productSubtotal', $summary);
         $this->assertStringContainsString('Envío o recojo se define durante el checkout.', $summary);
         $this->assertStringContainsString('El servidor confirmará los precios, la disponibilidad y los cargos definitivos', $summary);
         $this->assertStringNotContainsString('Total final', $summary);
@@ -75,6 +75,29 @@ class CartPageFrontendTest extends TestCase
         $this->assertStringContainsString('Tu carrito está vacío', $empty);
         $this->assertStringContainsString('Explorar productos', $empty);
         $this->assertStringContainsString('to="/catalog"', $empty);
+    }
+
+    public function test_cart_shows_unit_and_order_savings_and_refreshes_prices_from_the_api(): void
+    {
+        $view = file_get_contents(resource_path('js/views/Cart.vue'));
+        $store = file_get_contents(resource_path('js/stores/cart.js'));
+        $checkout = file_get_contents(resource_path('js/views/Checkout.vue'));
+        $summary = $this->sourceBetween($view, '<dl class="mt-5 space-y-4">', '</dl>');
+        $unitPrice = $this->sourceBetween($view, 'Precio unitario</p>', '</div>');
+
+        $this->assertStringContainsString('formatPen(itemPriceBreakdown(item).regularPrice)', $unitPrice);
+        $this->assertStringContainsString('formatPen(itemPriceBreakdown(item).appliedPrice)', $unitPrice);
+        $this->assertStringContainsString('Ahorras {{ formatPen(itemPriceBreakdown(item).unitSavings) }} por unidad', $unitPrice);
+        $this->assertStringContainsString('v-if="cartPriceSummary.hasSavings"', $summary);
+        $this->assertStringContainsString('Subtotal sin ofertas', $summary);
+        $this->assertStringContainsString('Ahorro en ofertas', $summary);
+        $this->assertStringContainsString('Subtotal de productos', $summary);
+        $this->assertStringContainsString('summarizeCartPrices(cartStore.items)', $view);
+        $this->assertStringContainsString("api.post('/cart'", $view);
+        $this->assertStringContainsString('cartStore.applyPriceQuotes(response.data.items)', $view);
+        $this->assertStringContainsString('item.regular_price = regular', file_get_contents(resource_path('js/utils/cartPricing.mjs')));
+        $this->assertStringContainsString('applyCartPriceQuotes(this.items', $store);
+        $this->assertStringContainsString('cartStore.applyPriceQuotes(response.data?.items)', $checkout);
     }
 
     private function sourceBetween(string $source, string $start, string $end): string

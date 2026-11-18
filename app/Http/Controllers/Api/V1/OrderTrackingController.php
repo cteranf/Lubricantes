@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\OrderDeliveryService;
 use App\Services\ProductReviewService;
+use App\Support\EffectiveInventoryReservationStatus;
+use App\Support\TransferPaymentInstallments;
 use Illuminate\Http\Request;
 
 class OrderTrackingController extends Controller
@@ -17,7 +19,7 @@ class OrderTrackingController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user', 'delivery:id,order_id,status'])->findOrFail($id);
+        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user', 'delivery:id,order_id,status', 'paymentSubmissions:id,order_id,status,amount,expected_amount,channel,submitted_at,reviewed_at,decision_reason'])->findOrFail($id);
 
         $user = $request->user();
 
@@ -29,6 +31,17 @@ class OrderTrackingController extends Controller
 
         $reviewAccessByProduct = $this->reviews->trackingReviewAccess($order, $user);
         $delivery = $order->isPickup() ? null : $this->delivery->getCustomerTracking($order);
+        $paymentSubmissionStatus = $order->paymentSubmissions->first(fn ($submission) => in_array($submission->status, [\App\Models\PaymentSubmission::PENDING_REVIEW, \App\Models\PaymentSubmission::OBSERVED, \App\Models\PaymentSubmission::APPROVED, \App\Models\PaymentSubmission::MANUAL_RESOLUTION_REQUIRED], true))?->status;
+        $reservationStatuses = $order->items
+            ->map(fn ($item) => EffectiveInventoryReservationStatus::forItem($order, $item->reservation, $paymentSubmissionStatus))
+            ->filter()
+            ->unique()
+            ->values();
+        $reservationStatus = $reservationStatuses->count() === 1
+            ? $reservationStatuses->first()
+            : ($reservationStatuses->isEmpty()
+                ? ($order->fulfillment_status === Order::FULFILLMENT_RESERVED ? 'none' : null)
+                : 'mixed');
 
         return response()->json([
             'order' => [
@@ -46,6 +59,21 @@ class OrderTrackingController extends Controller
                 'total' => $order->total,
                 'payment_method' => $order->payment_method,
                 'payment_status' => $order->payment_status,
+                'payment_submission_status' => $paymentSubmissionStatus,
+                'payment_installments' => $order->payment_method === 'transferencia' ? [
+                    'accounting' => TransferPaymentInstallments::summary($order, $order->paymentSubmissions),
+                    'operations' => $order->paymentSubmissions->map(fn ($payment) => [
+                        'id' => $payment->id,
+                        'amount' => $payment->amount,
+                        'amount_not_recorded' => $payment->amount === null,
+                        'channel' => $payment->channel,
+                        'status' => $payment->status,
+                        'operation_number_masked' => $payment->maskedOperationNumber(),
+                        'submitted_at' => $this->iso($payment->submitted_at),
+                        'reason' => in_array($payment->status, ['observed', 'rejected'], true) ? $payment->decision_reason : null,
+                    ])->values(),
+                ] : null,
+                'reservation_status' => $reservationStatus,
                 'paid_at' => $this->iso($order->paid_at),
                 'shipping_info' => $order->shipping_info,
                 'subtotal' => $order->subtotal ?? $order->total,
@@ -75,16 +103,17 @@ class OrderTrackingController extends Controller
                     'picked_up_at' => $this->iso($order->picked_up_at),
                     'deadline_status' => $order->pickupDeadlineStatus(),
                 ] : null,
-                'items' => $order->items->map(function ($item) use ($reviewAccessByProduct) {
+                'items' => $order->items->map(function ($item) use ($reviewAccessByProduct, $order, $paymentSubmissionStatus) {
                     $itemPayload = [
                         'name' => $item->product_name ?? $item->product?->name ?? 'Producto no disponible',
                         'quantity' => $item->quantity,
+                        'regular_price' => $item->regular_price,
                         'price' => $item->price,
                         'subtotal' => $item->subtotal,
                         'image_url' => $item->product?->image_url,
                         'warehouse' => $item->warehouse ? ['id' => $item->warehouse->id, 'name' => $item->warehouse->name] : null,
                         'reservation' => $item->reservation ? [
-                            'status' => $item->reservation->status,
+                            'status' => EffectiveInventoryReservationStatus::forItem($order, $item->reservation, $paymentSubmissionStatus),
                             'quantity' => $item->reservation->quantity,
                             'expires_at' => $this->iso($item->reservation->expires_at),
                             'consumed_at' => $this->iso($item->reservation->consumed_at),

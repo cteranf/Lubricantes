@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Support\EffectiveInventoryReservationStatus;
 
 class AdminOrderListResource extends JsonResource
 {
@@ -22,7 +23,11 @@ class AdminOrderListResource extends JsonResource
             'delivery_type' => $this->delivery_type,
             'pickup_branch_name_snapshot' => $this->pickup_branch_name_snapshot,
             'warehouse_name' => $firstItem?->warehouse?->name,
-            'reservation_status' => $firstItem?->currentReservation?->status,
+            'reservation_status' => EffectiveInventoryReservationStatus::forItem(
+                $this->resource,
+                $firstItem?->currentReservation,
+                $this->paymentSubmission?->status
+            ),
             'has_payment_submission' => (bool) $this->has_payment_submission,
             'payment_submission_status' => $this->paymentSubmission?->status,
         ];

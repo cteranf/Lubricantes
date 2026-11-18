@@ -21,7 +21,7 @@
                         <form role="search" class="relative" @submit.prevent="submitSearch">
                             <label for="catalog-search" class="mb-2 block text-sm font-bold text-slate-800">Buscar en el catálogo</label>
                             <div class="relative">
-                                <input id="catalog-search" v-model="searchDraft" type="search" class="search-input pr-12" placeholder="Nombre o SKU del producto" autocomplete="off">
+                                <input id="catalog-search" v-model="searchDraft" type="search" class="search-input pr-12" placeholder="Nombre, modelo o SKU del producto" autocomplete="off">
                                 <button type="submit" class="search-button" :disabled="!searchDraft.trim() && !filters.search" aria-label="Buscar en el catálogo"><i class="pi pi-search" aria-hidden="true"></i></button>
                             </div>
                         </form>

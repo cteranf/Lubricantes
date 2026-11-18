@@ -42,6 +42,25 @@ class MercadoPagoGateway implements PaymentGatewayInterface
             ];
         }
 
+        if (isset($orderData['shipping_amount'])) {
+            $money = new MoneyService;
+            $shippingMinor = $money->toMinor((string) $orderData['shipping_amount']);
+            if ($shippingMinor < 0) {
+                throw new \RuntimeException('El importe de envío almacenado no es válido.');
+            }
+            if ($shippingMinor > 0) {
+                $items[] = ['title' => 'Envío', 'quantity' => 1, 'unit_price' => (float) $money->fromMinor($shippingMinor)];
+            }
+
+            $itemsTotalMinor = 0;
+            foreach ($items as $item) {
+                $itemsTotalMinor += $money->toMinor((string) $item['unit_price']) * (int) $item['quantity'];
+            }
+            if ($itemsTotalMinor !== $money->toMinor((string) ($orderData['total'] ?? ''))) {
+                throw new \RuntimeException('El detalle del pedido no coincide con su total almacenado.');
+            }
+        }
+
         // Prepare preference data
         $preferenceData = [
             'items' => $items,

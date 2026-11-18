@@ -5,6 +5,7 @@ namespace App\Http\Requests\Admin;
 use App\Exceptions\InvalidProductImage;
 use App\Http\Requests\Admin\Concerns\NormalizesProductBarcodes;
 use App\Http\Requests\Admin\Concerns\NormalizesProductSpecifications;
+use App\Http\Requests\Admin\Concerns\ValidatesProductModelAssignment;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
@@ -20,6 +21,7 @@ class UpdateProductRequest extends FormRequest
 {
     use NormalizesProductBarcodes;
     use NormalizesProductSpecifications;
+    use ValidatesProductModelAssignment;
 
     public function authorize(): bool
     {
@@ -39,6 +41,7 @@ class UpdateProductRequest extends FormRequest
     {
         $this->validateUniqueProductSpecificationNames($validator);
         $this->validateProductBarcodes($validator);
+        $this->validateProductModelAssignment($validator, $this->route('product'));
     }
 
     public function rules(): array
@@ -46,7 +49,7 @@ class UpdateProductRequest extends FormRequest
         $product = $this->route('product');
 
         return [
-            'name' => ['sometimes', 'required', 'string', 'max:255'], 'price' => ['sometimes', 'required', 'numeric', 'min:0'],
+            'name' => ['sometimes', 'required', 'string', 'max:255'], 'presentation' => ['sometimes', 'nullable', 'string', 'max:100'], 'price' => ['sometimes', 'required', 'numeric', 'min:0'],
             'sku' => ['nullable', 'string', 'max:64', Rule::unique('products', 'sku')->ignore($product)], 'image' => ['nullable', 'file', 'max:10240', function ($attribute, $value, $fail) use ($product) {
                 if ($value === null || ! $value instanceof UploadedFile) {
                     return;
@@ -83,6 +86,7 @@ class UpdateProductRequest extends FormRequest
                     $fail('La marca seleccionada esta inactiva.');
                 }
             }],
+            'product_model_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'description' => ['nullable', 'string'], 'viscosity' => ['nullable', 'string'],
             'allow_reviews' => ['sometimes', 'boolean'],
             'specifications' => ['sometimes', 'array', 'max:30'],

@@ -29,11 +29,11 @@ class PaymentSubmission extends Model
 
     public const STATUSES = [self::PENDING_REVIEW, self::OBSERVED, self::APPROVED, self::REJECTED, self::EXPIRED, self::CANCELED, self::MANUAL_RESOLUTION_REQUIRED, self::REFUND_PENDING, self::REFUNDED];
 
-    protected $fillable = ['order_id', 'channel', 'status', 'expected_amount', 'currency', 'operation_number', 'normalized_operation_number', 'duplicate_fingerprint', 'declared_paid_at', 'origin_phone_last4', 'origin_bank', 'receiving_account_snapshot', 'submitted_by', 'submitted_at', 'reviewed_by', 'reviewed_at', 'decision_reason', 'review_expires_at', 'idempotency_key'];
+    protected $fillable = ['order_id', 'channel', 'status', 'expected_amount', 'amount', 'currency', 'operation_number', 'normalized_operation_number', 'duplicate_fingerprint', 'declared_paid_at', 'origin_phone_last4', 'origin_bank', 'receiving_account_snapshot', 'submitted_by', 'submitted_at', 'reviewed_by', 'reviewed_at', 'decision_reason', 'review_expires_at', 'idempotency_key'];
 
     protected $hidden = ['operation_number', 'normalized_operation_number', 'duplicate_fingerprint', 'origin_phone_last4', 'origin_bank', 'receiving_account_snapshot', 'idempotency_key'];
 
-    protected $casts = ['expected_amount' => 'decimal:2', 'declared_paid_at' => 'datetime', 'receiving_account_snapshot' => 'array', 'submitted_at' => 'datetime', 'reviewed_at' => 'datetime', 'review_expires_at' => 'datetime'];
+    protected $casts = ['expected_amount' => 'decimal:2', 'amount' => 'decimal:2', 'declared_paid_at' => 'datetime', 'receiving_account_snapshot' => 'array', 'submitted_at' => 'datetime', 'reviewed_at' => 'datetime', 'review_expires_at' => 'datetime'];
 
     protected static function booted(): void
     {
@@ -58,6 +58,11 @@ class PaymentSubmission extends Model
     public function order()
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function scopeOpenForAccounting($query)
+    {
+        return $query->whereIn('status', [self::PENDING_REVIEW, self::OBSERVED, self::MANUAL_RESOLUTION_REQUIRED]);
     }
 
     public function submitter()

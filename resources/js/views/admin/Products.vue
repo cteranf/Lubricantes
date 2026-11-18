@@ -27,6 +27,11 @@
                             <option value="">Todas</option><option v-for="item in brandOptions" :key="item.id" :value="String(item.id)">{{ item.name }}</option>
                         </select>
                     </label>
+                    <label class="text-sm">Modelo
+                        <select :value="list.filters.product_model_id" class="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2" @change="list.setFilter('product_model_id', $event.target.value, false)">
+                            <option value="">Todos</option><option v-for="item in modelFilterOptions" :key="item.id" :value="String(item.id)">{{ item.brand_name }} — {{ item.name }}</option>
+                        </select>
+                    </label>
                     <label class="text-sm">Estado
                         <select :value="list.filters.is_active" class="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2" @change="list.setFilter('is_active', $event.target.value, false)">
                             <option value="">Todos</option><option value="1">Activo</option><option value="0">Inactivo</option>
@@ -59,11 +64,11 @@
                     :actions-frozen="true"
                     :error="list.error.value"
                     :sort="{ column: list.sort.value, direction: list.direction.value }"
-                    search-placeholder="Buscar productos por nombre o SKU"
+                    search-placeholder="Buscar productos por nombre, SKU o modelo"
                     current-page-report-template="Mostrando {first} a {last} de {totalRecords} productos"
                     loading-message="Cargando productos…"
                     mobile-details-label="Detalles del producto {id}"
-                    :global-filter-fields="['name', 'sku']"
+                    :global-filter-fields="['name', 'sku', 'product_model.name']"
                     @retry="list.retry"
                     @page="list.setPage"
                     @per-page="list.setPerPage"
@@ -88,6 +93,7 @@
                     <template #cell-sku="{ row }"><span class="whitespace-nowrap font-mono text-xs tracking-tight text-slate-600">{{ row.sku || '—' }}</span></template>
                     <template #cell-category="{ row }">{{ row.category?.name || 'Sin categoría' }}</template>
                     <template #cell-brand="{ row }">{{ row.brand?.name || 'Sin marca' }}</template>
+                    <template #cell-product_model="{ row }">{{ row.product_model?.name || '—' }}</template>
                     <template #cell-price="{ row }"><span class="block whitespace-nowrap text-right font-semibold tabular-nums text-slate-800">{{ formatProductPrice(row.price) }}</span></template>
                     <template #cell-physical_stock="{ row }">
                         <div class="flex min-w-28 flex-col items-start gap-1">
@@ -114,6 +120,7 @@
                     <form class="grid grid-cols-1 gap-4 md:grid-cols-2" @submit.prevent="submitForm">
                         <Field label="Nombre" :error="fieldError('name')" class="md:col-span-2"><input v-model="form.name" class="input" required></Field>
                         <Field label="SKU interno" :error="fieldError('sku')"><input v-model="form.sku" class="input uppercase" placeholder="Se genera automáticamente"></Field>
+                        <Field label="Presentación" :error="fieldError('presentation')"><input v-model="form.presentation" class="input" maxlength="100" placeholder="Por ejemplo: 1 L o 5 L"></Field>
                         <Field label="Precio" :error="fieldError('price')"><input v-model="form.price" type="number" min="0" step="0.01" class="input" required></Field>
                         <section class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2" aria-labelledby="product-barcodes-title">
                             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -139,7 +146,13 @@
                         <Field v-if="!isEditing" label="Cantidad inicial" :error="fieldError('cantidad_inicial')"><input v-model.number="form.cantidad_inicial" type="number" min="0" class="input" required></Field>
                         <Field v-if="!isEditing" label="Almacén inicial" :error="fieldError('warehouse_id')"><select v-model="form.warehouse_id" :required="form.cantidad_inicial > 0" class="input"><option value="">Seleccione un almacén</option><option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.name }} — {{ warehouse.branch?.name }}</option></select><small class="text-slate-500">Los cambios posteriores se realizan desde Inventario.</small></Field>
                         <Field label="Categoría" :error="fieldError('category_id')"><select v-model="form.category_id" class="input" :disabled="optionsLoading"><option value="">Sin categoría</option><option v-for="item in categoryOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/categories" class="text-xs text-blue-700">Administrar categorías</router-link></Field>
-                        <Field label="Marca" :error="fieldError('brand_id')"><select v-model="form.brand_id" class="input" :disabled="optionsLoading"><option value="">Sin marca</option><option v-for="item in brandOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/brands" class="text-xs text-blue-700">Administrar marcas</router-link></Field>
+                        <Field label="Marca" :error="fieldError('brand_id')"><select v-model="form.brand_id" class="input" :disabled="optionsLoading || specificationsLoading" @change="onBrandSelected"><option value="">Sin marca</option><option v-for="item in brandOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select><router-link to="/admin/brands" class="text-xs text-blue-700">Administrar marcas</router-link></Field>
+                        <Field label="Modelo" :error="fieldError('product_model_id')">
+                            <Select v-model="form.product_model_id" class="mt-1 w-full" :options="productModelOptions" option-label="name" option-value="id" placeholder="Sin modelo" show-clear filter :disabled="optionsLoading || specificationsLoading || modelOptionsLoading || !form.brand_id" aria-label="Modelo del producto" />
+                            <small class="mt-1 block text-slate-500">Los modelos disponibles corresponden a la marca seleccionada. SKU e inventario siguen siendo propios de cada presentación.</small>
+                            <small v-if="modelOptionsError" class="mt-1 block text-red-700" role="alert">{{ modelOptionsError }} <button type="button" class="underline" :disabled="modelOptionsLoading" @click="retryProductModels">Reintentar</button></small>
+                            <small v-else-if="form.brand_id && !modelOptionsLoading && productModelOptions.length === 0" class="mt-1 block text-slate-500" role="status">La marca seleccionada no tiene modelos activos.</small>
+                        </Field>
                         <label class="md:col-span-2 flex items-start gap-3 rounded-xl border border-slate-200 p-4">
                             <input v-model="form.allow_reviews" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600">
                             <span><span class="block font-semibold text-slate-800">Permitir opiniones para este producto</span><span class="mt-1 block text-sm text-slate-600">Al desactivarlo, las opiniones existentes se conservan pero dejan de mostrarse y no se aceptan nuevas.</span></span>
@@ -286,6 +299,7 @@ import { useConfirm } from 'primevue/useconfirm';
 import { useToast } from 'primevue/usetoast';
 import Button from 'primevue/button';
 import InputText from 'primevue/inputtext';
+import Select from 'primevue/select';
 import Textarea from 'primevue/textarea';
 import FileUpload from 'primevue/fileupload';
 import Image from 'primevue/image';
@@ -313,7 +327,7 @@ const toast = useToast();
 const confirm = useConfirm();
 const route = useRoute();
 const router = useRouter();
-const filterKeys = ['search', 'sku', 'name', 'category_id', 'brand_id', 'is_active', 'price_min', 'price_max'];
+const filterKeys = ['search', 'sku', 'name', 'category_id', 'brand_id', 'product_model_id', 'is_active', 'price_min', 'price_max'];
 const list = useAdminListQuery({
     route,
     router,
@@ -326,6 +340,7 @@ const columns = [
     { key: 'sku', label: 'SKU', sortable: true, mobileDetail: true, class: 'min-w-28' },
     { key: 'category', label: 'Categoría', mobileDetail: true, class: 'hidden md:table-cell min-w-32' },
     { key: 'brand', label: 'Marca', mobileDetail: true, class: 'hidden md:table-cell min-w-28' },
+    { key: 'product_model', label: 'Modelo', mobileDetail: true, class: 'hidden lg:table-cell min-w-36' },
     { key: 'price', label: 'Precio', sortable: true, mobileDetail: true, class: 'min-w-28 text-right' },
     { key: 'physical_stock', label: 'Stock físico', mobileDetail: true, class: 'min-w-32' },
     { key: 'is_active', label: 'Estado', sortable: true, mobileDetail: true, class: 'min-w-24' },
@@ -333,6 +348,10 @@ const columns = [
 const warehouses = ref([]);
 const categoryOptions = ref([]);
 const brandOptions = ref([]);
+const modelFilterOptions = ref([]);
+const productModelOptions = ref([]);
+const modelOptionsLoading = ref(false);
+const modelOptionsError = ref('');
 const showModal = ref(false);
 const isEditing = ref(false);
 const processing = ref(false);
@@ -373,6 +392,7 @@ const specificationsFormError = ref('');
 const currentImageUrl = computed(() => selectedProduct.value?.image_url || null);
 const galleryImageCount = computed(() => (selectedProduct.value?.images?.length || 0) + (form.value?.images?.length || 0));
 let openingSequence = 0;
+let modelOptionsSequence = 0;
 let submissionSequence = 0;
 let optionsPromise = null;
 let isComponentMounted = false;
@@ -568,13 +588,14 @@ function loadOptions() {
     optionsError.value = '';
 
     const request = Promise.all([
-            api.get('/admin/warehouses/options'), api.get('/admin/categories/options'), api.get('/admin/brands/options'),
+            api.get('/admin/warehouses/options'), api.get('/admin/categories/options'), api.get('/admin/brands/options'), api.get('/admin/product-models/options'),
         ])
-        .then(([warehouseResponse, categoryResponse, brandResponse]) => {
+        .then(([warehouseResponse, categoryResponse, brandResponse, modelResponse]) => {
             if (isComponentMounted) {
                 warehouses.value = warehouseResponse.data;
                 categoryOptions.value = categoryResponse.data;
                 brandOptions.value = brandResponse.data;
+                modelFilterOptions.value = modelResponse.data;
                 optionsLoaded.value = true;
             }
 
@@ -603,6 +624,10 @@ async function openModal(product = null) {
     }
 
     const sequence = ++openingSequence;
+    modelOptionsSequence++;
+    productModelOptions.value = [];
+    modelOptionsLoading.value = false;
+    modelOptionsError.value = '';
 
     stopImageStatusPolling();
     clearImagePreview();
@@ -623,9 +648,9 @@ async function openModal(product = null) {
     if (product) {
         preserveAssignedOption(categoryOptions.value, product.category, product.category_id);
         preserveAssignedOption(brandOptions.value, product.brand, product.brand_id);
-        form.value = { id: product.id, name: product.name, sku: product.sku || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined, barcodes: [] };
+        form.value = { id: product.id, name: product.name, sku: product.sku || '', presentation: product.presentation || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', product_model_id: product.product_model_id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined, barcodes: [] };
     } else {
-        form.value = { name: '', sku: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', description: '', allow_reviews: true, images: [], specifications: [], barcodes: [] };
+        form.value = { name: '', sku: '', presentation: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', product_model_id: '', description: '', allow_reviews: true, images: [], specifications: [], barcodes: [] };
     }
     showModal.value = true;
 
@@ -635,6 +660,47 @@ async function openModal(product = null) {
     optionsError.value = optionsResult.ok ? '' : optionsResult.message;
 
     if (product) await loadProductSpecifications(sequence, productId);
+    else await loadProductModels(form.value.brand_id, null);
+}
+
+async function loadProductModels(brandId, assignedModel = null) {
+    const sequence = ++modelOptionsSequence;
+    productModelOptions.value = [];
+    modelOptionsError.value = '';
+    if (!validId(Number(brandId))) {
+        modelOptionsLoading.value = false;
+        return;
+    }
+
+    modelOptionsLoading.value = true;
+    try {
+        const { data } = await api.get(`/admin/brands/${Number(brandId)}/product-models/options`);
+        if (sequence !== modelOptionsSequence) return;
+        productModelOptions.value = Array.isArray(data) ? data : [];
+        if (assignedModel && validId(Number(assignedModel.id))
+            && !productModelOptions.value.some((item) => Number(item.id) === Number(assignedModel.id))) {
+            productModelOptions.value.push({ ...assignedModel, is_active: false });
+        }
+    } catch {
+        if (sequence === modelOptionsSequence) {
+            modelOptionsError.value = 'No se pudieron cargar los modelos de esta marca.';
+            if (assignedModel && validId(Number(assignedModel.id))) productModelOptions.value = [{ ...assignedModel }];
+        }
+    } finally {
+        if (sequence === modelOptionsSequence) modelOptionsLoading.value = false;
+    }
+}
+
+function onBrandSelected(event) {
+    const brandId = event?.value ?? event?.target?.value ?? form.value.brand_id;
+    form.value.brand_id = brandId || '';
+    form.value.product_model_id = '';
+    errors.value = { ...errors.value, product_model_id: undefined };
+    return loadProductModels(form.value.brand_id);
+}
+
+function retryProductModels() {
+    return loadProductModels(form.value.brand_id, selectedProduct.value?.product_model || null);
 }
 
 async function loadProductSpecifications(sequence = openingSequence, productId = selectedProduct.value?.id) {
@@ -652,6 +718,11 @@ async function loadProductSpecifications(sequence = openingSequence, productId =
         }
 
         selectedProduct.value = data;
+        form.value.brand_id = data.brand_id || '';
+        form.value.presentation = data.presentation || '';
+        form.value.product_model_id = data.product_model_id || '';
+        await loadProductModels(data.brand_id, data.product_model);
+        if (!isCurrentOpening(sequence, productId, mode)) return;
         form.value.specifications = specificationRows(data.specifications);
         form.value.barcodes = barcodeRows(data.barcodes);
     } catch {
@@ -692,6 +763,10 @@ async function retryOptions() {
 
 function closeModal() {
     openingSequence++;
+    modelOptionsSequence++;
+    productModelOptions.value = [];
+    modelOptionsLoading.value = false;
+    modelOptionsError.value = '';
     stopImageStatusPolling();
     clearImagePreview();
     showModal.value = false;
@@ -1080,9 +1155,12 @@ async function submitForm() {
 
     try {
         const data = new FormData();
-        ['name', 'sku', 'price', 'category_id', 'brand_id', 'description'].forEach((key) => {
+        ['name', 'sku', 'price', 'category_id', 'description'].forEach((key) => {
             if (formState[key] !== '' && formState[key] != null) data.append(key, formState[key]);
         });
+        data.append('presentation', formState.presentation ?? '');
+        data.append('brand_id', formState.brand_id ?? '');
+        data.append('product_model_id', formState.product_model_id ?? '');
         data.append('allow_reviews', formState.allow_reviews ? '1' : '0');
         if (mode === 'create') {
             data.append('cantidad_inicial', formState.cantidad_inicial);

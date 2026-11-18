@@ -17,7 +17,7 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         $query = Product::query()->with([
-            'category', 'brand', 'images',
+            'category', 'brand', 'productModel', 'images', 'activePromotion',
             'specifications:id,product_id,name,value,sort_order',
         ])->where('is_active', true);
 
@@ -35,8 +35,10 @@ class ProductController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where(fn ($search) => $search->where('name', 'like', '%'.$request->search.'%')
-                ->orWhere('sku', 'like', '%'.$request->search.'%'));
+            $term = '%'.$request->search.'%';
+            $query->where(fn ($search) => $search->where('name', 'like', $term)
+                ->orWhere('sku', 'like', $term)
+                ->orWhereHas('productModel', fn ($model) => $model->where('name', 'like', $term)));
         }
 
         if ($request->has('viscosity')) {
@@ -84,7 +86,7 @@ class ProductController extends Controller
     public function show($slug)
     {
         $product = Product::with([
-            'category', 'brand', 'images',
+            'category', 'brand', 'productModel', 'images', 'activePromotion',
             'specifications:id,product_id,name,value,sort_order',
         ])
             ->where('slug', $slug)

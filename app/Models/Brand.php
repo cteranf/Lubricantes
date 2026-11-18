@@ -17,4 +17,9 @@ class Brand extends Model
     {
         return $this->hasMany(Product::class);
     }
+
+    public function productModels()
+    {
+        return $this->hasMany(ProductModel::class)->orderBy('name')->orderBy('id');
+    }
 }

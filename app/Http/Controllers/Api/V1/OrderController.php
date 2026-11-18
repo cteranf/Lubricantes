@@ -7,12 +7,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\CustomerOrderHistoryResource;
 use App\Models\Branch;
 use App\Models\Order;
+use App\Models\InventoryReservation;
+use App\Models\PaymentSubmission;
 use App\Models\Product;
 use App\Models\UserAddress;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
+use App\Services\ProductPricingService;
 use App\Services\ShippingRateService;
+use App\Services\CheckoutPriceConfirmationService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,10 +52,82 @@ class OrderController extends Controller
             ->values());
     }
 
+    /**
+     * Return a current, non-reserving quote for restarting an expired transfer order.
+     */
+    public function repurchaseQuote(Request $request, Order $order)
+    {
+        abort_unless((int) $request->user()->id === (int) $order->user_id, 404);
+
+        $reservationExpired = ($order->reserved_until && $order->reserved_until->isPast())
+            || $order->reservations()->where('status', InventoryReservation::EXPIRED)->exists()
+            || $order->reservations()->where('status', InventoryReservation::ACTIVE)->where('expires_at', '<=', now())->exists();
+        $terminalTracking = in_array($order->tracking_status, ['delivered', 'picked_up'], true);
+        $hasSubmission = PaymentSubmission::query()->where('order_id', $order->id)->exists();
+
+        if ($order->payment_method !== 'transferencia'
+            || $order->payment_status !== 'pending'
+            || ! $reservationExpired
+            || $hasSubmission
+            || $terminalTracking
+            || in_array($order->status, ['rejected', 'delivered'], true)) {
+            return response()->json([
+                'code' => 'repurchase_not_available',
+                'message' => 'Este pedido no está disponible para volver a comprar sus productos.',
+            ], 409);
+        }
+
+        $order->load(['items.product.activePromotion', 'items.product.images']);
+        $pricing = app(ProductPricingService::class);
+        $availableByProduct = [];
+        try {
+            $availableByProduct = $this->inventory->sellableStockForProducts(
+                $order->items->pluck('product')->filter(fn ($product) => $product && $product->is_active)
+            );
+        } catch (InventoryException) {
+            // A missing active checkout warehouse makes every line unavailable.
+        }
+        $items = $order->items->map(function ($item) use ($availableByProduct, $pricing): array {
+            $product = $item->product;
+            if (! $product || ! $product->is_active) {
+                return [
+                    'product_id' => null,
+                    'name' => $item->product_name ?? 'Producto no disponible',
+                    'quantity' => (int) $item->quantity,
+                    'product_available' => false,
+                    'available_quantity' => 0,
+                    'regular_price' => null,
+                    'price' => null,
+                    'image_url' => null,
+                    'slug' => null,
+                ];
+            }
+
+            $quote = $pricing->quote($product);
+            $availableQuantity = (int) ($availableByProduct[$product->id] ?? 0);
+
+            return [
+                'product_id' => (int) $product->id,
+                'name' => $product->name,
+                'slug' => $product->slug,
+                'quantity' => (int) $item->quantity,
+                'product_available' => true,
+                'available_quantity' => $availableQuantity,
+                'regular_price' => $quote['regular_price'],
+                'price' => $quote['price'],
+                'image_url' => $product->image_url,
+            ];
+        })->values();
+
+        return response()->json(['items' => $items]);
+    }
+
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'checkout_token' => 'nullable|string|max:100',
+            'expected_total' => ['nullable', 'regex:/^\\d+(?:\\.\\d{1,2})?$/'],
+            'price_confirmation_token' => ['nullable', 'string', 'max:10000'],
             'shipping_info' => 'nullable|array',
             'shipping_info.phone' => 'nullable|string|max:30',
             'payment_method' => 'required|in:card,transferencia,contra_entrega,pago_en_sede',
@@ -148,17 +224,33 @@ class OrderController extends Controller
                 $reservationExpiresAt = $reservedUntil ?: now()->addYears(10);
                 $subtotalMinor = 0;
                 $itemsToCreate = [];
-
+                $productIds = collect($data['items'])->pluck('product_id')->map(fn ($id) => (int) $id)->sort()->values();
+                $products = Product::query()->whereIn('id', $productIds)->where('is_active', true)
+                    ->orderBy('id')->lockForUpdate()->with('activePromotion')->get()->keyBy('id');
+                if ($products->count() !== $productIds->count()) {
+                    throw ValidationException::withMessages(['items' => ['Uno de los productos ya no está disponible.']]);
+                }
+                $pricing = app(ProductPricingService::class);
                 foreach ($data['items'] as $requestedItem) {
-                    $product = Product::whereKey($requestedItem['product_id'])->where('is_active', true)->first();
+                    /** @var Product|null $product */
+                    $product = $products->get((int) $requestedItem['product_id']);
                     if (! $product) {
                         throw ValidationException::withMessages(['items' => ['Uno de los productos ya no está disponible.']]);
                     }
-                    $price = (string) ($product->sale_price ?? $product->price);
+                    $quote = $pricing->quote($product);
+                    $price = $quote['price'];
+                    $regularPrice = $quote['regular_price'];
                     $lineSubtotalMinor = $this->money->toMinor($price) * $requestedItem['quantity'];
                     $lineSubtotal = $this->money->fromMinor($lineSubtotalMinor);
                     $subtotalMinor += $lineSubtotalMinor;
-                    $itemsToCreate[] = ['product' => $product, 'quantity' => $requestedItem['quantity'], 'price' => $price, 'subtotal' => $lineSubtotal];
+                    $itemsToCreate[] = [
+                        'product' => $product,
+                        'quantity' => $requestedItem['quantity'],
+                        'price' => $price,
+                        'regular_price' => $regularPrice,
+                        'promotion_id' => $quote['promotion_id'],
+                        'subtotal' => $lineSubtotal,
+                    ];
                 }
 
                 $discountMinor = 0;
@@ -167,6 +259,53 @@ class OrderController extends Controller
                 $discountTotal = $this->money->fromMinor($discountMinor);
                 $shippingAmount = $this->money->fromMinor($shippingMinor);
                 $total = $this->money->fromMinor($subtotalMinor - $discountMinor + $shippingMinor);
+                $priceSnapshot = [
+                    'user_id' => (int) $request->user()->id,
+                    'checkout_token' => (string) $data['checkout_token'],
+                    'delivery_type' => (string) $data['delivery_type'],
+                    'address_id' => isset($data['address_id']) ? (int) $data['address_id'] : null,
+                    'pickup_branch_id' => isset($data['pickup_branch_id']) ? (int) $data['pickup_branch_id'] : null,
+                    'shipping_zone_id' => $shippingQuote['zone']->id ?? null,
+                    'shipping_rate_id' => $shippingQuote['rate']->id ?? null,
+                    'subtotal_minor' => $subtotalMinor,
+                    'shipping_minor' => $shippingMinor,
+                    'total_minor' => $subtotalMinor - $discountMinor + $shippingMinor,
+                    'items' => array_map(fn (array $item) => [
+                        'product_id' => (int) $item['product']->id,
+                        'quantity' => (int) $item['quantity'],
+                        'regular_price' => (string) $item['regular_price'],
+                        'price' => (string) $item['price'],
+                        'promotion_id' => $item['promotion_id'],
+                    ], $itemsToCreate),
+                ];
+                if (isset($data['expected_total'])) {
+                    try {
+                        $expectedTotalMinor = $this->money->toMinor((string) $data['expected_total']);
+                    } catch (\InvalidArgumentException) {
+                        throw ValidationException::withMessages(['expected_total' => ['El total revisado no es válido.']]);
+                    }
+                    $priceConfirmation = app(CheckoutPriceConfirmationService::class);
+                    if ($expectedTotalMinor !== (int) $priceSnapshot['total_minor']
+                        || (isset($data['price_confirmation_token']) && ! $priceConfirmation->confirms($data['price_confirmation_token'], $priceSnapshot, $expectedTotalMinor))) {
+                        return response()->json([
+                            'code' => 'price_changed',
+                            'message' => 'El precio o el envío cambió. Revisa el nuevo total antes de confirmar el pedido.',
+                            'regular_subtotal' => $this->money->fromMinor($subtotalMinor),
+                            'shipping_amount' => $shippingAmount,
+                            'total' => $total,
+                            'business_timezone' => config('app.timezone'),
+                            'items' => array_map(fn (array $item) => [
+                                'product_id' => (int) $item['product']->id,
+                                'name' => (string) $item['product']->name,
+                                'quantity' => (int) $item['quantity'],
+                                'regular_price' => (string) $item['regular_price'],
+                                'price' => (string) $item['price'],
+                                'subtotal' => (string) $item['subtotal'],
+                            ], $itemsToCreate),
+                            'confirmation_token' => $priceConfirmation->issue($priceSnapshot),
+                        ], 409);
+                    }
+                }
                 $shippingInfo = $data['delivery_type'] === 'delivery'
                     ? [
                         'recipient_name' => $shippingAddress->recipient_name,
@@ -219,7 +358,8 @@ class OrderController extends Controller
                     $item = $order->items()->create([
                         'product_id' => $itemData['product']->id, 'warehouse_id' => $warehouse->id,
                         'product_name' => $itemData['product']->name,
-                        'quantity' => $itemData['quantity'], 'price' => $itemData['price'], 'subtotal' => $itemData['subtotal'],
+                        'quantity' => $itemData['quantity'], 'regular_price' => $itemData['regular_price'],
+                        'promotion_id' => $itemData['promotion_id'], 'price' => $itemData['price'], 'subtotal' => $itemData['subtotal'],
                     ]);
                     $item->setRelation('product', $itemData['product']);
                     $item->setRelation('warehouse', $warehouse);

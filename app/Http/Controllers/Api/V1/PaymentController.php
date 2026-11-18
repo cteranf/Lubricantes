@@ -43,7 +43,14 @@ class PaymentController extends Controller
             return response()->json(['code' => 'reservation_expired', 'message' => 'El pedido o su reserva no se encuentran vigentes.', 'can_retry' => true], 409);
         }
         $this->assertPayable($order);
-        $preference = $this->preferences->createFor($order, $this->gatewayOrderData($order), $this->paymentSettings->getActiveGateway());
+        $orderData = $this->gatewayOrderData($order);
+        if (! $this->paymentAmountsMatch($orderData)) {
+            return response()->json([
+                'code' => 'order_total_mismatch',
+                'message' => 'No se pudo validar el importe guardado del pedido. Contacta con atención al cliente.',
+            ], 409);
+        }
+        $preference = $this->preferences->createFor($order, $orderData, $this->paymentSettings->getActiveGateway());
         if ($preference->state !== PaymentPreference::ACTIVE) {
             return response()->json(['code' => $preference->state === PaymentPreference::ORPHANED ? 'payment_reconciliation_required' : 'payment_preference_failed', 'message' => 'La preferencia no está disponible todavía; no se creó un segundo intento.'], 409);
         }
@@ -227,7 +234,34 @@ class PaymentController extends Controller
 
     private function gatewayOrderData(Order $order): array
     {
-        return ['order_id' => $order->id, 'items' => $order->items->map(fn ($item) => ['name' => $item->product->name, 'quantity' => $item->quantity, 'price' => $item->price])->all(), 'customer' => ['name' => $order->user->name, 'email' => $order->user->email], 'total' => $order->total];
+        return [
+            'order_id' => $order->id,
+            'items' => $order->items->map(fn ($item) => [
+                'name' => $item->product_name ?: $item->product?->name ?: 'Producto',
+                'quantity' => (int) $item->quantity,
+                // The unit amount is the persisted order snapshot; never reprice here.
+                'price' => $item->price,
+            ])->all(),
+            'shipping_amount' => $order->shipping_amount,
+            'total' => $order->total,
+            'customer' => ['name' => $order->user->name, 'email' => $order->user->email],
+        ];
+    }
+
+    private function paymentAmountsMatch(array $orderData): bool
+    {
+        try {
+            $money = app(\App\Services\MoneyService::class);
+            $itemsMinor = 0;
+            foreach ($orderData['items'] as $item) {
+                $itemsMinor += $money->toMinor((string) $item['price']) * (int) $item['quantity'];
+            }
+
+            return $itemsMinor + $money->toMinor((string) ($orderData['shipping_amount'] ?? '0'))
+                === $money->toMinor((string) $orderData['total']);
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
     }
 
     private function hash(?string $value): ?string

@@ -95,6 +95,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/location/districts', [LocationOptionController::class, 'districts']);
         Route::apiResource('addresses', UserAddressController::class)->only(['index', 'store', 'update']);
         Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
+        Route::get('/orders/{order}/repurchase-quote', [OrderController::class, 'repurchaseQuote']);
         Route::get('/orders/{order}/payment-options', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'index']);
         Route::get('/orders/{order}/payment-options/{account}/qr', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'qr']);
         Route::post('/orders/{order}/payment-submission', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'store']);
@@ -168,6 +169,11 @@ Route::prefix('v1')->group(function () {
             Route::post('/contact-inquiries/{contactInquiry}/actions/email', [AdminContactInquiryController::class, 'email'])->name('contact-inquiries.actions.email');
             Route::post('/contact-inquiries/{contactInquiry}/actions/whatsapp', [AdminContactInquiryController::class, 'whatsapp'])->name('contact-inquiries.actions.whatsapp');
             Route::patch('/products/{product}/status', [AdminProductController::class, 'status'])->name('products.status');
+            Route::get('/product-promotions/products', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'productOptions'])->name('product-promotions.products');
+            Route::patch('/product-promotions/{productPromotion}/status', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'status'])->name('product-promotions.status');
+            Route::get('/product-promotions', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'index'])->name('product-promotions.index');
+            Route::post('/product-promotions', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'store'])->name('product-promotions.store');
+            Route::put('/product-promotions/{productPromotion}', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'update'])->name('product-promotions.update');
             Route::post('/products/{product}/images', [AdminProductImageController::class, 'store'])->middleware('throttle:10,1')->name('products.images.store');
             Route::post('/products/{product}/images/reorder', [AdminProductImageController::class, 'reorder'])->name('products.images.reorder');
             Route::post('/products/{product}/images/{image}/replace', [AdminProductImageController::class, 'replace'])->middleware('throttle:10,1')->name('products.images.replace');
@@ -251,6 +257,12 @@ Route::prefix('v1')->group(function () {
             Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');
             Route::apiResource('categories', AdminCategoryController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');
+            Route::get('/product-models/options', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'options'])->name('product-models.options');
+            Route::get('/brands/{brand}/product-models', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'index'])->name('brands.product-models.index');
+            Route::get('/brands/{brand}/product-models/options', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'brandOptions'])->name('brands.product-models.options');
+            Route::post('/brands/{brand}/product-models', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'store'])->name('brands.product-models.store');
+            Route::put('/product-models/{productModel}', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'update'])->name('product-models.update');
+            Route::patch('/product-models/{productModel}/status', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'status'])->name('product-models.status');
             Route::delete('/brands/{brand}/image', [AdminBrandController::class, 'removeImage'])->name('brands.image.destroy');
             Route::patch('/brands/{brand}/status', [AdminBrandController::class, 'status'])->name('brands.status');
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);

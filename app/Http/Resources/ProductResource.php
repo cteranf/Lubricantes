@@ -14,6 +14,8 @@ class ProductResource extends JsonResource
         $images = $product->relationLoaded('images') ? $product->images : collect();
         $publicImages = $images->filter(fn ($image) => $image->hasPublishedImage())->values();
         $primary = $product->primaryImageRecord();
+        $promotion = $product->relationLoaded('activePromotion') ? $product->getRelation('activePromotion') : null;
+        $salePrice = $promotion?->promotion_price ?? $product->sale_price;
 
         return [
             'id' => (int) $product->id,
@@ -25,7 +27,7 @@ class ProductResource extends JsonResource
             'description' => $product->description,
             'specifications' => $this->when($product->relationLoaded('specifications'), fn () => ProductSpecificationResource::collection($product->getRelation('specifications'))->resolve($request)),
             'price' => $product->price,
-            'sale_price' => $product->sale_price,
+            'sale_price' => $salePrice,
             'stock' => (int) $product->stock,
             'viscosity' => $product->viscosity,
             'type' => $product->type,
@@ -46,6 +48,9 @@ class ProductResource extends JsonResource
                 'id' => (int) $product->brand->id,
                 'name' => $product->brand->name,
             ]),
+            'product_model' => $this->whenLoaded('productModel', fn () => $product->productModel ? [
+                'name' => (string) $product->productModel->name,
+            ] : null),
         ];
     }
 }
