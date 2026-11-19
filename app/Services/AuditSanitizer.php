@@ -27,7 +27,7 @@ class AuditSanitizer
             }
 
             if ($key === 'role') {
-                if (! is_string($value) || ! in_array($value, ['admin', 'customer', 'treasury'], true)) {
+                if (! is_string($value) || ! in_array($value, ['admin', 'customer', 'treasury', 'billing'], true)) {
                     throw new InvalidArgumentException('El valor de auditoría no es válido.');
                 }
             } elseif ($key === 'is_active') {
@@ -63,7 +63,7 @@ class AuditSanitizer
             }
 
             if ($key === 'changed_fields') {
-                if (! is_string($value) || strlen($value) > 160 || preg_match('/\A(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation)(?:,(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation))*\z/D', $value) !== 1) {
+                if (! is_string($value) || strlen($value) > 240 || preg_match('/\A(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation|commercial_name|legal_name|tax_id_type|tax_id_number|country_code|fiscal_address|contact_email|contact_phone|logo|boleta_enabled|factura_enabled|default_receipt_type)(?:,(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation|commercial_name|legal_name|tax_id_type|tax_id_number|country_code|fiscal_address|contact_email|contact_phone|logo|boleta_enabled|factura_enabled|default_receipt_type))*\z/D', $value) !== 1) {
                     throw new InvalidArgumentException('La lista de campos de auditoría no es válida.');
                 }
             } elseif ($key === 'reason') {

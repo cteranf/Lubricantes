@@ -15,7 +15,7 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'role' => $this->role,
             'role_label' => match ($this->role) {
-                'admin' => 'Administrador', 'treasury' => 'Tesorería', default => 'Cliente'
+                'admin' => 'Administrador', 'treasury' => 'Tesorería', 'billing' => 'Facturación', default => 'Cliente'
             },
             'is_active' => (bool) $this->is_active,
             'can_deliver' => $this->when($request->is('api/v1/admin/*'), (bool) $this->can_deliver),

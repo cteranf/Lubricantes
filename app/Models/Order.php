@@ -98,6 +98,13 @@ class Order extends Model
         'tracking_notes',
         'estimated_delivery_date',
         'delivered_at',
+        'requested_receipt_type',
+        'requested_identity_type',
+        'requested_identity_number',
+        'requested_identity_required',
+        'requested_recipient_name',
+        'requested_billing_address',
+        'requested_receipt_email',
     ];
 
     protected $casts = [
@@ -116,6 +123,7 @@ class Order extends Model
         'ready_for_pickup_at' => 'datetime',
         'pickup_deadline_at' => 'datetime',
         'picked_up_at' => 'datetime',
+        'requested_identity_required' => 'boolean',
     ];
 
     public function user()

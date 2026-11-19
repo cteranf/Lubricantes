@@ -47,7 +47,7 @@ const handleLogin = async () => {
     error.value = '';
     try {
         await authStore.login(form.value);
-        const redirect = route.query.redirect || '/';
+        const redirect = route.query.redirect || (authStore.isBilling ? '/admin/billing' : '/');
         router.push(redirect);
     } catch (requestError) {
         if (requestError?.response?.status === 403

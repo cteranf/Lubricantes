@@ -4,24 +4,24 @@ document_type: technical-audit
 status: current-code-review
 scope: read-only
 project: LubriStore
-reviewed_at: 2026-09-23
+reviewed_at: 2026-11-18
 ---
 
 # Auditoría del flujo de pagos y Tesorería
 
-> **Precedencia documental — dd2436b, consolidado el 2026-10-18:** las secciones de cierre más recientes sustituyen límites históricos incompatibles. Se conserva el historial útil, pero las ausencias y propuestas del diagnóstico inicial no describen el estado vigente. Esta consolidación no ejecutó pruebas ni consultó bases de datos.
+> **Precedencia documental — corte 2026-11-18, `main` en `3f40a1a`:** las secciones de cierre más recientes sustituyen límites históricos incompatibles. Se conserva el historial útil, pero las ausencias y propuestas del diagnóstico inicial no describen el estado vigente. La actualización fue estática: no ejecutó pruebas ni consultó datos de pagos.
 
-> **Actualización posterior del 2026-10-18:** A0/A1/A2 quedaron versionados localmente en `d0a73e2`. El cierre B3-B al final registra la capa HTTP privada y su certificación local, y sustituye los pendientes históricos de finalización interna y exposición HTTP. B3-B continúa sin commit ni despliegue nuevo; dd2436b sigue siendo la referencia de Hostinger confirmada.
+> **Actualización posterior del 2026-10-18:** A0/A1/A2 quedaron versionados localmente en `d0a73e2`. El cierre B3-B registra la capa HTTP privada y su certificación local. El despliegue documentado de dd2436b sigue siendo evidencia histórica, no confirmación de despliegue del código actual.
 
 ## Resumen ejecutivo
 
-Yape, Plin y banco siguen siendo `orders.payment_method=transferencia` y se distinguen por canal (`yape`, `plin`, `bank_transfer`). 2B1/2B2/2B3 están cerradas: presentación y recuperación del cliente, bandeja Treasury, observación, rechazo, corrección y aprobación financiera atómica. El importe esperado proviene exclusivamente de `orders.total`; no hay pagos parciales ni cuotas.
+Yape, Plin y banco siguen siendo `orders.payment_method=transferencia` y se distinguen por canal (`yape`, `plin`, `bank_transfer`). El cliente puede registrar varias presentaciones de abono asociadas al mismo pedido; cada importe reportado se revisa en Tesorería y se acumula con una política común. El total del pedido continúa siendo el importe máximo esperado y la liquidación financiera ocurre cuando los abonos aprobados cubren ese total.
 
 LubriStore tiene cuatro valores comerciales de método de pago: `card`, `transferencia`, `contra_entrega` y `pago_en_sede`. Mercado Pago conserva preferencias, transacciones y webhooks; contraentrega/pago en sede generan una `PaymentTransaction` al confirmarse el cobro. La aprobación Treasury vincula presentación, transacción e historial y consume inventario una sola vez. El flujo operativo legacy permanece para pedidos sin presentación; ante una presentación responde `treasury_approval_required`.
 
-Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` protege la bandeja financiera. Las cuentas receptoras siguen bajo administración. 2B4-B1/B2 están implementados y certificados, con apertura de resolución, reasignación/aprobación, HTTP, Vue y tracking de la reserva actual. B3-A0/A1/A2 aportan el backend interno de reembolso total, versionado en `d0a73e2`. B3-B añade HTTP privado certificado localmente; el frontend Treasury de reembolsos, la integración de devolución con gateways y la operación productiva siguen pendientes.
+Existen roles `admin`, `customer` y `treasury`. `active_user` bloquea usuarios inactivos; `is_treasury` protege la bandeja financiera. Las cuentas receptoras siguen bajo administración. 2B4-B1/B2 están implementados y certificados, con apertura de resolución, reasignación/aprobación, HTTP, Vue y tracking de la reserva actual. B3-A0/A1/A2 aportan backend interno de reembolso total; B3-B/C1/C2 completan HTTP privado, lectura y gestión manual en Treasury. La integración de devolución con gateways y la operación productiva siguen pendientes.
 
-Esta auditoría es de lectura: se inspeccionaron rutas, código, migraciones, modelos y pruebas. No se invocaron endpoints mutantes, pagos, webhooks, migraciones, seeders ni base de datos comercial.
+Esta auditoría original fue de lectura. La actualización del 2026-11-18 también fue estática y no invocó endpoints mutantes, pagos, webhooks, migraciones, seeders ni consultó filas de la base comercial.
 
 ## Situación actual y métodos admitidos
 
@@ -666,3 +666,35 @@ Una sola operación financiera puede estar activa. Los GET usan cancelación, se
 Certificación local: nueva suite PHP frontend 3 tests/51 assertions, que ejecuta además 24 casos funcionales Node sobre el módulo JavaScript real; regresiones frontend Payments 5/113, ResolutionOpening 5/90, Reassignment 4/78 y Navbar 3/15; SQLite HTTP C1 105/751 y HTTP B3-B 117/1029. Build Windows `npm.cmd run build` aprobado. Las comprobaciones de modales/plantillas son estáticas y de compilación; no se declara una prueba E2E de navegador. No se repitió MySQL ni el harness financiero: los contratos y backend no cambian. Advertencias no bloqueantes del build: Browserslist antiguo y chunk principal mayor de 500 kB.
 
 B3-C2 queda implementado y certificado localmente, pendiente de revisión estática focalizada; sin staging, commit, push o despliegue. No cambian modelos, migraciones, predicados, disponibilidad ni comandos A1/A2. Integración de gateways y aceptación/operación productiva siguen pendientes; no se accedió a Hostinger ni a datos comerciales.
+
+## Estado vigente del código: abonos múltiples — 2026-11-18
+
+Este cierre refleja `main` en `3f40a1a482d1a6b984eb985f77e3969c299d7b1a` y sustituye cualquier frase anterior que indique “no hay pagos parciales” o “una presentación por pedido”. Las secciones tempranas que propusieron `payment_submissions` como entidad futura y los cortes previos a 2B3 se conservan únicamente como historia.
+
+### Contrato y persistencia
+
+`database/migrations/2026_11_18_070000_allow_multiple_payment_submissions_per_order.php` convierte `payment_submissions.order_id` de único a indexado `(order_id, id)`, conserva la FK `restrictOnDelete` y agrega `amount DECIMAL(12,2) NULL`. Nullable conserva honestamente el histórico: para un registro sin `amount`, la compatibilidad actual calcula el importe usando `expected_amount`. El `down()` aborta si detecta pedidos con más de una presentación, para no perder registros. El cambio no convierte las presentaciones en pagos aprobados ni altera por sí solo `orders.payment_status` o inventario.
+
+### Cálculo, límites y cupos
+
+`app/Support/TransferPaymentInstallments.php::limits()` aplica:
+
+| Total del pedido | Operaciones máximas | Mínimo por abono |
+|---|---:|---:|
+| Hasta S/ 1,000.00 | 3 | S/ 50.00 |
+| Más de S/ 1,000.00 y hasta S/ 5,000.00 | 5 | S/ 100.00 |
+| Más de S/ 5,000.00 | 10 | S/ 200.00 |
+
+Importes se convierten a centavos enteros. `approved`, `pending_review`, `observed` y `manual_resolution_required` consumen una operación; `rejected` libera cupo y saldo, pero suma a conciliación requerida y bloquea nuevos abonos hasta que Tesorería resuelva el caso. El saldo restante se calcula como total menos importes aprobados, en revisión y observados; importes rechazados no reducen ese saldo. En el último cupo se exige el saldo exacto. Cuando el saldo ya está cubierto por importes en revisión/observados pero todavía no por aprobaciones, el contrato señala `payment_complete_in_review` y la interfaz impide registrar más.
+
+### Revisión y liquidación
+
+Rutas cliente bajo autenticación: `POST /api/v1/orders/{order}/payment-submission`, `PUT /api/v1/orders/{order}/payment-submission/correction`, `GET /api/v1/orders/{order}/payment-submission` y opciones de transferencia/QR. Rutas Treasury: `GET /api/v1/treasury/payment-submissions`, detalle e historial, y `PATCH /api/v1/treasury/payment-submissions/{submission}/approve` más decisiones de revisión/resolución.
+
+`CustomerPaymentSubmissionService` persiste el importe declarado y valida el agregado bajo los locks del pedido/presentaciones. `TreasuryPaymentApprovalService` revisa cada operación con actor e historial; la liquidación final se produce cuando los importes aprobados completan el total del pedido. Entonces la transacción de settlement queda vinculada/idempotente, `paid_at` y el estado de pago se actualizan y el inventario se consume una vez. Aprobaciones parciales actualizan el acumulado, pero no deben presentar el pedido como completamente pagado ni consumir anticipadamente la reserva.
+
+La interfaz del cliente presenta “Operaciones registradas X de N”, importe aprobado, en revisión, observado y saldo; si el total está completo pero en revisión muestra el estado informativo y bloquea el alta adicional. Treasury lista cada presentación individual, incluida una presentación aprobada, bajo filtros y permisos financieros. El detalle enmascara el celular del pagador para Yape/Plin y muestra el banco de origen para transferencia; históricos sin esos valores se muestran como no registrados.
+
+### Estado de validación de este documento
+
+La actualización es inspección estática de código/migración. `migrate:status` se ejecutó en modo lectura contra la conexión local `lubricantes` (MySQL 8.4.3/InnoDB) y reportó las migraciones presentes aplicadas; no se ejecutaron las suites ni se consultaron abonos reales durante esta edición documental. Las cifras de pruebas anteriores en este archivo son evidencia histórica de sus cortes respectivos.

@@ -25,7 +25,7 @@ class UserAdministrationService
                 'phone' => $data['phone'] ?? null,
                 'password' => Hash::make($data['password']),
                 'role' => $data['role'],
-                'can_deliver' => (bool) ($data['can_deliver'] ?? false),
+                'can_deliver' => ! in_array($data['role'], ['treasury', 'billing'], true) && (bool) ($data['can_deliver'] ?? false),
                 'is_active' => (bool) ($data['is_active'] ?? true),
             ]);
             $this->audit->recordUser(
@@ -71,7 +71,9 @@ class UserAdministrationService
                 'email' => $data['email'],
                 'phone' => $data['phone'] ?? null,
                 'role' => $data['role'],
-                'can_deliver' => array_key_exists('can_deliver', $data) ? (bool) $data['can_deliver'] : $locked->can_deliver,
+                'can_deliver' => in_array($data['role'], ['treasury', 'billing'], true)
+                    ? false
+                    : (array_key_exists('can_deliver', $data) ? (bool) $data['can_deliver'] : $locked->can_deliver),
             ])->save();
 
             if ($oldRole !== $locked->role) {

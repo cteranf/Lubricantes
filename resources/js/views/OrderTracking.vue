@@ -106,6 +106,12 @@
                         </div>
                     </section>
 
+                    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="receipt-request-title">
+                        <div class="flex items-center gap-3"><span class="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-800"><i class="pi pi-file" aria-hidden="true"></i></span><div><h2 id="receipt-request-title" class="font-bold text-slate-950">Comprobante solicitado</h2><p class="text-sm text-slate-600">Datos declarados para este pedido</p></div></div>
+                        <p v-if="!order.receipt_request" class="mt-4 text-sm text-slate-600">Datos de comprobante no registrados.</p>
+                        <dl v-else class="mt-4 grid gap-2 text-sm sm:grid-cols-2"><div><dt class="font-semibold text-slate-700">Tipo</dt><dd>{{ order.receipt_request.type === 'factura' ? 'Factura' : 'Boleta de venta' }}</dd></div><div><dt class="font-semibold text-slate-700">Estado</dt><dd>Solicitado; aún no emitido</dd></div><div v-if="order.receipt_request.recipient_name"><dt class="font-semibold text-slate-700">Receptor</dt><dd>{{ order.receipt_request.recipient_name }}</dd></div><div v-if="order.receipt_request.identity_number"><dt class="font-semibold text-slate-700">Documento</dt><dd>{{ order.receipt_request.identity_type }} · {{ order.receipt_request.identity_number }}</dd></div><div v-if="order.receipt_request.billing_address" class="sm:col-span-2"><dt class="font-semibold text-slate-700">Dirección de facturación</dt><dd>{{ order.receipt_request.billing_address }}</dd></div><div v-if="order.receipt_request.email" class="sm:col-span-2"><dt class="font-semibold text-slate-700">Correo</dt><dd>{{ order.receipt_request.email }}</dd></div></dl>
+                    </section>
+
                     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="destination-title">
                         <div class="flex items-start gap-3">
                             <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-800"><i :class="order.delivery_type === 'delivery' ? 'pi pi-truck' : 'pi pi-shopping-bag'" aria-hidden="true"></i></span>

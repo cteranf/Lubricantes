@@ -47,6 +47,7 @@ const routes = [
     },
     { path: '/profile', component: Profile, meta: { requiresAuth: true, noindex: true } },
     { path: '/treasury/payments', name: 'treasury-payments', component: () => import('@/views/treasury/TreasuryPayments.vue'), meta: { requiresTreasury: true, noindex: true } },
+    { path: '/admin/billing', name: 'billing-inbox', component: () => import('@/views/admin/BillingInbox.vue'), meta: { requiresBilling: true, noindex: true } },
     { path: '/orders', name: 'Orders', component: Orders, meta: { requiresAuth: true, noindex: true } },
     { path: '/orders/payment-return', name: 'PaymentReturn', component: PaymentReturn, meta: { requiresAuth: true, noindex: true } },
     { path: '/orders/success/:id', name: 'OrderSuccess', component: OrderSuccess, meta: { requiresAuth: true, noindex: true } },
@@ -78,6 +79,7 @@ const routes = [
     { path: '/admin/delivery-drivers', component: () => import('@/views/admin/DeliveryDrivers.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/delivery-vehicles', component: () => import('@/views/admin/DeliveryVehicles.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/payment-settings', component: () => import('@/views/admin/PaymentSettings.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/business-profile', name: 'admin-business-profile', component: () => import('@/views/admin/BusinessProfile.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/treasury/receiving-accounts', name: 'admin-treasury-receiving-accounts', component: () => import('@/views/admin/TreasuryReceivingAccounts.vue'), meta: { requiresAdmin: true } },
 ];
 
@@ -122,6 +124,14 @@ router.beforeEach(async (to, from, next) => {
         if (!authStore.isAuthenticated) {
             next({ path: '/login', query: { redirect: to.fullPath } });
         } else if (!authStore.isTreasury) {
+            next('/');
+        } else {
+            next();
+        }
+    } else if (to.meta.requiresBilling) {
+        if (!authStore.isAuthenticated) {
+            next({ path: '/login', query: { redirect: to.fullPath } });
+        } else if (!authStore.isAdmin && !authStore.isBilling) {
             next('/');
         } else {
             next();

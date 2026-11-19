@@ -21,7 +21,7 @@ class UserController extends Controller
         $data = $request->validate([
             'search' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,inactive'],
-            'role' => ['nullable', 'in:admin,customer,treasury'],
+            'role' => ['nullable', 'in:admin,customer,treasury,billing'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
         $query = User::query();

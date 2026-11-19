@@ -79,7 +79,7 @@ class AuditRequestContext
         }
         $route = $request->route();
         $middleware = $route ? $route->gatherMiddleware() : [];
-        $protected = collect($middleware)->contains(static fn (string $entry): bool => str_starts_with($entry, 'auth:') || in_array($entry, ['active_user', 'is_admin', 'is_treasury'], true)
+        $protected = collect($middleware)->contains(static fn (string $entry): bool => str_starts_with($entry, 'auth:') || in_array($entry, ['active_user', 'is_admin', 'is_treasury', 'can_access_billing'], true)
         );
         if (! $protected) {
             return;

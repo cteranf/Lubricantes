@@ -60,6 +60,11 @@ class User extends Authenticatable
         return $this->role === 'treasury';
     }
 
+    public function isBilling(): bool
+    {
+        return $this->role === 'billing';
+    }
+
     /**
      * Models created before the pending state migration do not receive the
      * database default in Eloquent's in-memory attributes. Treat that absence

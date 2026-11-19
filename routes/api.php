@@ -90,6 +90,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/cart', [CartController::class, 'store']); // Sync cart
         Route::get('/checkout/pickup-branches', [CheckoutPickupBranchController::class, 'index']);
         Route::post('/checkout/shipping-quote', CheckoutShippingQuoteController::class);
+        Route::get('/checkout/receipt-options', [OrderController::class, 'receiptOptions']);
         Route::get('/location/departments', [LocationOptionController::class, 'departments']);
         Route::get('/location/provinces', [LocationOptionController::class, 'provinces']);
         Route::get('/location/districts', [LocationOptionController::class, 'districts']);
@@ -124,6 +125,11 @@ Route::prefix('v1')->group(function () {
                     'code' => 'payment_submission_not_found',
                 ], 404)->header('Cache-Control', 'no-store, private')->header('Pragma', 'no-cache'))
                 ->name('payment-submissions.resolution.reassign');
+        });
+
+        Route::middleware('can_access_billing')->prefix('billing')->as('billing.')->group(function () {
+            Route::get('/orders', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'index'])->name('orders.index');
+            Route::get('/orders/{order}', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'show'])->name('orders.show');
         });
 
         // Payment
@@ -268,6 +274,8 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'show'])->name('payment-settings.show');
             Route::put('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'update'])->name('payment-settings.update');
+            Route::get('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'show'])->name('business-profile.show');
+            Route::put('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'update'])->name('business-profile.update');
             Route::get('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'index'])->name('treasury.receiving-accounts.index');
             Route::post('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'store'])->name('treasury.receiving-accounts.store');
             Route::get('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'show'])->name('treasury.receiving-accounts.show');

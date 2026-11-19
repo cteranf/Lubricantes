@@ -11,7 +11,7 @@
             @keydown="handleSidebarKeydown"
         >
             <div class="flex h-16 items-center justify-between border-b border-slate-800" :class="isSidebarCollapsed ? 'px-2' : 'px-5'">
-                <router-link :to="isTreasury ? '/treasury/payments' : '/admin/dashboard'" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isSidebarCollapsed ? (isTreasury ? 'LubriStore Tesorería' : 'LubriStore Admin') : undefined" @click="closeMobileMenu"><span v-if="!isSidebarCollapsed">Lubri<span class="text-blue-400">Store</span> {{ isTreasury ? 'Tesorería' : 'Admin' }}</span><span v-else class="text-sm text-blue-400" aria-hidden="true">LS</span></router-link>
+                <router-link :to="isTreasury ? '/treasury/payments' : isBilling ? '/admin/billing' : '/admin/dashboard'" class="rounded text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400" :aria-label="isSidebarCollapsed ? (isTreasury ? 'LubriStore Tesorería' : isBilling ? 'LubriStore Facturación' : 'LubriStore Admin') : undefined" @click="closeMobileMenu"><span v-if="!isSidebarCollapsed">Lubri<span class="text-blue-400">Store</span> {{ isTreasury ? 'Tesorería' : isBilling ? 'Facturación' : 'Admin' }}</span><span v-else class="text-sm text-blue-400" aria-hidden="true">LS</span></router-link>
                 <button ref="closeButton" type="button" class="flex h-11 w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 lg:hidden" aria-label="Cerrar menú administrativo" @click="closeMobileMenu"><i class="pi pi-times" aria-hidden="true"></i></button>
                 <button v-if="!isMobileViewport" type="button" class="collapse-toggle flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400" :aria-label="isCollapsed ? 'Expandir menú' : 'Contraer menú'" aria-controls="admin-navigation" :aria-expanded="!isSidebarCollapsed" @click="toggleCollapsed"><i :class="isCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'" aria-hidden="true"></i></button>
             </div>
@@ -113,6 +113,7 @@ const dashboardNavigation = [
 const adminNavigationGroups = [
     { id: 'sales', label: 'Ventas', icon: 'pi pi-shopping-cart', children: [
         { label: 'Pedidos', to: '/admin/orders', icon: 'pi pi-shopping-cart' },
+        { label: 'Facturación', to: '/admin/billing', icon: 'pi pi-file' },
         { label: 'Consultas', to: '/admin/contact-inquiries', icon: 'pi pi-inbox' },
     ] },
     { id: 'catalog', label: 'Catálogo', icon: 'pi pi-box', children: [
@@ -143,6 +144,7 @@ const adminNavigationGroups = [
         { label: 'Reportes gerenciales', to: '/admin/reports/management', icon: 'pi pi-chart-bar' },
     ] },
     { id: 'administration', label: 'Administración', icon: 'pi pi-shield', children: [
+        { label: 'Datos del negocio', to: '/admin/business-profile', icon: 'pi pi-briefcase' },
         { label: 'Usuarios', to: '/admin/users', icon: 'pi pi-users' },
         { label: 'Auditoría', to: '/admin/auditoria', icon: 'pi pi-history' },
     ] },
@@ -150,11 +152,15 @@ const adminNavigationGroups = [
 const treasuryNavigation = [
     { label: 'Bandeja de pagos', to: '/treasury/payments', icon: 'pi pi-wallet' },
 ];
+const billingNavigation = [
+    { label: 'Facturación', to: '/admin/billing', icon: 'pi pi-file' },
+];
 const profileNavigation = { label: 'Mi perfil', to: '/profile', icon: 'pi pi-user' };
 const isAdmin = computed(() => authStore.isAdmin);
 const isTreasury = computed(() => authStore.isTreasury);
+const isBilling = computed(() => authStore.isBilling);
 const isSidebarCollapsed = computed(() => isCollapsed.value && !isMobileViewport.value);
-const directNavigation = computed(() => isTreasury.value ? treasuryNavigation : isAdmin.value ? dashboardNavigation : []);
+const directNavigation = computed(() => isTreasury.value ? treasuryNavigation : isBilling.value ? billingNavigation : isAdmin.value ? dashboardNavigation : []);
 const visibleAdminGroups = computed(() => !isAdmin.value ? [] : adminNavigationGroups
     .map(group => ({ ...group, children: group.children.filter(item => item.to.startsWith('/admin/')) }))
     .filter(group => group.children.length > 0));

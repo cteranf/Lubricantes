@@ -26,11 +26,13 @@ class AdminUsersFrontendTest extends TestCase
         $this->assertStringContainsString('roleTone', $view);
         $this->assertStringContainsString('roleIcon', $view);
         $this->assertStringContainsString('<option value="treasury">Tesorería</option>', $view);
+        $this->assertStringContainsString('<option value="billing">Facturación</option>', $view);
         $this->assertStringContainsString("role === 'treasury' ? 'Tesorería'", $view);
+        $this->assertStringContainsString("role === 'billing' ? 'Facturación'", $view);
         $this->assertStringContainsString("role === 'treasury' ? 'badge-treasury'", $view);
         $this->assertStringContainsString("role === 'treasury' ? 'pi pi-wallet'", $view);
-        $this->assertStringContainsString("form.role !== 'treasury'", $view);
-        $this->assertStringContainsString("if (form.role === 'treasury') form.can_deliver = false", $view);
+        $this->assertStringContainsString("!['treasury','billing'].includes(form.role)", str_replace(' ', '', $view));
+        $this->assertStringContainsString("['treasury','billing'].includes(form.role)", str_replace(' ', '', $view));
         $this->assertStringContainsString('watch(() => form.role', $view);
         $this->assertStringContainsString("api.post('/admin/users', form)", $view);
         $this->assertStringContainsString('api.put(`/admin/users/${selected.value.id}`, form)', $view);

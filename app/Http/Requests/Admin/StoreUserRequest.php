@@ -26,7 +26,7 @@ class StoreUserRequest extends FormRequest
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'phone' => ['nullable', 'string', 'max:40'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'role' => ['required', Rule::in(['admin', 'customer', 'treasury'])],
+            'role' => ['required', Rule::in(['admin', 'customer', 'treasury', 'billing'])],
             'can_deliver' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
         ];

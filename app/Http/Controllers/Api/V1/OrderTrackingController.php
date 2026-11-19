@@ -59,6 +59,16 @@ class OrderTrackingController extends Controller
                 'total' => $order->total,
                 'payment_method' => $order->payment_method,
                 'payment_status' => $order->payment_status,
+                'receipt_request' => $order->requested_receipt_type ? [
+                    'type' => $order->requested_receipt_type,
+                    'identity_type' => $order->requested_identity_type,
+                    'identity_number' => $order->requested_identity_number,
+                    'identity_required' => (bool) $order->requested_identity_required,
+                    'recipient_name' => $order->requested_recipient_name,
+                    'billing_address' => $order->requested_billing_address,
+                    'email' => $order->requested_receipt_email,
+                    'status' => 'requested_not_issued',
+                ] : null,
                 'payment_submission_status' => $paymentSubmissionStatus,
                 'payment_installments' => $order->payment_method === 'transferencia' ? [
                     'accounting' => TransferPaymentInstallments::summary($order, $order->paymentSubmissions),

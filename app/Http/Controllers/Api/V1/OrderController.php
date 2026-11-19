@@ -6,17 +6,18 @@ use App\Exceptions\InventoryException;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\CustomerOrderHistoryResource;
 use App\Models\Branch;
-use App\Models\Order;
 use App\Models\InventoryReservation;
+use App\Models\Order;
 use App\Models\PaymentSubmission;
 use App\Models\Product;
 use App\Models\UserAddress;
+use App\Services\CheckoutPriceConfirmationService;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
 use App\Services\ProductPricingService;
 use App\Services\ShippingRateService;
-use App\Services\CheckoutPriceConfirmationService;
+use App\Support\SalesReceiptRules;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,7 @@ class OrderController extends Controller
         private MoneyService $money,
         private \App\Services\PaymentSettingService $paymentSettings,
         private InventoryReservationExpirationService $reservationExpiration,
+        private SalesReceiptRules $receiptRules,
     ) {}
 
     public function index(Request $request)
@@ -122,8 +124,23 @@ class OrderController extends Controller
         return response()->json(['items' => $items]);
     }
 
+    public function receiptOptions(): \Illuminate\Http\JsonResponse
+    {
+        return response()->json(['data' => $this->receiptRules->settings()]);
+    }
+
     public function store(Request $request)
     {
+        if (! $request->exists('receipt_request')) {
+            $settings = $this->receiptRules->settings();
+            $request->merge([
+                'receipt_settings_version' => $settings['version'],
+                'receipt_request' => [
+                    'type' => $settings['default_type'],
+                    'email' => $request->user()?->email,
+                ],
+            ]);
+        }
         $validator = Validator::make($request->all(), [
             'checkout_token' => 'nullable|string|max:100',
             'expected_total' => ['nullable', 'regex:/^\\d+(?:\\.\\d{1,2})?$/'],
@@ -137,6 +154,14 @@ class OrderController extends Controller
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|integer|distinct|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
+            'receipt_settings_version' => ['required', 'string', 'max:100'],
+            'receipt_request' => ['required', 'array:type,identity_type,identity_number,recipient_name,billing_address,email'],
+            'receipt_request.type' => ['required', 'string', 'in:boleta,factura'],
+            'receipt_request.identity_type' => ['nullable', 'string', 'max:20'],
+            'receipt_request.identity_number' => ['nullable', 'string', 'max:32'],
+            'receipt_request.recipient_name' => ['nullable', 'string', 'max:255'],
+            'receipt_request.billing_address' => ['nullable', 'string', 'max:255'],
+            'receipt_request.email' => ['required', 'email', 'max:255'],
         ]);
 
         if ($validator->fails()) {
@@ -259,6 +284,14 @@ class OrderController extends Controller
                 $discountTotal = $this->money->fromMinor($discountMinor);
                 $shippingAmount = $this->money->fromMinor($shippingMinor);
                 $total = $this->money->fromMinor($subtotalMinor - $discountMinor + $shippingMinor);
+                $receiptSettings = $this->receiptRules->settings(lock: true);
+                if (! hash_equals((string) $receiptSettings['version'], (string) $data['receipt_settings_version'])) {
+                    return response()->json([
+                        'code' => 'receipt_settings_changed',
+                        'message' => 'La configuración de comprobantes cambió. Actualiza tu elección antes de continuar.',
+                        'receipt_options' => $receiptSettings,
+                    ], 409);
+                }
                 $priceSnapshot = [
                     'user_id' => (int) $request->user()->id,
                     'checkout_token' => (string) $data['checkout_token'],
@@ -306,6 +339,11 @@ class OrderController extends Controller
                         ], 409);
                     }
                 }
+                $receiptSnapshot = $this->receiptRules->validateRequest(
+                    $data['receipt_request'],
+                    (int) $priceSnapshot['total_minor'],
+                    $receiptSettings
+                );
                 $shippingInfo = $data['delivery_type'] === 'delivery'
                     ? [
                         'recipient_name' => $shippingAddress->recipient_name,
@@ -352,6 +390,7 @@ class OrderController extends Controller
                     'fulfillment_status' => Order::FULFILLMENT_RESERVED,
                     'delivery_flow_version' => 1,
                     'reserved_until' => $reservedUntil,
+                    ...$receiptSnapshot,
                 ]);
 
                 foreach ($itemsToCreate as $itemData) {

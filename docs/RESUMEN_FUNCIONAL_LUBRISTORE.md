@@ -2,17 +2,17 @@
 document: Resumen funcional de LubriStore
 document_type: functional-overview
 version: 1.0
-generated_at: 2026-09-04
+generated_at: 2026-11-18
 project: LubriStore
-consolidated_at: 2026-10-18
-source_commit: dd2436b
+consolidated_at: 2026-11-18
+source_commit: 3f40a1a482d1a6b984eb985f77e3969c299d7b1a
 ---
 
 # LubriStore
 
-Este resumen refleja dd2436b. Las certificaciones y smoke mencionados son evidencia existente; esta consolidación documental no ejecutó pruebas ni consultó datos. Los resultados históricos no equivalen a una certificación operativa integral de producción.
+Este resumen describe el código de `main` en `3f40a1a482d1a6b984eb985f77e3969c299d7b1a`. Las referencias a dd2436b y sus certificaciones describen únicamente el despliegue histórico confirmado; esta actualización documental no ejecutó pruebas ni consultó datos comerciales, y no afirma que el código actual esté desplegado.
 
-Actualización posterior del 2026-10-18: el backend interno A0/A1/A2 quedó versionado localmente en `d0a73e2`. El cierre de reembolsos incorpora además B3-B HTTP privado certificado localmente y sustituye los pendientes históricos de finalización interna y endpoints. B3-B sigue sin commit ni despliegue nuevo en Hostinger.
+Actualización del 2026-11-18: el catálogo admite modelos comerciales por marca y promociones de precio fijo por producto con vigencia. El checkout recalcula y snapshottea el precio normal, el aplicado y la referencia de promoción; carrito, checkout, confirmación y seguimiento muestran el ahorro a partir de esos valores históricos. Transferencia/Yape/Plin admite varios abonos por pedido con resumen acumulado y revisión individual de Tesorería. Consulte el informe técnico y la auditoría de pagos para contratos y límites. Esta anotación es una revisión estática del código, no una nueva certificación ni despliegue.
 
 ## Reportes gerenciales
 
@@ -29,12 +29,15 @@ LubriStore es una tienda digital especializada en lubricantes. Permite mostrar p
 ## Módulos disponibles
 
 - Catálogo de productos, categorías, marcas e imágenes.
+- Modelos comerciales asociados a marcas, compartibles por varias presentaciones del producto.
+- Promociones web por producto con precio fijo y periodo de vigencia.
 - Carrito y checkout.
 - Direcciones de clientes.
 - Inventario por sedes y almacenes.
 - Reservas temporales de stock.
 - Pago con tarjeta, transferencia, contraentrega y pago en sede según configuración.
 - Registro seguro de transferencias mediante Yape, Plin o banco, con recuperación de la presentación del cliente.
+- Registro de varios abonos para una transferencia, con límites por importe del pedido y conciliación por Tesorería.
 - Bandeja de Tesorería con revisión, observación, rechazo, aprobación y resolución manual con reasignación de stock.
 - Preparación de pedidos, picking y packing.
 - Despacho propio o mediante courier.
@@ -44,7 +47,7 @@ LubriStore es una tienda digital especializada en lubricantes. Permite mostrar p
 
 ## Flujo comercial
 
-El cliente selecciona productos, revisa cantidades y elige una dirección o una sede de recojo. Para delivery se calcula una tarifa según la cobertura configurada; para pickup el flete es cero. El sistema valida disponibilidad, guarda un resumen histórico del pedido y reserva el stock antes de continuar con el pago.
+El cliente selecciona productos, revisa cantidades y elige una dirección o una sede de recojo. Para delivery se calcula una tarifa según la cobertura configurada; para pickup el flete es cero. El servidor valida disponibilidad y precios, aplica las promociones vigentes, solicita confirmar si el total cambió desde la revisión y guarda snapshots del nombre y los importes por línea antes de reservar stock. La oferta vigente del catálogo no altera un pedido ya creado.
 
 Una vez aprobado el pago o confirmado el método manual correspondiente, el equipo prepara el pedido. El cliente recibe el producto mediante reparto o lo recoge en la sede seleccionada.
 
@@ -60,7 +63,7 @@ Las reservas conservan versiones históricas. La reasignación crea una nueva re
 
 ## Pagos
 
-La plataforma puede trabajar con Mercado Pago y con métodos manuales. Las confirmaciones de tarjeta se verifican con el proveedor y los eventos se procesan de forma idempotente. Para transferencia, el cliente puede elegir Yape, Plin o banco, consultar un QR seguro cuando corresponde y registrar su operación; queda pendiente de validación por Tesorería. La operación se protege contra duplicados y no confirma el pago ni descuenta inventario por sí sola.
+La plataforma puede trabajar con Mercado Pago y con métodos manuales. Las confirmaciones de tarjeta se verifican con el proveedor y los eventos se procesan de forma idempotente. Para transferencia, el cliente puede elegir Yape, Plin o banco y registrar varios abonos que quedan pendientes de revisión individual. El resumen separa importes aprobados, en revisión, observados y saldo; registrar un abono no aprueba el pedido ni descuenta inventario. Tesorería conserva el control de la aprobación y el consumo se realiza conforme al total y a la reserva.
 
 ## Delivery y pickup
 
@@ -90,7 +93,7 @@ Antes de atender clientes reales se deben registrar las sedes y almacenes defini
 
 ## Posibles ampliaciones
 
-La bandeja de Tesorería, la aprobación y la resolución con reasignación ya están disponibles. Los reembolsos totales cuentan con servicios internos A0/A1/A2 y HTTP privado B3-B certificados localmente; siguen pendientes su interfaz Treasury, integración de devolución con gateways y validación operativa productiva. Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones, aplicaciones para repartidores y pruebas de interfaz automatizadas.
+La administración de promociones y modelos de producto ya está disponible en el código actual. Tesorería dispone de revisión de abonos múltiples y una sección para gestión manual de reembolsos; la devolución automática con gateways y la aceptación operativa productiva siguen pendientes de validación. La configuración fiscal del negocio vendedor y la emisión/registro de boletas y facturas aún requieren diseño; el diagnóstico está en [AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md](AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md). Otras ampliaciones son nuevas pasarelas, tarifas por peso o distancia, más puntos de recojo, notificaciones y aplicaciones para repartidores.
 
 Este resumen está dirigido a clientes y responsables de negocio. Para detalles técnicos, contratos y procedimientos de mantenimiento consulte `INFORME_TECNICO_LUBRISTORE.md`.
 
@@ -123,7 +126,9 @@ El cliente ve una confirmación clara de pago validado y una referencia de opera
 
 Los smoke históricos documentados confirmaron aprobación ordinaria y resolución con reasignación, una transacción vinculada, consumo único de stock y continuidad hacia preparación. Se conserva la evidencia funcional sin reproducir identificadores de pedidos, operaciones o referencias financieras.
 
-## Reembolsos: backend y HTTP privado certificados; interfaz pendiente
+## Reembolsos: flujo interno y bandeja Treasury
+
+> La información de esta sección conserva las certificaciones históricas de backend y HTTP. La frase histórica “frontend pendiente” fue reemplazada por la interfaz B3-C2 documentada al final: el código actual incluye una sección de Reembolsos en Treasury; no implica integración automática con pasarelas ni certificación productiva.
 
 B3-A0 aporta la infraestructura y B3-A1 permite iniciar el reembolso mediante un servicio interno, ahora expuesto por HTTP privado B3-B. No existe un botón de inicio ni se puede completar una devolución desde la interfaz. El inicio requiere un pedido pagado y cancelado, no entregado ni recogido, con inventario ya compensado; cancelar por sí solo no crea el reembolso.
 
@@ -141,7 +146,7 @@ Antes del ajuste posterior del matcher, la suite local B3-B aprobó en SQLite co
 
 Después se limitó la excepción de trim a la forma exacta de los dos POST, evitando que alcance rutas parecidas con segmentos extra o vacíos. Su nueva regresión aislada aprobó con **1 test/336 assertions** y los focalizados de payloads/controles con **24/96**. La suite SQLite actual aprobó con **117 tests/1029 assertions**. No se repitió MySQL, cuya evidencia anterior sigue siendo de 116 tests; el ajuste no cambia servicios financieros ni persistencia.
 
-Este cierre HTTP B3-B no acredita devoluciones reales en producción ni se ha publicado o desplegado. Hostinger conserva el despliegue confirmado de dd2436b. Siguen pendientes frontend Treasury, integración de gateways, revisión de históricos antes de habilitar el flujo completo, notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado. No se declara certificación productiva integral.
+Este cierre HTTP B3-B no acredita devoluciones reales en producción ni se ha publicado o desplegado. Hostinger conserva el despliegue confirmado de dd2436b. En el código posterior se añadieron lectura y gestión manual de reembolsos en Treasury, documentadas más abajo; continúan pendientes integración de gateways, revisión de históricos antes de habilitar el flujo completo, notificaciones, monitoreo financiero y validación de cron, workers, correo y operación integral del entorno desplegado. No se declara certificación productiva integral.
 
 La etapa local B3-C0 añade una evaluación interna de solo lectura con tres indicadores: posibilidad de iniciar, posibilidad de completar y necesidad de revisión manual. Comparte los predicados con A1/A2, sin ejecutar acciones financieras, abrir transacciones, bloquear ni modificar inventario. Un pedido normalmente no elegible no se considera corrupto automáticamente; la evidencia financiera incoherente bloquea ambas acciones. El POST conserva la revalidación transaccional final.
 
@@ -168,3 +173,7 @@ El cierre posterior a C1 incorpora localmente la sección Reembolsos en la bande
 Los formularios solicitan motivo o referencia y confirmación explícita, conservan texto ante validación y no muestran posteriormente los textos privados. Bloquean doble envío, descartan lecturas obsoletas y no hacen polling o retry automático. Un conflicto exige actualizar el detalle antes de reintentar; tras éxito se refrescan detalle y listado conservando filtros. Si falla ese refresco, se informa el éxito y se ofrece Actualizar sin repetir la devolución. La interfaz incluye tarjetas responsive, mensajes seguros y modales accesibles.
 
 Certificación local B3-C2: 3 tests PHP/51 assertions y 24 casos funcionales JavaScript; regresiones frontend Payments 5/113, apertura 5/90, reasignación 4/78 y Navbar 3/15; SQLite HTTP C1 105/751 y B3-B 117/1029; build Windows aprobado. No se repitió MySQL ni se declara E2E de navegador o certificación productiva. Pendiente revisión estática focalizada; sin staging, commit, push ni despliegue. Gateways y operación productiva continúan pendientes.
+
+## Actualización de código — 2026-11-18
+
+La sección Reembolsos de Treasury está integrada en la vista actual y consume el read-model privado existente; las acciones manuales siguen sujetas a indicadores/autorización del servidor. Transferencia admite varios abonos por pedido y aprobación acumulada, con cupos y mínimos según el importe total. Catálogo incorpora modelos comerciales por marca y promociones por producto; los pedidos conservan los precios históricos. En la rama de trabajo `feature/business-profile` existe una ficha administrativa global del vendedor con datos comerciales/fiscales, contacto y logo; moneda y zona horaria se muestran desde las fuentes actuales. Esta etapa no emite comprobantes ni realiza consultas SUNAT; cada documento futuro deberá snapshottear los datos del emisor. El detalle está en [auditoría de configuración y documentos de venta](AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md). Esta nota describe cambios locales de la rama, no afirma que estén desplegados.

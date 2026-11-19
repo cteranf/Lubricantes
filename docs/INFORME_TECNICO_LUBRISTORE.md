@@ -3,7 +3,7 @@ document: Informe técnico integral de LubriStore
 document_type: technical-source-of-truth
 version: 1.0
 status: current
-generated_at: 2026-09-04
+generated_at: 2026-11-18
 project: LubriStore
 backend: Laravel
 frontend: Vue
@@ -11,15 +11,17 @@ database: MySQL
 timezone: America/Lima
 environment_reviewed: local
 source_branch: main
-source_commit: dd2436b
-consolidated_at: 2026-10-18
+source_commit: 3f40a1a482d1a6b984eb985f77e3969c299d7b1a
+consolidated_at: 2026-11-18
 ---
 
-> Consolidación documental de dd2436b. La generación original del 2026-09-04 y sus evidencias locales se conservan como historial; no son verificaciones nuevas de producción. Las secciones de cierre posteriores sustituyen límites históricos incompatibles. El código y las migraciones tienen precedencia. Este lote no ejecutó pruebas, comandos de aplicación ni consultas a bases de datos.
+> La generación original del 2026-09-04 y la consolidación de dd2436b se conservan como historial; sus evidencias no son verificaciones nuevas de producción. Este corte estático corresponde al código de `main` en `3f40a1a482d1a6b984eb985f77e3969c299d7b1a`; el código y las migraciones tienen precedencia. No se ejecutaron pruebas ni procesos mutantes. La auditoría actual de configuración empresarial y documentos de venta está en [AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md](AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md).
 
 > Actualización posterior del 2026-10-18: A0/A1/A2 quedaron versionados localmente en `d0a73e2` (sección 10C). B3-B añade HTTP privado certificado (10D), todavía sin commit ni despliegue nuevo. Estos cierres sustituyen los pendientes históricos de finalización y HTTP; las afirmaciones anteriores de ausencia de ejecuciones corresponden únicamente a la consolidación documental de dd2436b.
 
-> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). 2B1/2B2/2B3 y 2B4-B1/B2 están implementados y certificados en su alcance. B3-A0/A1/A2 aportan el backend interno y B3-B su HTTP privado certificado localmente. Siguen pendientes frontend Treasury de devolución, integración automática de gateways y aceptación operativa productiva.
+> Auditoría específica de pagos: [AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md](AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md). Las secciones finales detallan abonos múltiples y la interfaz Treasury de reembolsos presentes en el código actual. La devolución automática con gateways y la aceptación operativa productiva siguen pendientes.
+
+> Corte funcional 2026-11-18: el código incluye modelos comerciales por marca, promociones por producto con snapshots de precio en `order_items` y varios abonos por pedido. El antiguo vínculo único de presentación por pedido es histórico y fue sustituido por la migración `2026_11_18_070000`; `amount` permanece nullable para no inventar importes de registros antiguos. La consulta local de `migrate:status` informó todas las migraciones presentes como ejecutadas en `lubricantes`; no se ejecutó ninguna migración durante esta actualización documental.
 
 # 1. Resumen ejecutivo
 
@@ -759,3 +761,31 @@ La interfaz Treasury permite aprobar solo presentaciones `pending_review` elegib
 El endpoint legacy de aprobación sigue disponible para pedidos históricos sin `PaymentSubmission`; para pedidos con presentación responde `409 treasury_approval_required`. El listado/detalle administrativo de pedidos usa `withExists` y carga eager limitada para exponer solo `has_payment_submission` y `payment_submission_status`; `Orders.vue` reemplaza visualmente el botón legacy por una etiqueta informativa y no enlaza al admin a la ruta restringida de Treasury.
 
 Quedaron fuera del cierre histórico 2B3 la resolución de reservas vencidas y las reasignaciones, posteriormente implementadas y certificadas en B1/B2. A0/A1/A2 y HTTP B3-B también quedaron resueltos después, según 10C/10D. El despliegue Hostinger confirmado corresponde a dd2436b. Siguen pendientes frontend de reembolsos, integración de gateways, notificaciones, eventual saneamiento histórico y monitoreo financiero; la instalación no certifica cron, workers, correo ni operación productiva integral.
+
+> La frase sobre el frontend pendiente describe el corte histórico de 2B3. El estado de código posterior está actualizado en el cierre B3-C2 de `AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md` y en la sección 41 de este informe.
+
+## 41. Actualización funcional del código — 2026-11-18
+
+Este corte agrega las capacidades presentes en `main` después de la consolidación de octubre. Es documentación derivada del código; no certifica despliegue ni vuelve a ejecutar suites.
+
+### Modelos comerciales de producto
+
+`ProductModel` (`product_models`) pertenece a una marca y almacena `name`, `normalized_name` y `is_active`. La unicidad normalizada es por marca; un mismo nombre puede existir en distintas marcas. `products.product_model_id` es nullable para compatibilidad con el catálogo histórico y la integridad de la asociación marca-modelo se aplica en base de datos y validación del servidor. Las rutas administrativas permiten consultar opciones por marca y crear/editar/activar/desactivar modelos. Los productos conservan SKU, código de barras, precio e inventario propios. La ficha pública puede mostrar el modelo asociado. Referencias: `app/Models/ProductModel.php`, `app/Models/Product.php`, `app/Http/Controllers/Api/V1/Admin/ProductModelController.php`, `database/migrations/2026_11_17_070000_create_product_models_table.php`.
+
+### Promociones y snapshots de precio
+
+`ProductPromotion` define producto, precio fijo, inicio/fin y habilitación. La interfaz administrativa gestiona periodos; el servidor valida que el precio sea positivo e inferior al normal y rechaza periodos habilitados superpuestos para el producto. `ProductPricingService::quote()` centraliza la selección entre precio regular, promoción vigente y compatibilidad `sale_price`. El listado y detalle públicos, carrito y checkout consumen la cotización del servidor.
+
+Al crear el pedido se recalculan precios y envío. Si el precio observado por el cliente quedó obsoleto, el servidor devuelve el nuevo resumen y pide confirmación. `order_items` conserva `regular_price`, `promotion_id`, `price` aplicado, `quantity` y `subtotal`; `orders` conserva subtotales, descuentos, envío y total. La confirmación y el seguimiento calculan ahorro desde snapshots. Un cambio futuro del catálogo o el vencimiento de la oferta no reescribe el pedido existente. `Order::total` sigue siendo el total final a pagar, por lo que el ahorro mostrado no se resta nuevamente.
+
+### Abonos múltiples por transferencia
+
+La migración `2026_11_18_070000_allow_multiple_payment_submissions_per_order` elimina el índice único de `payment_submissions.order_id`, conserva FK restrictiva y añade un índice por pedido/ID. Incorpora `amount` nullable: para históricos que carecen de importe reportado, las lecturas usan `expected_amount` como fallback definido por `TransferPaymentInstallments`; no se inventa ni backfillea el campo. La migración de reversión se protege y no restaura el modelo de un abono por pedido cuando hay varias presentaciones.
+
+`TransferPaymentInstallments` agrega importes en centavos y calcula aprobado, en revisión, observado, saldo, cupos usados/disponibles y conciliación requerida. Las operaciones aprobadas, pendientes, observadas y en resolución manual ocupan cupo; rejected libera cupo y saldo, pero requiere conciliación antes de registrar otro abono. Límites vigentes: hasta S/ 1,000, máximo 3 operaciones y mínimo S/ 50; hasta S/ 5,000, máximo 5 y mínimo S/ 100; por encima, máximo 10 y mínimo S/ 200. El último cupo exige liquidar exactamente el saldo. Si el saldo completo está en revisión, el cliente recibe el estado de pago completo pendiente de aprobación y se bloquean nuevos registros.
+
+`TreasuryPaymentApprovalService` aprueba cada presentación individualmente bajo transacción/locks; el pedido se marca pagado y la reserva se consume cuando el total de importes aprobados completa `orders.total`. Idempotencia y claves de ámbito impiden duplicar la liquidación, la transacción o el consumo. Rutas actuales y pruebas se enumeran en la actualización final de `AUDITORIA_FLUJO_PAGOS_Y_TESORERIA.md`.
+
+### Identidad de vendedor y documentos de venta: Etapa A implementada
+
+La rama `feature/business-profile` añade `BusinessProfile`, migración singleton, endpoints administrativos con FormRequest/Resource allowlisted, pantalla `BusinessProfile.vue` y gestión segura de logo. La escritura del singleton usa índice único y creación tolerante a carrera; el perfil puede seguir vacío para instalaciones existentes. El formulario informa faltantes y valida localmente el formato/dígito del RUC peruano sin consultar SUNAT. Moneda y timezone se leen de sus fuentes existentes, sin configuración paralela. Sedes/almacenes y titular de cuenta conservan sus responsabilidades. Esta etapa no emite documentos ni modifica información histórica de pedidos. El detalle de contrato, pruebas y pendientes está en [AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md](AUDITORIA_CONFIGURACION_NEGOCIO_Y_DOCUMENTOS_VENTA.md).

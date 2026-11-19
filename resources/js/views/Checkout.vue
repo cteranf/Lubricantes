@@ -53,6 +53,30 @@
                         <div v-if="selectedBranch" class="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-800"><i class="pi pi-check-circle mr-2"></i>Recojo sin costo en {{ selectedBranch.name }}</div>
                     </section>
 
+                    <section class="space-y-4 rounded-xl border border-slate-200 p-4 sm:p-5" aria-labelledby="receipt-heading">
+                        <div><h2 id="receipt-heading" class="text-lg font-bold">Comprobante de venta</h2><p class="mt-1 text-sm text-slate-600">Solicitar un comprobante no significa que ya haya sido emitido.</p></div>
+                        <p v-if="receiptOptionsLoading" class="text-sm text-slate-600" role="status">Cargando opciones de comprobante…</p>
+                        <p v-else-if="receiptConfigError" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900" role="alert">{{ receiptConfigError }} <button type="button" class="font-bold underline" @click="loadReceiptOptions">Actualizar opciones</button></p>
+                        <template v-else>
+                        <div v-if="receiptOptions.enabled_types.length === 1" class="rounded-lg bg-blue-50 p-3 text-sm font-semibold text-blue-900">{{ receiptOptions.enabled_types[0].label }}</div>
+                        <label v-else class="block text-sm font-semibold text-slate-700">Tipo de comprobante<select v-model="form.receipt_request.type" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3"><option v-for="item in receiptOptions.enabled_types" :key="item.value" :value="item.value">{{ item.label }}</option></select><span v-if="receiptFieldError('type')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('type') }}</span></label>
+                        <div v-if="form.receipt_request.type === 'boleta'" class="space-y-3 rounded-lg bg-slate-50 p-3">
+                            <p class="text-sm text-slate-700">{{ boletaIdentityRequired ? 'Por el total del pedido, SUNAT requiere identificar al comprador.' : 'Puedes solicitar que la boleta incluya identificación.' }} La validación del documento es local; no consultamos SUNAT ni RENIEC.</p>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                <label class="text-sm font-semibold text-slate-700">Tipo de documento<select v-model="form.receipt_request.identity_type" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" :required="boletaIdentityRequired || Boolean(form.receipt_request.identity_number)"><option value="">{{ boletaIdentityRequired ? 'Selecciona un documento' : 'Sin identificación' }}</option><option v-for="item in receiptOptions.identification_types || []" :key="item.value" :value="item.value">{{ item.label }}</option></select><span v-if="receiptFieldError('identity_type')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('identity_type') }}</span></label>
+                                <label class="text-sm font-semibold text-slate-700">Número de documento<input v-model.trim="form.receipt_request.identity_number" type="text" inputmode="text" autocomplete="off" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" :required="boletaIdentityRequired" :aria-invalid="Boolean(receiptFieldError('identity_number'))"><span v-if="receiptFieldError('identity_number')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('identity_number') }}</span></label>
+                                <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Nombre del titular<input v-model.trim="form.receipt_request.recipient_name" type="text" autocomplete="name" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" :required="boletaIdentityRequired || Boolean(form.receipt_request.identity_number)" :aria-invalid="Boolean(receiptFieldError('recipient_name'))"><span v-if="receiptFieldError('recipient_name')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('recipient_name') }}</span></label>
+                            </div>
+                        </div>
+                        <div v-else-if="form.receipt_request.type === 'factura'" class="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+                            <label class="text-sm font-semibold text-slate-700">RUC<input v-model.trim="form.receipt_request.identity_number" type="text" inputmode="numeric" maxlength="11" autocomplete="off" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" required :aria-invalid="Boolean(receiptFieldError('identity_number'))"><span v-if="receiptFieldError('identity_number')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('identity_number') }}</span></label>
+                            <label class="text-sm font-semibold text-slate-700">Razón social o nombre legal<input v-model.trim="form.receipt_request.recipient_name" type="text" autocomplete="organization" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" required :aria-invalid="Boolean(receiptFieldError('recipient_name'))"><span v-if="receiptFieldError('recipient_name')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('recipient_name') }}</span></label>
+                            <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Dirección de facturación<input v-model.trim="form.receipt_request.billing_address" type="text" autocomplete="billing street-address" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" required :aria-invalid="Boolean(receiptFieldError('billing_address'))"><span v-if="receiptFieldError('billing_address')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('billing_address') }}</span><button v-if="form.delivery_type === 'delivery' && selectedDeliveryAddress" type="button" class="mt-1 text-sm font-semibold text-blue-700 underline" @click="copyDeliveryToBilling">Copiar datos de entrega</button></label>
+                        </div>
+                        <label class="block text-sm font-semibold text-slate-700">Correo para recibir el comprobante<input v-model.trim="form.receipt_request.email" type="email" autocomplete="email" class="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3" required :aria-invalid="Boolean(receiptFieldError('email'))"><span v-if="receiptFieldError('email')" class="mt-1 block text-sm text-red-700">{{ receiptFieldError('email') }}</span></label>
+                        </template>
+                    </section>
+
                     <section>
                         <h2 class="mb-4 text-lg font-bold">Método de pago</h2>
                         <div v-if="loadingPaymentMethods" class="rounded-xl bg-slate-50 p-4 text-center text-slate-500 text-sm">
@@ -140,6 +164,7 @@
                         <div class="flex justify-between"><span>Subtotal de productos</span><span>S/ {{ money(checkoutPriceSummary.productSubtotal) }}</span></div>
                         <div class="flex justify-between"><span>Costo de envío</span><b :class="form.delivery_type === 'pickup' || quote?.has_coverage ? 'text-emerald-700' : 'text-slate-600'">{{ shippingLabel }}</b></div>
                         <div class="mt-4 flex justify-between border-t pt-4 text-xl font-bold"><span>Total actual</span><span>S/ {{ money(quotedTotal) }}</span></div>
+                        <div v-if="form.receipt_request.type" class="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700"><b>Solicitud de comprobante</b><p class="mt-1">{{ selectedReceiptLabel }}</p><p v-if="form.receipt_request.recipient_name">{{ form.receipt_request.recipient_name }}</p><p v-if="form.receipt_request.identity_number">{{ form.receipt_request.identity_type }} · {{ form.receipt_request.identity_number }}</p><p>{{ form.receipt_request.email }}</p><p v-if="form.receipt_request.billing_address">{{ form.receipt_request.billing_address }}</p></div>
                         <p v-if="form.delivery_type === 'delivery'" class="text-xs text-slate-500">Laravel recalculará precios, stock y tarifa al confirmar.</p>
                     </div>
                 </aside>
@@ -176,8 +201,13 @@ const addresses = ref([]), legacyAddresses = ref([]), legacyConfirmationRequired
 const departments = ref([]), provinces = ref([]), districts = ref([]);
 const territoryLoading = ref({ departments: false, provinces: false, districts: false });
 const quote = ref(null), quoteLoading = ref(false);
+const receiptOptions = ref({ enabled_types: [], identification_types: [], default_type: 'boleta', version: '' });
+const receiptConfigError = ref('');
+const receiptOptionsLoading = ref(true);
+const receiptOptionsReady = ref(false);
+const receiptErrors = ref({});
 let quoteRequest = 0;
-const form = ref({ address_id: null, phone: '', payment_method: 'card', delivery_type: 'delivery', pickup_branch_id: null });
+const form = ref({ address_id: null, phone: '', payment_method: 'card', delivery_type: 'delivery', pickup_branch_id: null, receipt_request: { type: 'boleta', identity_type: '', identity_number: '', recipient_name: authStore.user?.name || '', billing_address: '', email: authStore.user?.email || '' } });
 const addressForm = ref({ label: '', recipient_name: authStore.user?.name || '', phone: authStore.user?.phone || '', address: '', reference: '', department_id: null, province_id: null, district_id: null });
 const paymentMethods = ref([]);
 const loadingPaymentMethods = ref(true);
@@ -188,7 +218,10 @@ const pickupAvailable = computed(() => pickupBranchesLoaded.value && !pickupBran
 const canSubmitDelivery = computed(() => form.value.delivery_type === 'delivery' && Boolean(form.value.address_id && quote.value?.has_coverage && !quoteLoading.value));
 const canSubmitPickup = computed(() => form.value.delivery_type === 'pickup' && pickupAvailable.value && Boolean(selectedBranch.value));
 const hasPaymentMethod = computed(() => Boolean(form.value.payment_method && paymentMethods.value.some(m => m.value === form.value.payment_method)));
-const canSubmit = computed(() => cartStore.items.length > 0 && hasPaymentMethod.value && (canSubmitDelivery.value || canSubmitPickup.value));
+const canSubmit = computed(() => receiptOptionsReady.value && cartStore.items.length > 0 && hasPaymentMethod.value && (canSubmitDelivery.value || canSubmitPickup.value));
+const boletaIdentityRequired = computed(() => form.value.receipt_request.type === 'boleta' && toMinor(quotedTotal.value) > toMinor(receiptOptions.value.boleta_identification_threshold || '700.00'));
+const selectedReceiptLabel = computed(() => receiptOptions.value.enabled_types.find(item => item.value === form.value.receipt_request.type)?.label || 'Comprobante');
+const selectedDeliveryAddress = computed(() => addresses.value.find(address => Number(address.id) === Number(form.value.address_id)));
 const checkoutPriceSummary = computed(() => summarizeCartPrices(cartStore.items));
 const itemPriceBreakdown = cartItemPriceBreakdown;
 const quotedTotal = computed(() => fromMinor(toMinor(checkoutPriceSummary.value.productSubtotal) + (form.value.delivery_type === 'delivery' && quote.value?.has_coverage ? toMinor(quote.value.shipping_amount) : 0)));
@@ -209,6 +242,34 @@ function rotateCheckoutToken() {
     sessionStorage.removeItem('checkout:idempotency-token');
     checkoutTokenValue.value = checkoutToken();
     return checkoutTokenValue.value;
+}
+
+async function loadReceiptOptions() {
+    receiptOptionsLoading.value = true;
+    receiptConfigError.value = '';
+    try {
+        const options = (await api.get('/checkout/receipt-options')).data?.data;
+        if (!options || !Array.isArray(options.enabled_types) || !options.enabled_types.length) throw new Error('No hay documentos habilitados.');
+        receiptOptions.value = options;
+        receiptOptionsReady.value = true;
+        if (!options.enabled_types.some(item => item.value === form.value.receipt_request.type)) {
+            form.value.receipt_request.type = options.default_type;
+        }
+        if (form.value.receipt_request.type === 'factura') form.value.receipt_request.identity_type = 'RUC';
+    } catch {
+        receiptOptionsReady.value = false;
+        receiptConfigError.value = 'No se pudo cargar la configuración vigente de comprobantes. Actualiza las opciones antes de confirmar.';
+    } finally {
+        receiptOptionsLoading.value = false;
+    }
+}
+
+function receiptFieldError(field) { return receiptErrors.value[`receipt_request.${field}`]?.[0] || ''; }
+
+function copyDeliveryToBilling() {
+    const address = selectedDeliveryAddress.value;
+    if (!address) return;
+    form.value.receipt_request.billing_address = [address.address, address.district, address.province, address.department].filter(Boolean).join(', ');
 }
 
 async function startNewPurchase() {
@@ -297,6 +358,8 @@ async function submitOrder(isRetry = false) {
     try {
         const payload = {
             checkout_token: checkoutTokenValue.value,
+            receipt_settings_version: receiptOptions.value.version,
+            receipt_request: { ...form.value.receipt_request, identity_type: form.value.receipt_request.type === 'factura' ? 'RUC' : (form.value.receipt_request.identity_type || null) },
             expected_total: money(quotedTotal.value),
             ...(acceptedPriceConfirmationToken.value ? { price_confirmation_token: acceptedPriceConfirmationToken.value } : {}),
             items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })),
@@ -328,6 +391,18 @@ async function submitOrder(isRetry = false) {
                 if (quote.value && form.value.delivery_type === 'delivery') {
                     quote.value = { ...quote.value, shipping_amount: body.shipping_amount };
                 }
+                return;
+            }
+            if (orderError.response?.status === 409 && orderError.response?.data?.code === 'receipt_settings_changed') {
+                const nextSettings = orderError.response.data.receipt_options;
+                if (nextSettings) {
+                    receiptOptions.value = nextSettings;
+                    receiptOptionsReady.value = Array.isArray(nextSettings.enabled_types) && nextSettings.enabled_types.length > 0;
+                    if (!nextSettings.enabled_types?.some(item => item.value === form.value.receipt_request.type)) form.value.receipt_request.type = nextSettings.default_type;
+                    if (form.value.receipt_request.type === 'factura') form.value.receipt_request.identity_type = 'RUC';
+                } else await loadReceiptOptions();
+                receiptConfigError.value = orderError.response.data.message || 'La configuración de comprobantes cambió.';
+                acceptedPriceConfirmationToken.value = null;
                 return;
             }
             // Handle 409 reservation_expired from /orders endpoint
@@ -410,6 +485,7 @@ async function submitOrder(isRetry = false) {
         cartStore.clear();
         router.push({ name: 'OrderSuccess', params: { id: order.id } });
     } catch (error) {
+        receiptErrors.value = error.response?.data?.errors || {};
         toast.add({
             severity: 'error',
             summary: 'No se pudo confirmar',
@@ -432,6 +508,7 @@ watch(() => form.value.address_id, addressId => requestQuote(addressId));
 watch(() => addressForm.value.department_id, async id => { addressForm.value.province_id = null; addressForm.value.district_id = null; await loadProvinces(id); });
 watch(() => addressForm.value.province_id, async id => { addressForm.value.district_id = null; await loadDistricts(id); });
 onMounted(() => {
+    loadReceiptOptions();
     loadPaymentMethods(form.value.delivery_type);
     if (authStore.isAuthenticated) Promise.all([loadPickupBranches(), loadAddresses(), loadDepartments()]);
     else { loadingPickupBranches.value = false; addressesLoading.value = false; }
