@@ -12,6 +12,7 @@ use App\Models\PaymentSubmission;
 use App\Models\Product;
 use App\Models\UserAddress;
 use App\Services\CheckoutPriceConfirmationService;
+use App\Services\CheckoutTaxQuoteService;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
@@ -35,6 +36,8 @@ class OrderController extends Controller
         private \App\Services\PaymentSettingService $paymentSettings,
         private InventoryReservationExpirationService $reservationExpiration,
         private SalesReceiptRules $receiptRules,
+        private \App\Services\OrderTaxCalculationService $taxes,
+        private CheckoutTaxQuoteService $taxQuotes,
     ) {}
 
     public function index(Request $request)
@@ -145,6 +148,7 @@ class OrderController extends Controller
             'checkout_token' => 'nullable|string|max:100',
             'expected_total' => ['nullable', 'regex:/^\\d+(?:\\.\\d{1,2})?$/'],
             'price_confirmation_token' => ['nullable', 'string', 'max:10000'],
+            'tax_quote_token' => ['nullable', 'string', 'max:10000'],
             'shipping_info' => 'nullable|array',
             'shipping_info.phone' => 'nullable|string|max:30',
             'payment_method' => 'required|in:card,transferencia,contra_entrega,pago_en_sede',
@@ -284,6 +288,22 @@ class OrderController extends Controller
                 $discountTotal = $this->money->fromMinor($discountMinor);
                 $shippingAmount = $this->money->fromMinor($shippingMinor);
                 $total = $this->money->fromMinor($subtotalMinor - $discountMinor + $shippingMinor);
+                $taxSnapshot = $this->taxes->calculate($itemsToCreate, $shippingMinor, $discountMinor, true);
+                if ($this->money->toMinor((string) $taxSnapshot['totals']['gross_minor']) !== $subtotalMinor - $discountMinor + $shippingMinor) {
+                    throw ValidationException::withMessages(['tax_snapshot' => ['El desglose tributario no coincide con el total comercial confirmado. No se modificó el importe del pedido.']]);
+                }
+                $taxQuoteInput = [
+                    'items' => array_map(static fn (array $item): array => [
+                        'product_id' => (int) $item['product']->id,
+                        'quantity' => (int) $item['quantity'],
+                        'regular_price' => (string) $item['regular_price'],
+                        'price' => (string) $item['price'],
+                        'subtotal' => (string) $item['subtotal'],
+                        'tax_affectation' => $item['product']->tax_affectation,
+                    ], $itemsToCreate),
+                    'shipping_amount' => $shippingAmount,
+                    'tax_snapshot' => $taxSnapshot,
+                ];
                 $receiptSettings = $this->receiptRules->settings(lock: true);
                 if (! hash_equals((string) $receiptSettings['version'], (string) $data['receipt_settings_version'])) {
                     return response()->json([
@@ -303,6 +323,8 @@ class OrderController extends Controller
                     'subtotal_minor' => $subtotalMinor,
                     'shipping_minor' => $shippingMinor,
                     'total_minor' => $subtotalMinor - $discountMinor + $shippingMinor,
+                    'tax_calculation_version' => $taxSnapshot['calculation_version'],
+                    'tax_configuration_version' => $taxSnapshot['configuration_version'],
                     'items' => array_map(fn (array $item) => [
                         'product_id' => (int) $item['product']->id,
                         'quantity' => (int) $item['quantity'],
@@ -335,9 +357,26 @@ class OrderController extends Controller
                                 'price' => (string) $item['price'],
                                 'subtotal' => (string) $item['subtotal'],
                             ], $itemsToCreate),
+                            'tax_preview' => $taxSnapshot,
+                            'tax_quote_token' => $this->taxQuotes->issue($taxQuoteInput),
                             'confirmation_token' => $priceConfirmation->issue($priceSnapshot),
                         ], 409);
                     }
+                }
+                if (isset($data['tax_quote_token']) && ! $this->taxQuotes->confirms($data['tax_quote_token'], $taxQuoteInput)) {
+                    return response()->json([
+                        'code' => 'tax_calculation_changed',
+                        'message' => 'El cálculo tributario cambió desde que revisaste el checkout. Revisa el desglose actualizado antes de continuar.',
+                        'total' => $total,
+                        'shipping_amount' => $shippingAmount,
+                        'tax_preview' => $taxSnapshot,
+                        'items' => array_map(fn (array $item) => [
+                            'product_id' => (int) $item['product']->id,
+                            'regular_price' => (string) $item['regular_price'],
+                            'price' => (string) $item['price'],
+                        ], $itemsToCreate),
+                        'tax_quote_token' => $this->taxQuotes->issue($taxQuoteInput),
+                    ], 409);
                 }
                 $receiptSnapshot = $this->receiptRules->validateRequest(
                     $data['receipt_request'],
@@ -375,6 +414,9 @@ class OrderController extends Controller
                     'shipping_estimated_days_min_snapshot' => $shippingQuote['estimated_days_min'] ?? null,
                     'shipping_estimated_days_max_snapshot' => $shippingQuote['estimated_days_max'] ?? null,
                     'total' => $total,
+                    'tax_calculation_status' => $taxSnapshot['status'],
+                    'tax_snapshot' => $taxSnapshot,
+                    'tax_calculation_version' => $taxSnapshot['calculation_version'],
                     'checkout_token' => $data['checkout_token'],
                     'shipping_info' => $shippingInfo,
                     'payment_method' => $data['payment_method'],
@@ -393,12 +435,13 @@ class OrderController extends Controller
                     ...$receiptSnapshot,
                 ]);
 
-                foreach ($itemsToCreate as $itemData) {
+                foreach ($itemsToCreate as $itemIndex => $itemData) {
                     $item = $order->items()->create([
                         'product_id' => $itemData['product']->id, 'warehouse_id' => $warehouse->id,
                         'product_name' => $itemData['product']->name,
                         'quantity' => $itemData['quantity'], 'regular_price' => $itemData['regular_price'],
                         'promotion_id' => $itemData['promotion_id'], 'price' => $itemData['price'], 'subtotal' => $itemData['subtotal'],
+                        'tax_snapshot' => $taxSnapshot['lines'][$itemIndex] ?? null,
                     ]);
                     $item->setRelation('product', $itemData['product']);
                     $item->setRelation('warehouse', $warehouse);

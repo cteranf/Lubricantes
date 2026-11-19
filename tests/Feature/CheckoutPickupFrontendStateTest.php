@@ -28,7 +28,7 @@ class CheckoutPickupFrontendStateTest extends TestCase
         $this->assertStringContainsString('if (!Array.isArray(response.data))', $source);
         $this->assertStringContainsString('pickupBranches.value = response.data;', $source);
         $this->assertStringContainsString("const canSubmitPickup = computed(() => form.value.delivery_type === 'pickup' && pickupAvailable.value && Boolean(selectedBranch.value));", $source);
-        $this->assertStringContainsString('else { quote.value = null; quoteLoading.value = false; quoteRequest++; }', $source);
+        $this->assertStringContainsString("else { quote.value = null; quoteLoading.value = false; quoteRequest++; void refreshTaxPreview('0.00'); }", $source);
     }
 
     public function test_checkout_shows_offer_breakdown_and_adds_shipping_to_discounted_subtotal_once(): void

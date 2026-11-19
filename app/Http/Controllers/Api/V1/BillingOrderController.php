@@ -27,6 +27,7 @@ class BillingOrderController extends Controller
                 'requested_recipient_name', 'requested_billing_address', 'requested_receipt_email',
             ])
             ->with('user:id,name');
+        $query->with('electronicDocuments:id,order_id,draft_reference,document_type,status,version,prepared_at');
 
         if (filled($filters['search'] ?? null)) {
             $term = trim($filters['search']);
@@ -73,7 +74,7 @@ class BillingOrderController extends Controller
                 'requested_identity_type', 'requested_identity_number', 'requested_identity_required',
                 'requested_recipient_name', 'requested_billing_address', 'requested_receipt_email',
             ])
-            ->with(['user:id,name'])
+            ->with(['user:id,name', 'electronicDocuments:id,order_id,draft_reference,document_type,status,version,prepared_at'])
             ->findOrFail($id);
         $order->load(['items:id,order_id,product_name,quantity,regular_price,price,subtotal']);
 

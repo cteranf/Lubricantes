@@ -24,6 +24,14 @@ class BillingOrderResource extends JsonResource
             'total' => $this->total,
             'payment_status' => $this->payment_status,
             'receipt_status' => $this->requested_receipt_type ? 'requested_not_issued' : 'not_registered',
+            'electronic_documents' => $this->whenLoaded('electronicDocuments', fn () => $this->electronicDocuments->map(fn ($document): array => [
+                'id' => (int) $document->id,
+                'draft_reference' => $document->draft_reference,
+                'document_type' => $document->document_type,
+                'status' => $document->status,
+                'version' => (int) $document->version,
+                'prepared_at' => $document->prepared_at?->toISOString(),
+            ])->all()),
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item): array => [
                 'product_name' => $item->product_name ?? 'Producto no disponible',
                 'quantity' => (int) $item->quantity,

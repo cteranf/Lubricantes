@@ -50,6 +50,7 @@ class UpdateProductRequest extends FormRequest
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'], 'presentation' => ['sometimes', 'nullable', 'string', 'max:100'], 'price' => ['sometimes', 'required', 'numeric', 'min:0'],
+            'tax_affectation' => ['sometimes', 'nullable', 'string', 'in:10,20,30'],
             'sku' => ['nullable', 'string', 'max:64', Rule::unique('products', 'sku')->ignore($product)], 'image' => ['nullable', 'file', 'max:10240', function ($attribute, $value, $fail) use ($product) {
                 if ($value === null || ! $value instanceof UploadedFile) {
                     return;

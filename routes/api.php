@@ -128,8 +128,13 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::middleware('can_access_billing')->prefix('billing')->as('billing.')->group(function () {
+            Route::get('/electronic-invoicing/status', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'status'])->name('electronic-invoicing.status');
             Route::get('/orders', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'index'])->name('orders.index');
             Route::get('/orders/{order}', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'show'])->name('orders.show');
+            Route::post('/orders/{order}/electronic-documents', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'prepare'])->name('electronic-documents.prepare');
+            Route::get('/electronic-documents/{id}', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'show'])->whereNumber('id')->name('electronic-documents.show');
+            Route::put('/electronic-documents/{id}', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'update'])->whereNumber('id')->name('electronic-documents.update');
+            Route::post('/electronic-documents/{id}/issue', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'issue'])->whereNumber('id')->name('electronic-documents.issue');
         });
 
         // Payment
@@ -276,6 +281,10 @@ Route::prefix('v1')->group(function () {
             Route::put('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'update'])->name('payment-settings.update');
             Route::get('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'show'])->name('business-profile.show');
             Route::put('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'update'])->name('business-profile.update');
+            Route::get('/electronic-invoicing/settings', [App\Http\Controllers\Api\V1\Admin\ElectronicInvoiceSettingsController::class, 'show'])->name('electronic-invoicing.settings.show');
+            Route::put('/electronic-invoicing/settings', [App\Http\Controllers\Api\V1\Admin\ElectronicInvoiceSettingsController::class, 'update'])->name('electronic-invoicing.settings.update');
+            Route::get('/electronic-invoicing/tax-configuration', [App\Http\Controllers\Api\V1\Admin\BusinessTaxConfigurationController::class, 'show'])->name('electronic-invoicing.tax-configuration.show');
+            Route::put('/electronic-invoicing/tax-configuration', [App\Http\Controllers\Api\V1\Admin\BusinessTaxConfigurationController::class, 'update'])->name('electronic-invoicing.tax-configuration.update');
             Route::get('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'index'])->name('treasury.receiving-accounts.index');
             Route::post('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'store'])->name('treasury.receiving-accounts.store');
             Route::get('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'show'])->name('treasury.receiving-accounts.show');

@@ -1,0 +1,6 @@
+<?php
+require __DIR__.'/../../vendor/autoload.php'; $app=require __DIR__.'/../../bootstrap/app.php'; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+use App\Models\BusinessTaxConfiguration; use Illuminate\Support\Facades\DB;
+$db=DB::connection(); $identity=$db->selectOne('SELECT DATABASE() AS db, @@default_storage_engine AS engine'); $target='lubristore_einvoice_phase2_20261119_a7f3'; if($identity->db!==$target||strtolower($identity->engine)!=='innodb'){fwrite(STDERR,"ABORT target verification failed\n");exit(2);}
+$config=BusinessTaxConfiguration::query()->updateOrCreate(['singleton_key'=>BusinessTaxConfiguration::SINGLETON_KEY],['igv_rate_basis_points'=>1550,'ipm_rate_basis_points'=>250,'effective_from'=>'2026-11-19','prices_include_tax'=>true,'shipping_treatment'=>'ancillary_to_goods','is_configured'=>true,'version'=>1]);
+echo "database={$identity->db}\nengine={$identity->engine}\nconfigured=".($config->is_configured?'yes':'no')."\nigv_bps={$config->igv_rate_basis_points}\nipm_bps={$config->ipm_rate_basis_points}\neffective_from={$config->effective_from->format('Y-m-d')}\nversion={$config->version}\n";

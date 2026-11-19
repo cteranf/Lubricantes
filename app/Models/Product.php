@@ -15,7 +15,7 @@ class Product extends Model
 
     protected $fillable = [
         'category_id', 'brand_id', 'product_model_id', 'name', 'slug', 'sku', 'description',
-        'price', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured', 'allow_reviews',
+        'price', 'tax_affectation', 'sale_price', 'viscosity', 'type', 'presentation', 'image_path', 'is_active', 'is_featured', 'allow_reviews',
     ];
 
     protected $appends = ['image_url', 'image_variants', 'image_srcset', 'image_dimensions'];

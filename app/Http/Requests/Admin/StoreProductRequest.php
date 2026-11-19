@@ -50,6 +50,7 @@ class StoreProductRequest extends FormRequest
             'brand_id' => ['nullable', Rule::exists('brands', 'id')->where(fn ($q) => Schema::hasColumn('brands', 'is_active') ? $q->where('is_active', true) : $q)],
             'product_model_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'price' => ['required', 'numeric', 'min:0'],
+            'tax_affectation' => ['sometimes', 'nullable', 'string', 'in:10,20,30'],
             'cantidad_inicial' => ['required', 'integer', 'min:0'],
             'warehouse_id' => [
                 Rule::requiredIf(fn () => (int) $this->input('cantidad_inicial', 0) > 0),

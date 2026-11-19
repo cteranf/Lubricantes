@@ -27,7 +27,7 @@ class ProductController extends Controller
         $query = Product::query()
             ->select([
                 'products.id', 'products.category_id', 'products.brand_id', 'products.product_model_id', 'products.name',
-                'products.sku', 'products.presentation', 'products.price', 'products.is_active', 'products.image_path',
+                'products.sku', 'products.presentation', 'products.price', 'products.tax_affectation', 'products.is_active', 'products.image_path',
                 'products.stock', 'products.created_at', 'products.description', 'products.allow_reviews',
             ])
             ->with(['category:id,name', 'brand:id,name', 'productModel:id,brand_id,name,is_active', 'images:id,product_id,image_path,sort_order,is_primary,variants,original_path,processing_status'])

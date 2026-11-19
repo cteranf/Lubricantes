@@ -80,6 +80,7 @@ const routes = [
     { path: '/admin/delivery-vehicles', component: () => import('@/views/admin/DeliveryVehicles.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/payment-settings', component: () => import('@/views/admin/PaymentSettings.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/business-profile', name: 'admin-business-profile', component: () => import('@/views/admin/BusinessProfile.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/electronic-invoicing', name: 'admin-electronic-invoicing', component: () => import('@/views/admin/ElectronicInvoicingSettings.vue'), meta: { requiresAdmin: true } },
     { path: '/admin/treasury/receiving-accounts', name: 'admin-treasury-receiving-accounts', component: () => import('@/views/admin/TreasuryReceivingAccounts.vue'), meta: { requiresAdmin: true } },
 ];
 

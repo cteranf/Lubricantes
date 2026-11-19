@@ -63,6 +63,11 @@ class AdminBusinessProfileResource extends JsonResource
                 'timezone' => (string) config('app.timezone', 'UTC'),
                 'timezone_source' => 'config/app.php',
             ],
+            'electronic_invoicing' => [
+                'enabled' => (bool) config('electronic_invoicing.enabled', false),
+                'editable_here' => false,
+                'status' => config('electronic_invoicing.enabled', false) ? 'module_enabled' : 'not_enabled',
+            ],
             'logo_limits' => [
                 'max_kilobytes' => (int) config('brand_images.max_kilobytes', 2048),
                 'max_width' => (int) config('brand_images.max_width', 4000),

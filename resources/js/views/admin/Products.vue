@@ -122,6 +122,10 @@
                         <Field label="SKU interno" :error="fieldError('sku')"><input v-model="form.sku" class="input uppercase" placeholder="Se genera automáticamente"></Field>
                         <Field label="Presentación" :error="fieldError('presentation')"><input v-model="form.presentation" class="input" maxlength="100" placeholder="Por ejemplo: 1 L o 5 L"></Field>
                         <Field label="Precio" :error="fieldError('price')"><input v-model="form.price" type="number" min="0" step="0.01" class="input" required></Field>
+                        <Field label="Afectación tributaria" :error="fieldError('tax_affectation')">
+                            <select v-model="form.tax_affectation" class="input"><option value="">Pendiente de clasificación</option><option value="10">Gravado: operación onerosa</option><option value="20">Exonerado: operación onerosa</option><option value="30">Inafecto: operación onerosa</option></select>
+                            <small class="text-slate-500">La clasificación es explícita y no modifica el precio final ni la existencia.</small>
+                        </Field>
                         <section class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2" aria-labelledby="product-barcodes-title">
                             <div class="flex flex-wrap items-center justify-between gap-2">
                                 <div><h3 id="product-barcodes-title" class="font-semibold text-slate-800">Códigos de barras comerciales</h3><p class="text-sm text-slate-600">Asocia códigos impresos en el envase. No reemplazan el SKU ni el QR interno.</p></div>
@@ -648,9 +652,9 @@ async function openModal(product = null) {
     if (product) {
         preserveAssignedOption(categoryOptions.value, product.category, product.category_id);
         preserveAssignedOption(brandOptions.value, product.brand, product.brand_id);
-        form.value = { id: product.id, name: product.name, sku: product.sku || '', presentation: product.presentation || '', price: product.price, category_id: product.category?.id || '', brand_id: product.brand?.id || '', product_model_id: product.product_model_id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined, barcodes: [] };
+        form.value = { id: product.id, name: product.name, sku: product.sku || '', presentation: product.presentation || '', price: product.price, tax_affectation: product.tax_affectation || '', category_id: product.category?.id || '', brand_id: product.brand?.id || '', product_model_id: product.product_model_id || '', description: product.description ?? '', allow_reviews: product.allow_reviews !== false, images: [], specifications: undefined, barcodes: [] };
     } else {
-        form.value = { name: '', sku: '', presentation: '', price: 0, cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', product_model_id: '', description: '', allow_reviews: true, images: [], specifications: [], barcodes: [] };
+        form.value = { name: '', sku: '', presentation: '', price: 0, tax_affectation: '', cantidad_inicial: 0, warehouse_id: preferredWarehouse(), category_id: '', brand_id: '', product_model_id: '', description: '', allow_reviews: true, images: [], specifications: [], barcodes: [] };
     }
     showModal.value = true;
 
@@ -720,6 +724,7 @@ async function loadProductSpecifications(sequence = openingSequence, productId =
         selectedProduct.value = data;
         form.value.brand_id = data.brand_id || '';
         form.value.presentation = data.presentation || '';
+        form.value.tax_affectation = data.tax_affectation || '';
         form.value.product_model_id = data.product_model_id || '';
         await loadProductModels(data.brand_id, data.product_model);
         if (!isCurrentOpening(sequence, productId, mode)) return;
@@ -1161,6 +1166,7 @@ async function submitForm() {
         data.append('presentation', formState.presentation ?? '');
         data.append('brand_id', formState.brand_id ?? '');
         data.append('product_model_id', formState.product_model_id ?? '');
+        data.append('tax_affectation', formState.tax_affectation ?? '');
         data.append('allow_reviews', formState.allow_reviews ? '1' : '0');
         if (mode === 'create') {
             data.append('cantidad_inicial', formState.cantidad_inicial);

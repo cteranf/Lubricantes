@@ -9,6 +9,14 @@ class AuditSanitizer
 {
     private const FORBIDDEN_KEY_PATTERN = '/password|token|secret|authorization|cookie|payload|card|credential|signature|receipt|file|checkout|account_number|cci/i';
 
+    private const CHANGED_FIELDS = [
+        'name', 'email', 'phone', 'can_deliver', 'show_reviews_publicly', 'accept_new_reviews',
+        'require_moderation', 'commercial_name', 'legal_name', 'tax_id_type', 'tax_id_number',
+        'country_code', 'fiscal_address', 'contact_email', 'contact_phone', 'logo', 'boleta_enabled',
+        'factura_enabled', 'default_receipt_type', 'connection_type', 'provider_name', 'environment',
+        'document_type', 'document_number', 'billing_address',
+    ];
+
     public function snapshot(string $action, ?array $values): ?array
     {
         if ($values === null) {
@@ -63,7 +71,7 @@ class AuditSanitizer
             }
 
             if ($key === 'changed_fields') {
-                if (! is_string($value) || strlen($value) > 240 || preg_match('/\A(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation|commercial_name|legal_name|tax_id_type|tax_id_number|country_code|fiscal_address|contact_email|contact_phone|logo|boleta_enabled|factura_enabled|default_receipt_type)(?:,(?:name|email|phone|can_deliver|show_reviews_publicly|accept_new_reviews|require_moderation|commercial_name|legal_name|tax_id_type|tax_id_number|country_code|fiscal_address|contact_email|contact_phone|logo|boleta_enabled|factura_enabled|default_receipt_type))*\z/D', $value) !== 1) {
+                if (! is_string($value) || strlen($value) > 240 || ! $this->isChangedFieldsList($value)) {
                     throw new InvalidArgumentException('La lista de campos de auditoría no es válida.');
                 }
             } elseif ($key === 'reason') {
@@ -157,5 +165,12 @@ class AuditSanitizer
         if (! is_string($encoded) || strlen($encoded) > $maxBytes) {
             throw new InvalidArgumentException('La auditoría excede el tamaño permitido.');
         }
+    }
+
+    private function isChangedFieldsList(string $value): bool
+    {
+        $fieldPattern = implode('|', array_map(static fn (string $field): string => preg_quote($field, '/'), self::CHANGED_FIELDS));
+
+        return preg_match('/\A(?:'.$fieldPattern.')(?:,(?:'.$fieldPattern.'))*\z/D', $value) === 1;
     }
 }

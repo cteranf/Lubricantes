@@ -21,12 +21,17 @@ class OrderItem extends Model
         'regular_price',
         'promotion_id',
         'subtotal',
+        'tax_snapshot',
     ];
 
     public function order()
     {
         return $this->belongsTo(Order::class);
     }
+
+    protected $casts = [
+        'tax_snapshot' => 'array',
+    ];
 
     public function product()
     {

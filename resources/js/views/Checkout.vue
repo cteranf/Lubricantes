@@ -131,9 +131,10 @@
                         </button>
                     </div>
                     <section v-if="priceChangePrompt" class="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950" role="alert" aria-live="polite">
-                        <h2 class="font-bold">El precio cambió</h2>
-                        <p class="text-sm">El total que revisaste era S/ {{ priceChangePrompt.previousTotal }}. El nuevo total es <strong>S/ {{ priceChangePrompt.total }}</strong>. Revisa los precios actualizados antes de continuar.</p>
-                        <button type="button" class="min-h-11 rounded-lg bg-amber-800 px-4 font-bold text-white disabled:opacity-50" :disabled="processing" @click="acceptUpdatedPrice">{{ processing ? 'Actualizando pedido…' : 'Confirmar el nuevo total' }}</button>
+                        <h2 class="font-bold">{{ priceChangePrompt.kind === 'tax' ? 'El cálculo tributario cambió' : 'El precio cambió' }}</h2>
+                        <p v-if="priceChangePrompt.kind === 'tax'" class="text-sm">{{ priceChangePrompt.message }} El total final permanece en S/ <strong>{{ priceChangePrompt.total }}</strong>. Revisa el desglose actualizado antes de continuar.</p>
+                        <p v-else class="text-sm">El total que revisaste era S/ {{ priceChangePrompt.previousTotal }}. El nuevo total es <strong>S/ {{ priceChangePrompt.total }}</strong>. Revisa los precios actualizados antes de continuar.</p>
+                        <button type="button" class="min-h-11 rounded-lg bg-amber-800 px-4 font-bold text-white disabled:opacity-50" :disabled="processing" @click="acceptUpdatedPrice">{{ processing ? 'Actualizando pedido…' : priceChangePrompt.kind === 'tax' ? 'Confirmar desglose' : 'Confirmar el nuevo total' }}</button>
                     </section>
                     <button :disabled="processing || !canSubmit || Boolean(priceChangePrompt)" class="min-h-12 w-full rounded-xl bg-green-600 px-4 font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">{{ processing ? 'Procesando…' : 'Confirmar pedido' }}</button>
                 </form>
@@ -164,6 +165,22 @@
                         <div class="flex justify-between"><span>Subtotal de productos</span><span>S/ {{ money(checkoutPriceSummary.productSubtotal) }}</span></div>
                         <div class="flex justify-between"><span>Costo de envío</span><b :class="form.delivery_type === 'pickup' || quote?.has_coverage ? 'text-emerald-700' : 'text-slate-600'">{{ shippingLabel }}</b></div>
                         <div class="mt-4 flex justify-between border-t pt-4 text-xl font-bold"><span>Total actual</span><span>S/ {{ money(quotedTotal) }}</span></div>
+                        <section class="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm" aria-labelledby="tax-preview-heading" aria-live="polite">
+                            <h3 id="tax-preview-heading" class="font-bold text-slate-900">Desglose tributario</h3>
+                            <p v-if="taxPreviewLoading" class="mt-1 text-slate-600" role="status">Actualizando desglose…</p>
+                            <p v-else-if="taxPreviewError" class="mt-1 text-amber-900" role="status">{{ taxPreviewError }}</p>
+                            <template v-else-if="taxPreview?.status === 'complete'">
+                                <p class="mt-1 text-xs text-slate-600">Precios finales con impuestos incluidos · tasas efectivas desde {{ taxPreview.effective_from }}</p>
+                                <div class="mt-2 flex justify-between"><span>Base gravada</span><span>S/ {{ money(taxPreview.totals.taxable_base_minor) }}</span></div>
+                                <div class="flex justify-between"><span>IGV</span><span>S/ {{ money(taxPreview.totals.igv_minor) }}</span></div>
+                                <div class="flex justify-between"><span>IPM</span><span>S/ {{ money(taxPreview.totals.ipm_minor) }}</span></div>
+                                <div v-if="Number(taxPreview.totals.exempt_base_minor) > 0" class="flex justify-between"><span>Base exonerada</span><span>S/ {{ money(taxPreview.totals.exempt_base_minor) }}</span></div>
+                                <div v-if="Number(taxPreview.totals.unaffected_base_minor) > 0" class="flex justify-between"><span>Base inafecta</span><span>S/ {{ money(taxPreview.totals.unaffected_base_minor) }}</span></div>
+                                <p class="mt-2 border-t pt-2 text-xs text-slate-600">El desglose no altera el total final del pedido.</p>
+                            </template>
+                            <p v-else-if="taxPreview?.status === 'review_required'" class="mt-1 text-amber-900">{{ taxPendingMessage(taxPreview) }}</p>
+                            <p v-else class="mt-1 text-slate-600">El desglose está pendiente de configuración o clasificación. Se conserva el total comercial mostrado.</p>
+                        </section>
                         <div v-if="form.receipt_request.type" class="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700"><b>Solicitud de comprobante</b><p class="mt-1">{{ selectedReceiptLabel }}</p><p v-if="form.receipt_request.recipient_name">{{ form.receipt_request.recipient_name }}</p><p v-if="form.receipt_request.identity_number">{{ form.receipt_request.identity_type }} · {{ form.receipt_request.identity_number }}</p><p>{{ form.receipt_request.email }}</p><p v-if="form.receipt_request.billing_address">{{ form.receipt_request.billing_address }}</p></div>
                         <p v-if="form.delivery_type === 'delivery'" class="text-xs text-slate-500">Laravel recalculará precios, stock y tarifa al confirmar.</p>
                     </div>
@@ -197,6 +214,11 @@ const retryAttempted = ref(false);
 const reservationExpiredMessage = ref('');
 const priceChangePrompt = ref(null);
 const acceptedPriceConfirmationToken = ref(null);
+const acceptedTaxQuoteToken = ref(null);
+const taxQuoteToken = ref(null);
+const taxPreview = ref(null);
+const taxPreviewLoading = ref(false);
+const taxPreviewError = ref('');
 const addresses = ref([]), legacyAddresses = ref([]), legacyConfirmationRequired = ref(false), legacyUnrecognizedCount = ref(0), addressesLoading = ref(true), showAddressForm = ref(false), savingAddress = ref(false);
 const departments = ref([]), provinces = ref([]), districts = ref([]);
 const territoryLoading = ref({ departments: false, provinces: false, districts: false });
@@ -207,6 +229,7 @@ const receiptOptionsLoading = ref(true);
 const receiptOptionsReady = ref(false);
 const receiptErrors = ref({});
 let quoteRequest = 0;
+let taxQuoteRequest = 0;
 const form = ref({ address_id: null, phone: '', payment_method: 'card', delivery_type: 'delivery', pickup_branch_id: null, receipt_request: { type: 'boleta', identity_type: '', identity_number: '', recipient_name: authStore.user?.name || '', billing_address: '', email: authStore.user?.email || '' } });
 const addressForm = ref({ label: '', recipient_name: authStore.user?.name || '', phone: authStore.user?.phone || '', address: '', reference: '', department_id: null, province_id: null, district_id: null });
 const paymentMethods = ref([]);
@@ -218,7 +241,7 @@ const pickupAvailable = computed(() => pickupBranchesLoaded.value && !pickupBran
 const canSubmitDelivery = computed(() => form.value.delivery_type === 'delivery' && Boolean(form.value.address_id && quote.value?.has_coverage && !quoteLoading.value));
 const canSubmitPickup = computed(() => form.value.delivery_type === 'pickup' && pickupAvailable.value && Boolean(selectedBranch.value));
 const hasPaymentMethod = computed(() => Boolean(form.value.payment_method && paymentMethods.value.some(m => m.value === form.value.payment_method)));
-const canSubmit = computed(() => receiptOptionsReady.value && cartStore.items.length > 0 && hasPaymentMethod.value && (canSubmitDelivery.value || canSubmitPickup.value));
+const canSubmit = computed(() => receiptOptionsReady.value && !taxPreviewLoading.value && Boolean(taxQuoteToken.value) && cartStore.items.length > 0 && hasPaymentMethod.value && (canSubmitDelivery.value || canSubmitPickup.value));
 const boletaIdentityRequired = computed(() => form.value.receipt_request.type === 'boleta' && toMinor(quotedTotal.value) > toMinor(receiptOptions.value.boleta_identification_threshold || '700.00'));
 const selectedReceiptLabel = computed(() => receiptOptions.value.enabled_types.find(item => item.value === form.value.receipt_request.type)?.label || 'Comprobante');
 const selectedDeliveryAddress = computed(() => addresses.value.find(address => Number(address.id) === Number(form.value.address_id)));
@@ -314,10 +337,11 @@ function selectDelivery(type) {
     if (type === 'pickup' && !pickupAvailable.value) return;
     priceChangePrompt.value = null;
     acceptedPriceConfirmationToken.value = null;
+    acceptedTaxQuoteToken.value = null;
     form.value.delivery_type = type;
     loadPaymentMethods(type);
     if (type === 'delivery') requestQuote(form.value.address_id);
-    else { quote.value = null; quoteLoading.value = false; quoteRequest++; }
+    else { quote.value = null; quoteLoading.value = false; quoteRequest++; void refreshTaxPreview('0.00'); }
 }
 
 async function loadPickupBranches() {
@@ -344,7 +368,37 @@ async function loadDepartments() { territoryLoading.value.departments = true; tr
 async function loadProvinces(departmentId) { provinces.value = []; districts.value = []; if (!departmentId) return; territoryLoading.value.provinces = true; try { provinces.value = (await api.get('/location/provinces', { params: { department_id: departmentId } })).data; } finally { territoryLoading.value.provinces = false; } }
 async function loadDistricts(provinceId) { districts.value = []; if (!provinceId) return; territoryLoading.value.districts = true; try { districts.value = (await api.get('/location/districts', { params: { province_id: provinceId } })).data; } finally { territoryLoading.value.districts = false; } }
 async function saveAddress() { savingAddress.value = true; try { const address = (await api.post('/addresses', addressForm.value)).data; addresses.value.unshift(address); form.value.address_id = address.id; form.value.phone = address.phone; showAddressForm.value = false; } catch (error) { toast.add({ severity: 'error', summary: 'Dirección inválida', detail: Object.values(error.response?.data?.errors || {})[0]?.[0] || error.message, life: 5000 }); } finally { savingAddress.value = false; } }
-async function requestQuote(addressId) { const current = ++quoteRequest; quote.value = null; if (!addressId || form.value.delivery_type !== 'delivery') return; quoteLoading.value = true; try { const result = (await api.post('/checkout/shipping-quote', { address_id: addressId })).data; if (current === quoteRequest) quote.value = result; } catch (error) { if (current === quoteRequest) quote.value = { has_coverage: false, message: error.response?.data?.message || 'No se pudo calcular el envío.' }; } finally { if (current === quoteRequest) quoteLoading.value = false; } }
+async function requestQuote(addressId) { const current = ++quoteRequest; quote.value = null; acceptedPriceConfirmationToken.value = null; acceptedTaxQuoteToken.value = null; if (!addressId || form.value.delivery_type !== 'delivery') return; quoteLoading.value = true; try { const result = (await api.post('/checkout/shipping-quote', { address_id: addressId })).data; if (current === quoteRequest) { quote.value = result; if (result.has_coverage) await refreshTaxPreview(result.shipping_amount); } } catch (error) { if (current === quoteRequest) quote.value = { has_coverage: false, message: error.response?.data?.message || 'No se pudo calcular el envío.' }; } finally { if (current === quoteRequest) quoteLoading.value = false; } }
+
+async function refreshTaxPreview(shippingAmount = form.value.delivery_type === 'delivery' && quote.value?.has_coverage ? quote.value.shipping_amount : '0.00') {
+    const request = ++taxQuoteRequest;
+    if (!cartStore.items.length) { taxPreview.value = null; taxQuoteToken.value = null; return; }
+    taxPreviewLoading.value = true;
+    taxPreviewError.value = '';
+    try {
+        const response = (await api.post('/cart', {
+            items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })),
+            shipping_amount: money(shippingAmount),
+        })).data;
+        if (request !== taxQuoteRequest) return;
+        cartStore.applyPriceQuotes(response.items);
+        taxPreview.value = response.tax_preview || null;
+        taxQuoteToken.value = response.tax_quote_token || null;
+    } catch (error) {
+        if (request === taxQuoteRequest) {
+            taxPreviewError.value = error.response?.data?.message || 'No se pudo actualizar el desglose tributario.';
+            taxQuoteToken.value = null;
+        }
+    } finally {
+        if (request === taxQuoteRequest) taxPreviewLoading.value = false;
+    }
+}
+
+function taxPendingMessage(snapshot) {
+    if (snapshot?.missing_fields?.includes('shipping_mixed_affectations')) return 'El cálculo tributario del envío cobrado con productos de afectaciones distintas está pendiente de revisión contable. Se conserva el costo de envío y el total final; no se afirmará un impuesto para ese cargo.';
+    if (snapshot?.missing_fields?.includes('shipping_treatment_unresolved')) return 'El tratamiento tributario del envío cobrado para esta combinación está pendiente de revisión. Se conserva el total final.';
+    return 'Este desglose requiere revisión antes de preparar un documento. El total del checkout no cambia.';
+}
 
 /**
  * Creates the order and triggers payment.
@@ -362,6 +416,7 @@ async function submitOrder(isRetry = false) {
             receipt_request: { ...form.value.receipt_request, identity_type: form.value.receipt_request.type === 'factura' ? 'RUC' : (form.value.receipt_request.identity_type || null) },
             expected_total: money(quotedTotal.value),
             ...(acceptedPriceConfirmationToken.value ? { price_confirmation_token: acceptedPriceConfirmationToken.value } : {}),
+            ...((acceptedTaxQuoteToken.value || taxQuoteToken.value) ? { tax_quote_token: acceptedTaxQuoteToken.value || taxQuoteToken.value } : {}),
             items: cartStore.items.map(item => ({ product_id: item.product_id, quantity: item.quantity })),
             address_id: form.value.delivery_type === 'delivery' ? form.value.address_id : null,
             shipping_info: form.value.delivery_type === 'delivery' ? {} : { phone: form.value.phone },
@@ -378,11 +433,15 @@ async function submitOrder(isRetry = false) {
                 const body = orderError.response.data;
                 const previousTotal = money(quotedTotal.value);
                 priceChangePrompt.value = {
+                    kind: 'price',
                     previousTotal,
                     total: money(body.total),
                     confirmationToken: body.confirmation_token,
                 };
                 acceptedPriceConfirmationToken.value = null;
+                acceptedTaxQuoteToken.value = null;
+                if (body.tax_preview) taxPreview.value = body.tax_preview;
+                if (body.tax_quote_token) taxQuoteToken.value = body.tax_quote_token;
                 cartStore.applyPriceQuotes((body.items || []).map(line => ({
                     product_id: line.product_id,
                     regular_price: line.regular_price,
@@ -391,6 +450,21 @@ async function submitOrder(isRetry = false) {
                 if (quote.value && form.value.delivery_type === 'delivery') {
                     quote.value = { ...quote.value, shipping_amount: body.shipping_amount };
                 }
+                return;
+            }
+            if (orderError.response?.status === 409 && orderError.response?.data?.code === 'tax_calculation_changed') {
+                const body = orderError.response.data;
+                taxPreview.value = body.tax_preview || null;
+                taxQuoteToken.value = body.tax_quote_token || null;
+                cartStore.applyPriceQuotes((body.items || []).map(line => ({ product_id: line.product_id, regular_price: line.regular_price, applied_price: line.price })));
+                acceptedTaxQuoteToken.value = null;
+                priceChangePrompt.value = {
+                    kind: 'tax',
+                    previousTotal: money(quotedTotal.value),
+                    total: money(body.total),
+                    taxQuoteToken: body.tax_quote_token,
+                    message: body.message || 'La configuración o clasificación tributaria cambió.',
+                };
                 return;
             }
             if (orderError.response?.status === 409 && orderError.response?.data?.code === 'receipt_settings_changed') {
@@ -498,13 +572,20 @@ async function submitOrder(isRetry = false) {
 }
 
 function acceptUpdatedPrice() {
-    if (processing.value || !priceChangePrompt.value?.confirmationToken) return;
-    acceptedPriceConfirmationToken.value = priceChangePrompt.value.confirmationToken;
+    if (processing.value || !priceChangePrompt.value) return;
+    if (priceChangePrompt.value.kind === 'tax') {
+        if (!priceChangePrompt.value.taxQuoteToken) return;
+        acceptedTaxQuoteToken.value = priceChangePrompt.value.taxQuoteToken;
+    } else {
+        if (!priceChangePrompt.value.confirmationToken) return;
+        acceptedPriceConfirmationToken.value = priceChangePrompt.value.confirmationToken;
+    }
     priceChangePrompt.value = null;
     submitOrder(false);
 }
 
 watch(() => form.value.address_id, addressId => requestQuote(addressId));
+watch(() => cartStore.items.map(item => `${item.product_id}:${item.quantity}`).join('|'), () => { if (!quoteLoading.value) void refreshTaxPreview(); });
 watch(() => addressForm.value.department_id, async id => { addressForm.value.province_id = null; addressForm.value.district_id = null; await loadProvinces(id); });
 watch(() => addressForm.value.province_id, async id => { addressForm.value.district_id = null; await loadDistricts(id); });
 onMounted(() => {

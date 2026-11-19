@@ -1,0 +1,34 @@
+# Facturación electrónica — base de la fase 1
+
+## Alcance implementado
+
+La habilitación comercial es `ELECTRONIC_INVOICING_ENABLED`, desactivada por defecto. Para habilitarla localmente, configura `ELECTRONIC_INVOICING_ENABLED=true` en el entorno de la aplicación y reinicia el proceso que sirve Laravel. Se observa en Datos del negocio, pero no forma parte de los campos editables de BusinessProfile. La ruta administrativa de configuración persiste mecanismo (`direct_sunat` o `provider_api`) y entorno (`testing` por defecto o `production`); no admite credenciales. La API declara el adaptador no disponible hasta que exista una integración real.
+
+La interfaz `ElectronicInvoiceGateway` reserva `send` para transmitir un intento inmutable e idempotente y `query` para reconciliar el resultado de un intento previamente transmitido. El núcleo debe ser responsable de autorización, snapshots, validación, control de versión, idempotencia, auditoría y estados; el adaptador futuro de traducir el contrato interno al proveedor, custodiar credenciales fuera de estos ajustes y devolver un resultado normalizado sin guardar payloads crudos. Un timeout con resultado incierto deberá bloquear cambios de conexión/entorno hasta reconciliarse. En esta fase no se crean intentos ni se simulan estados del proveedor.
+
+Facturación y administración pueden preparar y corregir borradores desde el detalle de un pedido. La preparación usa exclusivamente los datos actuales del perfil emisor y los snapshots de receptor, productos e importes del checkout/pedido. Se indica la procedencia y se enumeran datos ausentes; no se recuperan datos históricos faltantes desde el perfil actual, no se alteran snapshots y no se calcula IGV. El precio monetario se representa con dos decimales mediante `MoneyService`.
+
+Cada borrador conserva tipo boleta/factura, referencia interna UUID separada de la futura serie/correlativo, entorno y mecanismo elegidos, versión optimista, actor y fechas. `preparation_key` idempotente permite reintentar una solicitud sin duplicar el borrador; una clave nueva permite preparar otro documento posteriormente. Las correcciones se registran en el historial inmutable del documento con actor, versión y nombres de campos, sin valores tributarios personales; también se escriben en la bitácora central. La emisión no está implementada: el endpoint devuelve `connection_not_implemented` con HTTP 503 y mantiene el documento como borrador, sin intento ni aceptación simulada.
+
+## Persistencia
+
+La migración `2026_11_19_071000_create_electronic_invoice_foundation_tables.php` crea settings singleton, documentos, eventos y la estructura futura para intentos. Las claves foráneas restringen la eliminación de pedidos y documentos con intentos; los eventos se eliminan con su documento. Se debe validar con SQLite aislado y, cuando haya una base desechable autorizada, MySQL/InnoDB. No ejecutar migraciones sobre la base local compartida como parte de pruebas.
+
+No hay endpoint público ni descarga para clientes en esta fase. Cuando exista un documento publicado, su lectura deberá requerir autenticación y comprobar que el usuario sea dueño del pedido. El middleware vigente deja la bandeja y borradores accesibles solo a admin y Facturación activos; Tesorería conserva sus rutas independientes.
+
+## Validación de Fase 1 (2026-11-19)
+
+- Validación MySQL desechable: esquema `lubristore_einvoice_phase1_20261119`, MySQL 8.4.3 e InnoDB. La migración de esta fase se aplicó, revirtió y reaplicó allí; se verificaron nueve foreign keys, los índices únicos de singleton y de clave de preparación, y el rechazo directo de un segundo singleton. Los pedidos e ítems previos a rollback permanecieron intactos.
+- Idempotencia/concurrencia por solicitudes HTTP autenticadas e independientes: dos POST simultáneos con la misma `preparation_key` devolvieron 201 y un único borrador; dos PUT con la misma versión devolvieron 200 y 409; una clave nueva creó intencionalmente un borrador distinto.
+- Reglas: administrador configuró; administrador y Facturación prepararon/corrigieron; cliente, tesorería y Facturación inactivo recibieron 403 en las rutas probadas. Con el módulo deshabilitado, el detalle existente siguió disponible, pero preparación, corrección y emisión devolvieron 409. La emisión bloqueada no creó intentos ni cambió el borrador. Preparación y corrección conservaron pago, reserva, inventario y snapshots originales del pedido/checkout.
+- Pruebas aprobadas en el esquema aislado: `ElectronicInvoicingFoundationTest` (4 tests, 53 assertions), `ReceiptBillingTest` (11, 94), `ElectronicInvoicingMigrationTest` (1, 12) y `ElectronicInvoicingFrontendTest` (1, 17). El build no se repitió porque el lote no cambió Vue/JavaScript desde el build aprobado previamente.
+- Se corrigió `ElectronicDocumentService::updateDraft()` para rechazar modificaciones mientras `ELECTRONIC_INVOICING_ENABLED` es falso, manteniendo la lectura de documentos existentes. La regresión verifica 409 y ausencia de cambios de versión, estado e historial.
+- Revisión visual parcial: Datos del negocio se abrió con usuario sintético y mostró el estado informativo comercial. No se completó la pantalla de facturación en escritorio/móvil: un `public/hot` preexistente apuntaba a `http://[::1]:5173`, cuyo módulo devolvía un tipo MIME inválido; los servidores QA dejaron de escuchar en los puertos 8037/8012 antes de terminar. No se considera validada visualmente la pantalla de configuración, listado, preparación ni corrección de borradores. Repetir manualmente en escritorio y móvil en `/admin/electronic-invoicing` con `ELECTRONIC_INVOICING_ENABLED=true` y datos aislados.
+
+Para aplicar únicamente la migración en la instalación local, después de revisar el destino de conexión: `php artisan migrate --path=database/migrations/2026_11_19_071000_create_electronic_invoice_foundation_tables.php`.
+
+La evolución del cálculo tributario, las tasas, afectaciones, snapshots y límites de emisión de la Fase 2 se documenta en [FACTURACION_ELECTRONICA_FASE_2.md](FACTURACION_ELECTRONICA_FASE_2.md). Las notas de esta página describen el alcance original de Fase 1.
+
+## Siguiente fase: decisiones necesarias
+
+Antes de calcular tributos o implementar adaptadores, el negocio/contabilidad debe definir: tratamiento IGV y afectación por producto; impuestos y descuentos por línea; tratamiento tributario del envío; emisión total o parcial con varios abonos; momento de emisión (pago total, despacho u otro); series y correlativos por sucursal/tipo; notas de crédito/débito y anulaciones; datos obligatorios y reglas SUNAT vigentes; proveedor elegido, credenciales y custodia/rotación; política ante timeout y consultas de estado; publicación/descarga privada para clientes; formato PDF/XML y conservación legal. Ninguna de estas reglas se presume en la base de borradores.

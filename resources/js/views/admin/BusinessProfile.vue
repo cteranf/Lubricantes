@@ -100,6 +100,12 @@
                     <p v-if="pendingFields.length === 0" class="mt-1 text-sm text-amber-900">La ficha tiene completos los datos identificados para esta etapa.</p>
                     <ul v-else class="mt-2 grid gap-1 text-sm text-amber-900 sm:grid-cols-2"><li v-for="item in pendingFields" :key="item.field">• {{ item.label }}</li></ul>
                 </section>
+                <section class="rounded-2xl border border-slate-200 bg-slate-50 p-5" aria-labelledby="electronic-invoice-heading">
+                    <h2 id="electronic-invoice-heading" class="text-lg font-bold text-slate-900">Facturación electrónica</h2>
+                    <p class="mt-2 text-sm text-slate-700">Módulo comercial: <strong>{{ electronicInvoicing.enabled ? 'habilitado' : 'no habilitado' }}</strong>.</p>
+                    <p class="mt-1 text-xs text-slate-600">Esta disponibilidad es informativa y no se puede cambiar desde Datos del negocio. La configuración operativa está en el módulo administrativo.</p>
+                    <router-link to="/admin/electronic-invoicing" class="mt-3 inline-flex rounded-lg text-sm font-bold text-blue-700 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">Abrir configuración operativa</router-link>
+                </section>
 
                 <div class="flex justify-end">
                     <Button type="submit" label="Guardar datos del negocio" icon="pi pi-save" :loading="saving" :disabled="saving" class="w-full sm:w-auto" />
@@ -143,6 +149,7 @@ const operational = reactive({ currency: 'PEN', currency_source: 'config/payment
 const logoLimits = reactive({ max_kilobytes: 2048, max_width: 4000, max_height: 2500 });
 const logoLimitText = computed(() => `${logoLimits.max_kilobytes / 1024} MB`);
 const pendingFields = ref([]);
+const electronicInvoicing = ref({ enabled: false });
 const localLogo = ref(null);
 const localObjectUrl = ref('');
 const removeLogo = ref(false);
@@ -156,6 +163,7 @@ function setPayload(payload) {
     Object.assign(operational, data.operational_settings ?? {});
     Object.assign(logoLimits, data.logo_limits ?? {});
     pendingFields.value = data.pending_fields ?? [];
+    electronicInvoicing.value = data.electronic_invoicing ?? { enabled: false };
     removeLogo.value = false;
 }
 async function load() {

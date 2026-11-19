@@ -15,6 +15,7 @@ class AdminProductListResource extends JsonResource
             'presentation' => $this->presentation,
             'description' => $this->description,
             'price' => (string) $this->price,
+            'tax_affectation' => $this->tax_affectation,
             'is_active' => (bool) $this->is_active,
             'allow_reviews' => (bool) $this->allow_reviews,
             'product_model_id' => $this->product_model_id === null ? null : (int) $this->product_model_id,

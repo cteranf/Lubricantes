@@ -54,6 +54,9 @@ class Order extends Model
         'subtotal',
         'discount_total',
         'shipping_amount',
+        'tax_calculation_status',
+        'tax_snapshot',
+        'tax_calculation_version',
         'shipping_address_id',
         'shipping_zone_id',
         'shipping_rate_id',
@@ -114,6 +117,7 @@ class Order extends Model
         'subtotal' => 'decimal:2',
         'discount_total' => 'decimal:2',
         'shipping_amount' => 'decimal:2',
+        'tax_snapshot' => 'array',
         'estimated_delivery_date' => 'date',
         'delivered_at' => 'datetime',
         'reserved_until' => 'datetime',
@@ -134,6 +138,11 @@ class Order extends Model
     public function items()
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function electronicDocuments()
+    {
+        return $this->hasMany(ElectronicDocument::class)->orderByDesc('id');
     }
 
     public function reservations()

@@ -145,6 +145,7 @@ const adminNavigationGroups = [
     ] },
     { id: 'administration', label: 'Administración', icon: 'pi pi-shield', children: [
         { label: 'Datos del negocio', to: '/admin/business-profile', icon: 'pi pi-briefcase' },
+        { label: 'Facturación electrónica', to: '/admin/electronic-invoicing', icon: 'pi pi-file-edit' },
         { label: 'Usuarios', to: '/admin/users', icon: 'pi pi-users' },
         { label: 'Auditoría', to: '/admin/auditoria', icon: 'pi pi-history' },
     ] },
