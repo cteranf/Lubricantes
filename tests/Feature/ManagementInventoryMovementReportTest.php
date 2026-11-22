@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ManagementInventoryMovementReportTest extends TestCase
@@ -24,7 +25,7 @@ class ManagementInventoryMovementReportTest extends TestCase
         return InventoryMovement::create(['warehouse_id' => $w->id, 'product_id' => $p->id, 'type' => $type, 'quantity' => $qty, 'quantity_before' => $before ?? 0, 'quantity_after' => $after ?? $qty, 'reason' => $reason, 'reference_type' => 'test', 'reference_id' => 'REF-'.$qty, 'created_at' => now()]);
     }
 
-    /** @dataProvider movementTypes */
+    #[DataProvider('movementTypes')]
     public function test_each_real_type_has_explicit_direction_and_signed_quantity(string $type, string $direction, int $signed): void
     {
         $branch = Branch::create(['code' => 'BT'.$type, 'name' => 'Sede', 'address' => 'Dir']);

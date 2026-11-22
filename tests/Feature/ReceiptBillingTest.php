@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Branch;
 use App\Models\BusinessProfile;
+use App\Models\ElectronicDocument;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ShippingRate;
@@ -243,6 +244,44 @@ class ReceiptBillingTest extends TestCase
             $this->getJson('/api/v1/billing/orders')->assertForbidden();
             $this->getJson('/api/v1/billing/orders/'.$order->id)->assertForbidden();
         }
+    }
+
+    public function test_billing_inbox_distinguishes_customer_request_from_each_electronic_document_state(): void
+    {
+        $customer = $this->customer();
+        $order = Order::create([
+            'user_id' => $customer->id, 'status' => 'pending', 'total' => 600, 'shipping_info' => [],
+            'payment_method' => 'transferencia', 'payment_status' => 'pending', 'delivery_type' => 'pickup', 'tracking_status' => 'pending',
+            'requested_receipt_type' => 'factura', 'requested_identity_type' => 'RUC', 'requested_identity_number' => '20987654321',
+            'requested_identity_required' => true, 'requested_recipient_name' => 'Receptor sintético', 'requested_receipt_email' => 'buyer@example.test',
+        ]);
+        $expectedLabels = [
+            'draft' => 'Borrador; no emitido', 'queued' => 'Pendiente de procesamiento', 'processing' => 'Procesando',
+            'submitted' => 'Enviado; resultado pendiente', 'uncertain' => 'Resultado incierto; requiere revisión manual',
+            'accepted' => 'Aceptado en ambiente de pruebas', 'accepted_observed' => 'Aceptado con observaciones en ambiente de pruebas',
+            'rejected' => 'Rechazado por SUNAT pruebas', 'sunat_exception' => 'Excepción SOAP de SUNAT; numeración conservada',
+        ];
+        foreach ($expectedLabels as $status => $label) {
+            ElectronicDocument::query()->create([
+                'order_id' => $order->id, 'draft_reference' => (string) Str::uuid(), 'preparation_key' => (string) Str::uuid(),
+                'document_type' => 'factura', 'status' => $status, 'environment' => 'testing', 'connection_type' => 'direct_sunat',
+                'seller_snapshot' => [], 'recipient_snapshot' => [], 'lines_snapshot' => [], 'amounts_snapshot' => ['total' => '600.00'],
+                'currency' => 'PEN', 'tax_calculation_status' => 'pending_definition', 'version' => 1, 'prepared_at' => now(),
+            ]);
+        }
+
+        Sanctum::actingAs(User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $list = $this->getJson('/api/v1/billing/orders')->assertOk()
+            ->assertJsonPath('data.0.receipt_status', 'requested_not_issued')
+            ->assertJsonPath('data.0.requested_receipt_type', 'factura');
+        $documents = collect($list->json('data.0.electronic_documents'))->keyBy('status');
+        $this->assertCount(count($expectedLabels), $documents);
+        foreach ($expectedLabels as $status => $label) {
+            $this->assertSame($label, $documents[$status]['status_label']);
+        }
+
+        $detail = $this->getJson('/api/v1/billing/orders/'.$order->id)->assertOk();
+        $this->assertCount(count($expectedLabels), $detail->json('data.electronic_documents'));
     }
 
     public function test_billing_role_can_only_be_assigned_by_admin_user_management(): void

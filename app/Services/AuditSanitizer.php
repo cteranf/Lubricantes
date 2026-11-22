@@ -15,6 +15,7 @@ class AuditSanitizer
         'country_code', 'fiscal_address', 'contact_email', 'contact_phone', 'logo', 'boleta_enabled',
         'factura_enabled', 'default_receipt_type', 'connection_type', 'provider_name', 'environment',
         'document_type', 'document_number', 'billing_address',
+        'sunat_credentials', 'signing_certificate', 'signing_certificate_removed',
     ];
 
     public function snapshot(string $action, ?array $values): ?array

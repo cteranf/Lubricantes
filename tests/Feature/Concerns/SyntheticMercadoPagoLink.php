@@ -5,6 +5,9 @@ namespace Tests\Feature\Concerns;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\PaymentPreferenceService;
+use Dotenv\Dotenv;
+use Illuminate\Support\Facades\DB;
+use MercadoPago\Exceptions\MPApiException;
 use MercadoPago\MercadoPagoConfig;
 use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
@@ -75,10 +78,15 @@ trait SyntheticMercadoPagoLink
             'MERCADOPAGO_ACCESS_TOKEN' => 'access_token',
             'MERCADOPAGO_WEBHOOK_SECRET' => 'webhook_secret',
         ] as $environmentKey => $configKey) {
+            $knownSyntheticValue = match ($configKey) {
+                'public_key' => 'TEST-SYNTHETIC-PUBLIC-KEY',
+                'access_token' => 'TEST-SYNTHETIC-ACCESS-TOKEN',
+                'webhook_secret' => 'synthetic-local-webhook-secret',
+            };
             $environmentValue = getenv($environmentKey);
             $configuredValue = is_array($payment) ? ($payment[$configKey] ?? null) : null;
-            if (($environmentValue !== false && $environmentValue !== '')
-                || (is_string($configuredValue) && $configuredValue !== '')) {
+            if (($environmentValue !== false && $environmentValue !== '' && $environmentValue !== $knownSyntheticValue)
+                || (is_string($configuredValue) && $configuredValue !== '' && $configuredValue !== $knownSyntheticValue)) {
                 $externalCredentialsAbsent = false;
             }
         }
@@ -92,20 +100,24 @@ trait SyntheticMercadoPagoLink
             try {
                 $contents = @file_get_contents(base_path('.env'));
                 if (is_string($contents)) {
-                    $ordinary = \Dotenv\Dotenv::parse($contents)['DB_DATABASE'] ?? null;
+                    $ordinary = Dotenv::parse($contents)['DB_DATABASE'] ?? null;
                 }
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Fail closed below without printing any ordinary configuration.
             }
             $facts['ordinary_database'] = $ordinary;
         }
-        $this->assertTrue($this->syntheticDatabaseGuardAllows($facts, false), 'Synthetic database configuration is not authorized.');
+        $allowed = $this->syntheticDatabaseGuardAllows($facts, false);
+        $this->assertTrue(
+            $allowed,
+            'Synthetic database configuration is not authorized; failed checks: '.implode(',', $this->syntheticDatabaseGuardFailureCodes($facts))
+        );
         // Read-only preflight: never probe an endpoint before its configuration
         // passes the local-only guard. Do not expose a connection error's text.
         $this->mysqlPreflightPdoOpened = false;
         $this->mysqlPreflightSelectAttempted = false;
         try {
-            $effective = \Illuminate\Support\Facades\DB::connection();
+            $effective = DB::connection();
             $pdo = $effective->getPdo();
             $this->mysqlPreflightPdoOpened = true;
             $facts['effective_driver'] = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
@@ -127,6 +139,57 @@ trait SyntheticMercadoPagoLink
             throw $this->safeConnectionFailure($category);
         }
         $this->assertTrue($this->syntheticDatabaseGuardAllows($facts), 'Synthetic database effective connection is not authorized.');
+    }
+
+    /** @return list<string> Safe names of failed checks; never includes configured values. */
+    private function syntheticDatabaseGuardFailureCodes(array $facts): array
+    {
+        $failures = [];
+        if (($facts['environment'] ?? null) !== 'testing') {
+            $failures[] = 'environment';
+        }
+        if (($facts['debug'] ?? null) !== false) {
+            $failures[] = 'debug';
+        }
+        if (! in_array($facts['driver'] ?? null, ['sqlite', 'mysql'], true)) {
+            $failures[] = 'driver';
+        }
+        if (($facts['external_credentials_absent'] ?? false) !== true) {
+            $failures[] = 'credentials';
+        }
+        foreach (['url', 'read', 'write'] as $override) {
+            if (! empty($facts[$override])) {
+                $failures[] = $override.'_override';
+            }
+        }
+        if (($facts['driver'] ?? null) === 'sqlite') {
+            if (($facts['database'] ?? null) !== ':memory:') {
+                $failures[] = 'sqlite_memory';
+            }
+
+            return $failures;
+        }
+        $name = $facts['database'] ?? null;
+        if (! is_string($name) || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $name) !== 1) {
+            $failures[] = 'database_name';
+        }
+        if (is_string($name) && (strcasecmp($name, 'lubristore_remote_payments_test') === 0
+            || strcasecmp($name, 'lubricantes') === 0
+            || ! is_string($facts['ordinary_database'] ?? null)
+            || strcasecmp($name, (string) ($facts['ordinary_database'] ?? '')) === 0)) {
+            $failures[] = 'ordinary_or_forbidden_database';
+        }
+        if (! in_array($facts['host'] ?? null, ['127.0.0.1', 'localhost', '::1'], true)) {
+            $failures[] = 'host';
+        }
+        if (! empty($facts['unix_socket'])) {
+            $failures[] = 'socket';
+        }
+        if (! ctype_digit((string) ($facts['port'] ?? '')) || (int) $facts['port'] < 1 || (int) $facts['port'] > 65535) {
+            $failures[] = 'port';
+        }
+
+        return $failures;
     }
 
     /** Classify only recognized numeric PDO driver codes; never inspect messages. */
@@ -227,9 +290,9 @@ trait SyntheticMercadoPagoLink
 
             public bool $missing = false;
 
-            public ?\Throwable $paymentFailure = null;
+            public ?Throwable $paymentFailure = null;
 
-            public ?\Throwable $merchantFailure = null;
+            public ?Throwable $merchantFailure = null;
 
             public int $paymentId;
 
@@ -262,7 +325,7 @@ trait SyntheticMercadoPagoLink
                         throw $this->merchantFailure;
                     }
                     if ($this->missing) {
-                        throw new \MercadoPago\Exceptions\MPApiException('Synthetic missing merchant order', new MPResponse(404, ['message' => 'not found']));
+                        throw new MPApiException('Synthetic missing merchant order', new MPResponse(404, ['message' => 'not found']));
                     }
 
                     return new MPResponse(200, $this->merchant);

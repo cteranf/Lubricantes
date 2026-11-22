@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Mockery;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -33,7 +34,7 @@ class TreasuryPaymentReassignmentAtomicityTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** @dataProvider physicalWriteFailures */
+    #[DataProvider('physicalWriteFailures')]
     public function test_each_physical_write_failure_rolls_back_the_complete_two_item_reassignment(string $point): void
     {
         $fixture = $this->fixture();
@@ -125,7 +126,7 @@ class TreasuryPaymentReassignmentAtomicityTest extends TestCase
         $this->assertCompleteRollback($fixture, $before);
     }
 
-    /** @dataProvider canceledOrderWriteFailures */
+    #[DataProvider('canceledOrderWriteFailures')]
     public function test_canceled_expired_order_is_not_partially_reopened_when_a_late_write_fails(string $point): void
     {
         $fixture = $this->fixture(true);
@@ -268,6 +269,12 @@ class TreasuryPaymentReassignmentAtomicityTest extends TestCase
             $products[] = $product;
             $originals[] = $reservation;
         }
+        if ($expireAutomatically) {
+            // Expire the fixture before creating a submitted proof. The
+            // expiration flow correctly preserves reservations under review.
+            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
+        }
+
         $submission = PaymentSubmission::create([
             'order_id' => $order->id,
             'channel' => 'yape',
@@ -283,10 +290,6 @@ class TreasuryPaymentReassignmentAtomicityTest extends TestCase
             'submitted_at' => now(),
             'idempotency_key' => 'atomicity-submission-'.Str::uuid(),
         ]);
-
-        if ($expireAutomatically) {
-            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
-        }
         $case = app(TreasuryPaymentResolutionService::class)->open($submission->id, $treasury->id);
         $transaction = PaymentTransaction::where('payment_submission_id', $submission->id)->firstOrFail();
 
@@ -395,6 +398,6 @@ class TreasuryPaymentReassignmentAtomicityTest extends TestCase
         $previous = new PDOException($message, $driverCode);
         $previous->errorInfo = [$sqlState, $driverCode, $message];
 
-        return new QueryException('statement', [], $previous);
+        return new QueryException('testing', 'statement', [], $previous);
     }
 }

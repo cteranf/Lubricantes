@@ -6,20 +6,22 @@ use App\Exceptions\PaymentLinkEvidenceException as LinkFailure;
 use App\Models\PaymentPreference;
 use App\Services\PaymentPreferenceService;
 use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
-use Tests\TestCase;
 use Tests\Support\PaymentLockSqlObserver;
+use Tests\TestCase;
 
 class PaymentPreferenceLockOrderTest extends TestCase
 {
     use RefreshDatabase;
     use SyntheticMercadoPagoLink;
 
-    /** @dataProvider transitions */
+    #[DataProvider('transitions')]
     public function test_link_changed_between_locator_and_lock_rejects_without_subsequent_writes(string $transition): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($transition) {
@@ -85,7 +87,7 @@ class PaymentPreferenceLockOrderTest extends TestCase
         return [['activate'], ['fail'], ['orphan']];
     }
 
-    /** @dataProvider terminalTransitions */
+    #[DataProvider('terminalTransitions')]
     public function test_closing_creation_is_idempotent(string $transition, string $state): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($transition, $state) {
@@ -142,7 +144,7 @@ class PaymentPreferenceLockOrderTest extends TestCase
             $physicalConstraint = false;
             try {
                 app(PaymentPreferenceService::class)->createFor($other, [], 'mercadopago');
-            } catch (\Illuminate\Database\QueryException $exception) {
+            } catch (QueryException $exception) {
                 $caught = true;
                 $physicalConstraint = ($exception->errorInfo[0] ?? null) === '23000'
                     && (int) ($exception->errorInfo[1] ?? 0) === ($sqlite ? 19 : 1062);

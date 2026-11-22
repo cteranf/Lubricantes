@@ -3,15 +3,19 @@
 namespace Tests\Feature;
 
 use App\Http\Resources\TreasuryPaymentRefundWorklistResource;
+use App\Models\Order;
 use App\Models\PaymentRefund;
 use App\Models\User;
+use App\Services\InventoryBalanceLockService;
 use App\Services\TreasuryPaymentRefundAvailabilityService;
 use App\Services\TreasuryPaymentRefundService;
 use App\Services\TreasuryPaymentRefundWorklistService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundServiceTest
 {
@@ -21,7 +25,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         config(['app.debug' => false, 'logging.default' => 'null']);
     }
 
-    /** @dataProvider readActors */
+    #[DataProvider('readActors')]
     public function test_read_authorization_precedes_all_financial_lookups(?string $role, bool $active, string $endpoint): void
     {
         $f = $this->fixture();
@@ -36,7 +40,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $dispatcher = DB::connection()->getEventDispatcher();
         $probe = clone $dispatcher;
         $lookups = 0;
-        $probe->listen(\Illuminate\Database\Events\QueryExecuted::class, function ($query) use (&$lookups): void {
+        $probe->listen(QueryExecuted::class, function ($query) use (&$lookups): void {
             $lookups += (int) preg_match('/\b(?:orders|payment_refunds)\b/i', $query->sql);
         });
         DB::connection()->setEventDispatcher($probe);
@@ -100,7 +104,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         }
     }
 
-    /** @dataProvider readActors */
+    #[DataProvider('readActors')]
     public function test_raw_query_authorization_precedes_duplicate_validation(?string $role, bool $active, string $endpoint): void
     {
         $f = $this->fixture();
@@ -178,7 +182,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $this->getJson($url)->assertOk();
     }
 
-    /** @dataProvider invalidReadFilters */
+    #[DataProvider('invalidReadFilters')]
     public function test_read_filters_are_strict_and_never_echo_values(array $query): void
     {
         $f = $this->fixture();
@@ -226,11 +230,11 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $f = $this->fixture();
         $this->actingAs($f['treasury'], 'sanctum');
         $original = $this->app->make(TreasuryPaymentRefundWorklistService::class);
-        $broken = new class(app(TreasuryPaymentRefundAvailabilityService::class), app(\App\Services\InventoryBalanceLockService::class)) extends TreasuryPaymentRefundWorklistService
+        $broken = new class(app(TreasuryPaymentRefundAvailabilityService::class), app(InventoryBalanceLockService::class)) extends TreasuryPaymentRefundWorklistService
         {
             protected function candidates(): Builder
             {
-                return \App\Models\Order::query()->from('missing_synthetic_worklist_table');
+                return Order::query()->from('missing_synthetic_worklist_table');
             }
         };
         $this->app->instance(TreasuryPaymentRefundWorklistService::class, $broken);
@@ -248,7 +252,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $this->assertTrue((int) DB::selectOne('SELECT 1 AS usable')->usable === 1);
     }
 
-    /** @dataProvider controlledReadConflicts */
+    #[DataProvider('controlledReadConflicts')]
     public function test_read_conflicts_are_private_and_never_return_partial_data(string $mode): void
     {
         $f = $this->fixture();
@@ -256,7 +260,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $original = $this->app->make(TreasuryPaymentRefundWorklistService::class);
         $service = $original;
         if ($mode === 'unstable') {
-            $service = new class(app(TreasuryPaymentRefundAvailabilityService::class), app(\App\Services\InventoryBalanceLockService::class), (int) $f['order']->id) extends TreasuryPaymentRefundWorklistService
+            $service = new class(app(TreasuryPaymentRefundAvailabilityService::class), app(InventoryBalanceLockService::class), (int) $f['order']->id) extends TreasuryPaymentRefundWorklistService
             {
                 public int $attempts = 0;
 
@@ -274,7 +278,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         } else {
             $count = $mode === 'candidates' ? 201 : 101;
             for ($i = 0; $i < $count; $i++) {
-                \App\Models\Order::create(['user_id' => $f['customer']->id, 'status' => 'confirmed', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'card', 'payment_status' => 'refund_pending']);
+                Order::create(['user_id' => $f['customer']->id, 'status' => 'confirmed', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'card', 'payment_status' => 'refund_pending']);
             }
         }
         $this->app->instance(TreasuryPaymentRefundWorklistService::class, $service);
@@ -330,7 +334,7 @@ class TreasuryPaymentRefundWorklistHttpTest extends TreasuryPaymentRefundService
         $dispatcher = $connection->getEventDispatcher();
         $probe = clone $dispatcher;
         $queries = 0;
-        $probe->listen(\Illuminate\Database\Events\QueryExecuted::class, function () use (&$queries): void {
+        $probe->listen(QueryExecuted::class, function () use (&$queries): void {
             $queries++;
         });
         $connection->setEventDispatcher($probe);

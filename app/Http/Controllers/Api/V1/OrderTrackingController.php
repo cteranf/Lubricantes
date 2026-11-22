@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\PaymentSubmission;
 use App\Services\OrderDeliveryService;
 use App\Services\ProductReviewService;
 use App\Support\EffectiveInventoryReservationStatus;
@@ -19,7 +20,7 @@ class OrderTrackingController extends Controller
      */
     public function show(Request $request, $id)
     {
-        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user', 'delivery:id,order_id,status', 'paymentSubmissions:id,order_id,status,amount,expected_amount,channel,submitted_at,reviewed_at,decision_reason'])->findOrFail($id);
+        $order = Order::with(['items.product.images', 'items.warehouse', 'items.reservation', 'user', 'delivery:id,order_id,status', 'paymentSubmissions:id,order_id,status,amount,expected_amount,channel,submitted_at,reviewed_at,decision_reason', 'paymentSubmissions.resolutionCase:id,payment_submission_id,status'])->findOrFail($id);
 
         $user = $request->user();
 
@@ -31,7 +32,7 @@ class OrderTrackingController extends Controller
 
         $reviewAccessByProduct = $this->reviews->trackingReviewAccess($order, $user);
         $delivery = $order->isPickup() ? null : $this->delivery->getCustomerTracking($order);
-        $paymentSubmissionStatus = $order->paymentSubmissions->first(fn ($submission) => in_array($submission->status, [\App\Models\PaymentSubmission::PENDING_REVIEW, \App\Models\PaymentSubmission::OBSERVED, \App\Models\PaymentSubmission::APPROVED, \App\Models\PaymentSubmission::MANUAL_RESOLUTION_REQUIRED], true))?->status;
+        $paymentSubmissionStatus = $order->paymentSubmissions->first(fn ($submission) => in_array($submission->status, [PaymentSubmission::PENDING_REVIEW, PaymentSubmission::OBSERVED, PaymentSubmission::APPROVED, PaymentSubmission::MANUAL_RESOLUTION_REQUIRED], true))?->status;
         $reservationStatuses = $order->items
             ->map(fn ($item) => EffectiveInventoryReservationStatus::forItem($order, $item->reservation, $paymentSubmissionStatus))
             ->filter()

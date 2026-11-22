@@ -16,6 +16,7 @@ class ElectronicDocument extends Model
         'prepared_at' => 'datetime',
         'last_modified_at' => 'datetime',
         'confirmed_at' => 'datetime',
+        'accepted_at' => 'datetime',
     ];
 
     public function events()

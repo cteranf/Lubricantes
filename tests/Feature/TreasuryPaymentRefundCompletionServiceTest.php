@@ -16,12 +16,13 @@ use App\Services\TreasuryPaymentService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 
 /** Reuses the complete, private-safe A1 fixtures and snapshots. */
 class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundServiceTest
 {
-    /** @dataProvider globalReservationStates */
+    #[DataProvider('globalReservationStates')]
     public function test_completion_reconciles_global_reservations_without_touching_foreign_inventory(string $state): void
     {
         $fixture = $this->pendingFixture();
@@ -45,7 +46,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
         $this->assertTrue(hash_equals($foreignBefore, $this->foreignReservationDigest($foreign)), 'Foreign inventory and reservation must remain unchanged.');
     }
 
-    /** @dataProvider completionMethods */
+    #[DataProvider('completionMethods')]
     public function test_completes_total_refunds_without_inventory_or_logistics_writes(string $method, bool $submission, bool $case): void
     {
         $fixture = $this->pendingFixture($method, $submission, $case);
@@ -127,7 +128,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
         $this->assertConflictUnchanged($fixture, fn () => $service->complete($first->id, $other->id, '00/Ref-B'));
     }
 
-    /** @dataProvider invalidCompletionReferences */
+    #[DataProvider('invalidCompletionReferences')]
     public function test_rejects_invalid_references_without_writes(string $reference): void
     {
         $fixture = $this->pendingFixture();
@@ -167,7 +168,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
         $this->assertConflictUnchanged($fixture, fn () => $service->complete($fixture['refund']->id, $inactive->id, 'fixture-ref'));
     }
 
-    /** @dataProvider incompatibleCompletionStates */
+    #[DataProvider('incompatibleCompletionStates')]
     public function test_rejects_partial_crossed_and_incompatible_financial_states(string $corruption): void
     {
         $fixture = $this->pendingFixture();
@@ -205,7 +206,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
         return array_map(fn ($state) => [$state], ['failed', 'completed partial', 'missing original', 'partial timestamp', 'partial reference', 'no requester', 'wrong refund amount', 'order not canceled', 'order delivered', 'order picked up', 'order not pending refund', 'submission not pending refund', 'wrong original amount', 'wrong original type', 'wrong original status', 'wrong original method', 'missing A1 history', 'wrong A1 history', 'duplicate A1 history', 'premature final history', 'previous refund transaction', 'crossed accounting', 'duplicate refund transaction']);
     }
 
-    /** @dataProvider completionWriteStages */
+    #[DataProvider('completionWriteStages')]
     public function test_failure_after_each_write_rolls_back_the_entire_completion(string $stage): void
     {
         $fixture = $this->pendingFixture();
@@ -228,7 +229,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
     public function test_nonconcurrent_sql_error_propagates_without_retry_or_writes(): void
     {
         $fixture = $this->pendingFixture();
-        $failure = new QueryException('completion probe', [], new PDOException('synthetic SQL failure', 9999));
+        $failure = new QueryException('testing', 'completion probe', [], new PDOException('synthetic SQL failure', 9999));
         $service = $this->completionProbe('accounting', $failure);
         $before = $this->snapshot($fixture);
         try {
@@ -244,7 +245,8 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
     public function test_recognized_retry_rehydrates_every_model_and_rolls_back_partial_writes(): void
     {
         $fixture = $this->pendingFixture();
-        $service = $this->completionProbe('refund', new QueryException('completion retry probe', [], new PDOException('database is locked', 40001)), false);
+        $this->commitInMemoryTransactionForTopLevelRetry();
+        $service = $this->completionProbe('refund', new QueryException('testing', 'completion retry probe', [], new PDOException('database is locked', 40001)), false);
         $before = $this->protectedSnapshot($fixture);
         $refund = $service->complete($fixture['refund']->id, $fixture['treasury']->id, 'fixture-ref');
         $this->assertSame(2, $service->attempts);
@@ -260,9 +262,10 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
     public function test_persistent_concurrency_failure_exhausts_exactly_three_attempts(): void
     {
         $fixture = $this->pendingFixture();
-        $failure = new QueryException('completion retry probe', [], new PDOException('database is locked', 40001));
+        $failure = new QueryException('testing', 'completion retry probe', [], new PDOException('database is locked', 40001));
         $service = $this->completionProbe('accounting', $failure);
         $before = $this->snapshot($fixture);
+        $this->commitInMemoryTransactionForTopLevelRetry();
         try {
             $service->complete($fixture['refund']->id, $fixture['treasury']->id, 'fixture-ref');
             $this->fail('The exhausted exception must propagate.');
@@ -278,7 +281,7 @@ class TreasuryPaymentRefundCompletionServiceTest extends TreasuryPaymentRefundSe
         $fixture = $this->pendingFixture();
         $previous = new PDOException('UNIQUE constraint failed: payment_transactions.idempotency_key', 19);
         $previous->errorInfo = ['23000', 19, 'UNIQUE constraint failed: payment_transactions.idempotency_key'];
-        $service = $this->completionProbe('accounting', new QueryException('completion unique probe', [], $previous));
+        $service = $this->completionProbe('accounting', new QueryException('testing', 'completion unique probe', [], $previous));
         $this->assertConflictUnchanged($fixture, fn () => $service->complete($fixture['refund']->id, $fixture['treasury']->id, 'fixture-ref'));
     }
 

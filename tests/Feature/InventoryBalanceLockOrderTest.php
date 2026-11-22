@@ -127,7 +127,7 @@ class InventoryBalanceLockOrderTest extends TestCase
         try {
             app(InventoryService::class)->transfer($product, $source, $destination, 1, 'Missing source transfer');
             $this->fail('A missing source balance must be rejected.');
-        } catch (\App\Exceptions\InventoryException) {
+        } catch (InventoryException) {
         }
 
         $this->assertFalse(WarehouseInventory::where(['warehouse_id' => $source->id, 'product_id' => $product->id])->exists());
@@ -150,7 +150,7 @@ class InventoryBalanceLockOrderTest extends TestCase
         try {
             app(InventoryService::class)->transfer($product, $source, $destination, 1, 'Negative aggregate transfer');
             $this->fail('A negative aggregate stock must be rejected.');
-        } catch (\App\Exceptions\InventoryException) {
+        } catch (InventoryException) {
         }
 
         $this->assertSame(-1, (int) $product->fresh()->stock);
@@ -171,7 +171,7 @@ class InventoryBalanceLockOrderTest extends TestCase
         try {
             app(InventoryService::class)->transfer($product, $source, $destination, 3, 'Rollback destination transfer');
             $this->fail('An excessive transfer must fail.');
-        } catch (\App\Exceptions\InventoryException) {
+        } catch (InventoryException) {
         }
 
         $this->assertFalse(WarehouseInventory::where(['warehouse_id' => $destination->id, 'product_id' => $product->id])->exists());
@@ -193,6 +193,8 @@ class InventoryBalanceLockOrderTest extends TestCase
                 throw $this->recognizedConcurrencyException();
             }
         });
+
+        $this->commitInMemoryTransactionForTopLevelRetry();
 
         [$out, $in] = $service->transfer($fixture['product'], $fixture['source'], $fixture['destination'], 1, 'Retried transfer', $fixture['actor']);
 
@@ -253,6 +255,7 @@ class InventoryBalanceLockOrderTest extends TestCase
         $service = $this->instrumentedTransferService(function (): void {
             throw $this->recognizedConcurrencyException();
         });
+        $this->commitInMemoryTransactionForTopLevelRetry();
 
         try {
             $service->transfer($fixture['product'], $fixture['source'], $fixture['destination'], 1, 'Deadlock exhaustion', $fixture['actor']);
@@ -375,12 +378,21 @@ class InventoryBalanceLockOrderTest extends TestCase
 
     private function recognizedConcurrencyException(): QueryException
     {
-        return new QueryException('retry probe', [], new PDOException('database is locked', 40001));
+        return new QueryException('testing', 'retry probe', [], new PDOException('database is locked', 40001));
+    }
+
+    private function commitInMemoryTransactionForTopLevelRetry(): void
+    {
+        // Laravel 13 reports a simulated deadlock inside a nested test transaction as DeadlockException.
+        // Commit only this in-memory SQLite fixture so the service exercises its top-level retry loop.
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+        DB::commit();
     }
 
     private function nonConcurrentQueryException(): QueryException
     {
-        return new QueryException('retry probe', [], new PDOException('synthetic non-concurrent database failure', 9999));
+        return new QueryException('testing', 'retry probe', [], new PDOException('synthetic non-concurrent database failure', 9999));
     }
 
     /** @param array{product: Product, source: Warehouse, destination: Warehouse, actor: User, sourceBalance: WarehouseInventory} $fixture */

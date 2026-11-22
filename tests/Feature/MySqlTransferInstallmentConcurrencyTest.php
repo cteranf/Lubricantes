@@ -14,10 +14,11 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlTransferInstallmentConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
@@ -68,8 +69,12 @@ class MySqlTransferInstallmentConcurrencyTest extends TestCase
     private function requireDedicatedInnoDbDatabase(): void
     {
         $connection = DB::connection();
-        if ($connection->getDriverName() !== 'mysql' || $connection->getDatabaseName() !== 'lubristore_payment_installments_test') {
-            $this->markTestSkipped('Requires the dedicated MySQL database lubristore_payment_installments_test; shared test databases are not accepted.');
+        $database = getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+        if ($connection->getDriverName() !== 'mysql'
+            || ! is_string($database)
+            || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $database) !== 1
+            || $connection->getDatabaseName() !== $database) {
+            $this->markTestSkipped('Requires the dedicated disposable PHP 8.5/Laravel 13 MySQL schema.');
         }
 
         $engines = collect(DB::select(

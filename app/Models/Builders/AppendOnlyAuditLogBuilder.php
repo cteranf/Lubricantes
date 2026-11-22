@@ -25,12 +25,12 @@ class AppendOnlyAuditLogBuilder extends Builder
         throw new LogicException('Use AuditService para agregar eventos validados.');
     }
 
-    public function firstOrCreate(array $attributes = [], array $values = [])
+    public function firstOrCreate(array $attributes = [], \Closure|array $values = [])
     {
         throw new LogicException('Use AuditService para agregar eventos validados.');
     }
 
-    public function updateOrCreate(array $attributes, array $values = [])
+    public function updateOrCreate(array $attributes, \Closure|array $values = [])
     {
         throw new LogicException('La bitácora de auditoría no admite upsert de modelos.');
     }

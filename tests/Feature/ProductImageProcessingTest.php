@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\InvalidProductImage;
 use App\Exceptions\ProductImageProcessingFailed;
+use App\Http\Resources\AdminProductListResource;
 use App\Jobs\ProcessProductImage;
 use App\Models\Branch;
 use App\Models\Brand;
@@ -15,6 +16,7 @@ use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use App\Services\ProductImageProcessingService;
 use App\Services\ProductImageProcessor;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -65,7 +67,7 @@ class ProductImageProcessingTest extends TestCase
         $this->assertNull($legacyImage->pending_original_path);
         $this->assertFalse($legacyImage->canRegenerate());
 
-        $payload = (new \App\Http\Resources\AdminProductListResource($legacyProduct->fresh()->load('images')))->resolve(request());
+        $payload = (new AdminProductListResource($legacyProduct->fresh()->load('images')))->resolve(request());
         $this->assertCount(1, $payload['images']);
         $this->assertSame($payload['image_url'], $payload['images'][0]['url']);
         $this->assertSame(Storage::disk('public')->url('products/optimized/legacy/card.webp'), $payload['image_url']);
@@ -409,7 +411,7 @@ class ProductImageProcessingTest extends TestCase
                 && $job->operation === 'upload'
                 && array_keys(unserialize($serialized)->__serialize()) === ['productImageId', 'generationId', 'operation']
                 && ! str_contains($serialized, 'client-name.png')
-                && $job instanceof \Illuminate\Contracts\Queue\ShouldBeEncrypted;
+                && $job instanceof ShouldBeEncrypted;
         });
     }
 
@@ -502,7 +504,7 @@ class ProductImageProcessingTest extends TestCase
         $this->assertArrayNotHasKey('image_processing_status', $payload);
         $this->assertTrue($payload['allow_reviews']);
         $this->assertSame([
-            'id', 'name', 'sku', 'presentation', 'description', 'price', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
+            'id', 'name', 'sku', 'presentation', 'description', 'price', 'tax_affectation', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
             'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images', 'specifications', 'barcodes',
         ], array_keys($payload));
         $this->assertSame([], $payload['specifications']);

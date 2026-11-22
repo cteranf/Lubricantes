@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AdminOrdersTreasurySubmissionTest extends TestCase
@@ -42,7 +43,7 @@ class AdminOrdersTreasurySubmissionTest extends TestCase
         }
     }
 
-    /** @dataProvider submissionStatuses */
+    #[DataProvider('submissionStatuses')]
     public function test_admin_fulfillment_serializes_the_real_submission_status_and_disables_legacy_approval(string $status): void
     {
         $admin = User::factory()->create(['role' => 'admin']);

@@ -14,10 +14,14 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
+use App\Services\CustomerPaymentSubmissionService;
+use App\Services\TreasuryPaymentService;
 use App\Support\TransferPaymentInstallments;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CustomerPaymentSubmissionTest extends TestCase
@@ -26,7 +30,7 @@ class CustomerPaymentSubmissionTest extends TestCase
 
     private string $currentOrderTotal = '10.00';
 
-    /** @dataProvider channels */
+    #[DataProvider('channels')]
     public function test_customer_can_submit_each_supported_transfer_channel(string $channel): void
     {
         [$owner, $order] = $this->order('30.50');
@@ -79,7 +83,7 @@ class CustomerPaymentSubmissionTest extends TestCase
         $this->assertSame(1, PaymentSubmission::count());
     }
 
-    /** @dataProvider ineligibleOrders */
+    #[DataProvider('ineligibleOrders')]
     public function test_ineligible_orders_and_reservations_cannot_create_submissions(string $field, mixed $value): void
     {
         [$owner, $order] = $this->order();
@@ -207,7 +211,7 @@ class CustomerPaymentSubmissionTest extends TestCase
         PaymentSubmissionHistory::creating(fn () => throw new \RuntimeException('forced history failure'));
 
         try {
-            app(\App\Services\CustomerPaymentSubmissionService::class)->submit(
+            app(CustomerPaymentSubmissionService::class)->submit(
                 $order,
                 $owner->id,
                 $this->payload('yape', $account->id),
@@ -235,18 +239,18 @@ class CustomerPaymentSubmissionTest extends TestCase
         $beforeReservationExpiry = $reservation->fresh()->expires_at->format('Y-m-d H:i:s');
         $previous = new \PDOException('FOREIGN KEY constraint failed', 19);
         $previous->errorInfo = ['HY000', 19, 'FOREIGN KEY constraint failed'];
-        $failure = new \Illuminate\Database\QueryException('insert into payment_submission_histories values (?)', [], $previous);
+        $failure = new QueryException('testing', 'insert into payment_submission_histories values (?)', [], $previous);
         PaymentSubmissionHistory::creating(fn () => throw $failure);
 
         try {
-            app(\App\Services\CustomerPaymentSubmissionService::class)->submit(
+            app(CustomerPaymentSubmissionService::class)->submit(
                 $order,
                 $owner->id,
                 $this->payload('yape', $account->id),
                 'non-unique-db-error',
             );
             $this->fail('El error de integridad no UNIQUE fue convertido indebidamente en conflicto.');
-        } catch (\Illuminate\Database\QueryException $exception) {
+        } catch (QueryException $exception) {
             $this->assertSame($failure, $exception);
         } finally {
             PaymentSubmissionHistory::flushEventListeners();
@@ -406,14 +410,14 @@ class CustomerPaymentSubmissionTest extends TestCase
             $this->assertNotSame($operation, $submission->maskedOperationNumber());
         }
 
-        $normalized = app(\App\Services\TreasuryPaymentService::class)->normalizeOperationNumber('00-123 4567');
+        $normalized = app(TreasuryPaymentService::class)->normalizeOperationNumber('00-123 4567');
         $submission = new PaymentSubmission(['operation_number' => $normalized]);
         $this->assertSame('001234567', $normalized);
         $this->assertSame('•••••4567', $submission->maskedOperationNumber());
         $this->assertStringNotContainsString('1111', (new PaymentSubmission(['operation_number' => '1111']))->maskedOperationNumber());
     }
 
-    /** @dataProvider acceptedInstallmentSequences */
+    #[DataProvider('acceptedInstallmentSequences')]
     public function test_installment_sequences_respect_exact_balance_and_operation_policy(string $total, array $amounts): void
     {
         [$owner, $order] = $this->order($total);

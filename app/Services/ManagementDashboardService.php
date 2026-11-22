@@ -21,7 +21,7 @@ class ManagementDashboardService
     public function legacyDashboard(array $filters): array
     {
         [$start, $end, $label] = $this->period($filters);
-        $previousStart = $start->copy()->subSeconds($end->diffInSeconds($start) + 1);
+        $previousStart = $start->copy()->subSeconds($start->diffInSeconds($end, true) + 1);
         $previousEnd = $start->copy()->subSecond();
 
         $current = $this->recognizedOrders($filters, $start, $end);
@@ -367,7 +367,7 @@ class ManagementDashboardService
             $deadline = $reservations->sortBy('expires_at')->first()->expires_at;
             if ($deadline->isPast()) {
                 $items[] = ['order_id' => $order->id, 'order_number' => (string) $order->id, 'stage' => 'reservation', 'stage_label' => 'Reserva vencida', 'severity' => 'critical', 'severity_rank' => 4, 'reason_code' => 'RESERVATION_EXPIRED_ACTIVE', 'reason' => 'Existe una reserva activa vencida.', 'stage_started_at' => null, 'age_seconds' => null, 'age_label' => 'Sin fecha disponible', 'delivery_type' => $order->delivery_type, 'action_label' => 'Abrir inventario', 'action_route' => '/admin/inventory', 'deadline_at' => $deadline->toIso8601String(), 'is_overdue' => true, 'seconds_remaining' => null, 'overdue_seconds' => $deadline->diffInSeconds($now), 'deadline_label' => 'Vencida'];
-            } elseif ($deadline->diffInMinutes($now) <= config('management_dashboard.reservation_expiring_minutes', 120)) {
+            } elseif ($now->diffInMinutes($deadline) <= config('management_dashboard.reservation_expiring_minutes', 120)) {
                 $items[] = ['order_id' => $order->id, 'order_number' => (string) $order->id, 'stage' => 'reservation', 'stage_label' => 'Reserva próxima a vencer', 'severity' => 'medium', 'severity_rank' => 2, 'reason_code' => 'RESERVATION_EXPIRING', 'reason' => 'La reserva vencerá pronto.', 'stage_started_at' => null, 'age_seconds' => null, 'age_label' => 'Sin fecha disponible', 'delivery_type' => $order->delivery_type, 'action_label' => 'Abrir inventario', 'action_route' => '/admin/inventory', 'deadline_at' => $deadline->toIso8601String(), 'is_overdue' => false, 'seconds_remaining' => $now->diffInSeconds($deadline), 'overdue_seconds' => null, 'deadline_label' => 'Vence pronto'];
             }
         }
@@ -379,7 +379,7 @@ class ManagementDashboardService
             $base = ['order_id' => $pickup->id, 'order_number' => (string) $pickup->id, 'stage' => 'pickup', 'stage_started_at' => $pickup->ready_for_pickup_at->toIso8601String(), 'age_seconds' => $pickup->ready_for_pickup_at->diffInSeconds($now), 'age_label' => $pickup->ready_for_pickup_at->diffForHumans($now, true), 'delivery_type' => 'pickup', 'action_label' => 'Abrir pickup', 'action_route' => '/admin/orders/'.$pickup->id, 'deadline_at' => $deadline->toIso8601String()];
             if ($deadline->isPast()) {
                 $items[] = array_merge($base, ['stage_label' => 'Recojo vencido', 'severity' => 'critical', 'severity_rank' => 4, 'reason_code' => 'PICKUP_EXPIRED', 'reason' => 'El plazo de recojo ha vencido.', 'is_overdue' => true, 'seconds_remaining' => null, 'overdue_seconds' => $deadline->diffInSeconds($now), 'deadline_label' => 'Vencida']);
-            } elseif ($deadline->diffInMinutes($now) <= config('management_dashboard.pickup_expiring_minutes', 120)) {
+            } elseif ($now->diffInMinutes($deadline) <= config('management_dashboard.pickup_expiring_minutes', 120)) {
                 $items[] = array_merge($base, ['stage_label' => 'Recojo próximo a vencer', 'severity' => 'medium', 'severity_rank' => 2, 'reason_code' => 'PICKUP_EXPIRING', 'reason' => 'El plazo de recojo está próximo a vencer.', 'is_overdue' => false, 'seconds_remaining' => $now->diffInSeconds($deadline), 'overdue_seconds' => null, 'deadline_label' => 'Vence pronto']);
             } else {
                 $items[] = array_merge($base, ['stage_label' => 'Esperando recojo', 'severity' => 'information', 'severity_rank' => 1, 'reason_code' => 'PICKUP_WAITING', 'reason' => 'El pedido está listo para recojo.', 'is_overdue' => false, 'seconds_remaining' => null, 'overdue_seconds' => null, 'deadline_label' => null]);

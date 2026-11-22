@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
@@ -34,7 +35,7 @@ class SyntheticMercadoPagoDatabaseGuardTest extends TestCase
         $this->assertTrue($this->syntheticDatabaseGuardAllows($facts), 'Isolated local MySQL must be allowed.');
     }
 
-    /** @dataProvider unsafeNames */
+    #[DataProvider('unsafeNames')]
     public function test_unsafe_mysql_database_names_are_rejected(mixed $name): void
     {
         $facts = $this->mysqlFacts();
@@ -48,7 +49,7 @@ class SyntheticMercadoPagoDatabaseGuardTest extends TestCase
         return [[null], [''], ['lubricantes'], ['LUBRICANTES'], ['ordinary'], ['safe_TEST'], ['safe_test '], [' safe_test'], ['safe_test_backup'], ['_test'], ['../safe_test'], ['safe-test'], ['safe;DROP_test'], [['safe_test']]];
     }
 
-    /** @dataProvider unsafeConditions */
+    #[DataProvider('unsafeConditions')]
     public function test_unsafe_environment_or_effective_connection_is_rejected(string $case): void
     {
         $facts = $this->mysqlFacts();
@@ -100,7 +101,7 @@ class SyntheticMercadoPagoDatabaseGuardTest extends TestCase
         return array_map(static fn ($case) => [$case], $cases);
     }
 
-    /** @dataProvider mysqlDriverErrorCodes */
+    #[DataProvider('mysqlDriverErrorCodes')]
     public function test_mysql_connection_error_codes_map_to_safe_categories(int $code, string $expected): void
     {
         $failure = new PDOException('synthetic driver error', $code);
@@ -125,7 +126,7 @@ class SyntheticMercadoPagoDatabaseGuardTest extends TestCase
     {
         $pdo = new PDOException('synthetic driver error', 1049);
         $pdo->errorInfo = ['HY000', 1049, 'synthetic driver detail'];
-        $failure = new QueryException('SELECT 1', [], $pdo);
+        $failure = new QueryException('testing', 'SELECT 1', [], $pdo);
 
         $this->assertSame('mysql_database_missing', $this->classifyConnectionFailure($failure));
     }

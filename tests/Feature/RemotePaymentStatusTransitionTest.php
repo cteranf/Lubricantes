@@ -2,14 +2,20 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\InventoryException;
 use App\Models\PaymentTransaction;
+use App\Models\Product;
+use App\Models\WarehouseInventory;
+use App\Services\InventoryService;
+use App\Services\OrderPaymentService;
 use App\Services\PaymentGateway\MercadoPagoGateway;
 use App\Services\PaymentProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
-use Tests\TestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
+use Tests\TestCase;
 
 class RemotePaymentStatusTransitionTest extends TestCase
 {
@@ -43,13 +49,13 @@ class RemotePaymentStatusTransitionTest extends TestCase
         });
     }
 
-    /** @dataProvider pendingStates */
+    #[DataProvider('pendingStates')]
     public function test_pending_approval_consumes_reserved_inventory_once_and_terminal_entry_is_immutable(string $initial): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($initial) {
-            $inventory = app(\App\Services\InventoryService::class);
+            $inventory = app(InventoryService::class);
             $warehouse = $inventory->defaultWarehouse();
-            $product = \App\Models\Product::create(['name' => 'Synthetic item', 'slug' => 'synthetic-'.bin2hex(random_bytes(16)), 'sku' => 'SYN-'.bin2hex(random_bytes(8)), 'price' => '10.25', 'is_active' => true]);
+            $product = Product::create(['name' => 'Synthetic item', 'slug' => 'synthetic-'.bin2hex(random_bytes(16)), 'sku' => 'SYN-'.bin2hex(random_bytes(8)), 'price' => '10.25', 'is_active' => true]);
             $inventory->initializeProduct($product, 5, $warehouse);
             $item = $order->items()->create(['product_id' => $product->id, 'warehouse_id' => $warehouse->id, 'quantity' => 1, 'price' => '10.25', 'subtotal' => '10.25']);
             $inventory->reserveForOrder($item, now()->addMinutes(30));
@@ -65,7 +71,7 @@ class RemotePaymentStatusTransitionTest extends TestCase
             $processor->process($preference, $gateway->verifyPayment((string) $transport->paymentId));
             $this->assertSame(PaymentTransaction::APPROVED, $entry->refresh()->status);
             $this->assertSame('consumed', $item->currentReservation()->first()->status);
-            $this->assertSame(4, \App\Models\WarehouseInventory::where('warehouse_id', $warehouse->id)->where('product_id', $product->id)->sole()->quantity);
+            $this->assertSame(4, WarehouseInventory::where('warehouse_id', $warehouse->id)->where('product_id', $product->id)->sole()->quantity);
             $before = hash('sha256', json_encode([DB::table('payment_transactions')->get(), DB::table('inventory_movements')->get(), DB::table('inventory_reservations')->get(), DB::table('order_fulfillment_histories')->get()]));
             $processor->process($preference, $gateway->verifyPayment((string) $transport->paymentId));
             $this->assertTrue(hash_equals($before, hash('sha256', json_encode([DB::table('payment_transactions')->get(), DB::table('inventory_movements')->get(), DB::table('inventory_reservations')->get(), DB::table('order_fulfillment_histories')->get()]))), 'Repeated approval must not duplicate financial, stock or history writes.');
@@ -93,12 +99,12 @@ class RemotePaymentStatusTransitionTest extends TestCase
             $processor->process($preference, $gateway->verifyPayment((string) $transport->paymentId));
             $before = PaymentTransaction::sole()->getRawOriginal();
             $transport->payment['status'] = 'approved';
-            $this->app->instance(\App\Services\InventoryService::class, \Mockery::mock(\App\Services\InventoryService::class)->shouldReceive('consumeOrderReservation')->once()->andThrow(new \App\Exceptions\InventoryException('Synthetic stock conflict'))->getMock());
+            $this->app->instance(InventoryService::class, \Mockery::mock(InventoryService::class)->shouldReceive('consumeOrderReservation')->once()->andThrow(new InventoryException('Synthetic stock conflict'))->getMock());
             // Re-resolve so the actual processor uses the failing stock dependency.
             $rejected = false;
             try {
                 app(PaymentProcessingService::class)->process($preference, $gateway->verifyPayment((string) $transport->paymentId));
-            } catch (\App\Exceptions\InventoryException) {
+            } catch (InventoryException) {
                 $rejected = true;
             }
             $this->assertTrue($rejected, 'Stock errors must propagate.');
@@ -107,7 +113,7 @@ class RemotePaymentStatusTransitionTest extends TestCase
         });
     }
 
-    /** @dataProvider unavailableOrders */
+    #[DataProvider('unavailableOrders')]
     public function test_late_or_crossed_payment_is_rejected_before_financial_writes(string $case): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($case) {
@@ -149,13 +155,13 @@ class RemotePaymentStatusTransitionTest extends TestCase
         return [['expired'], ['canceled'], ['crossed']];
     }
 
-    /** @dataProvider legacyRecordedStatuses */
+    #[DataProvider('legacyRecordedStatuses')]
     public function test_legacy_failed_entry_can_finalize_only_if_remote_evidence_was_pending(string $providerStatus, bool $canApprove): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($providerStatus, $canApprove) {
             // Reproduce the former application writer through its real service,
             // entirely in SQLite; no manual financial repair or row updates.
-            $entry = DB::transaction(fn () => app(\App\Services\OrderPaymentService::class)->recordCardAttempt(
+            $entry = DB::transaction(fn () => app(OrderPaymentService::class)->recordCardAttempt(
                 $order, (string) $transport->paymentId, PaymentTransaction::FAILED,
                 ['gateway' => 'mercadopago', 'payment_preference_id' => $preference->id,
                     'provider_payment_id' => (string) $transport->paymentId,

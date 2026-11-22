@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class EmailVerificationFrontendTest extends TestCase
@@ -86,9 +87,7 @@ class EmailVerificationFrontendTest extends TestCase
         $this->assertStringContainsString('requestIsCurrent(sequence, confirmationSequence)', $confirmation);
     }
 
-    /**
-     * @dataProvider additionalConfirmationRequestCases
-     */
+    #[DataProvider('additionalConfirmationRequestCases')]
     public function test_confirmation_request_heuristic_rejects_known_additional_request_channels(string $source): void
     {
         $this->assertFalse($this->hasExactlyOneConfirmationPost($source));
@@ -132,9 +131,7 @@ class EmailVerificationFrontendTest extends TestCase
         $this->assertStringNotContainsString('expires:', $confirmation);
     }
 
-    /**
-     * @dataProvider unsafeVerificationRedirectCases
-     */
+    #[DataProvider('unsafeVerificationRedirectCases')]
     public function test_verification_redirect_heuristic_rejects_query_propagation(string $query): void
     {
         $route = "path: '/email/verification', redirect: (to) => ({ name: 'EmailVerification', query: {$query} })";

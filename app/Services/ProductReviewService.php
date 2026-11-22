@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\PaymentResolutionCase;
 use App\Models\PaymentSubmission;
 use App\Models\Product;
 use App\Models\ProductReview;
@@ -51,12 +52,7 @@ class ProductReviewService
                 ->pluck('status', 'product_id');
 
             $hasRefundedSubmission = $order->payment_status === 'refunded'
-                || PaymentSubmission::query()
-                    ->where('order_id', $order->id)
-                    ->where(function (Builder $submissions): void {
-                        $this->applyRefundedSubmissionCondition($submissions);
-                    })
-                    ->exists();
+                || $this->hasRefundedSubmission($order);
 
             if (! $hasRefundedSubmission) {
                 $eligibleProductIds = OrderItem::query()
@@ -223,6 +219,24 @@ class ProductReviewService
     {
         $submissions->where('status', 'refunded')
             ->orWhereHas('resolutionCase', fn (Builder $cases) => $cases->where('status', 'refunded'));
+    }
+
+    private function hasRefundedSubmission(Order $order): bool
+    {
+        if ($order->relationLoaded('paymentSubmissions')) {
+            return $order->paymentSubmissions->contains(function (PaymentSubmission $submission): bool {
+                return $submission->status === PaymentSubmission::REFUNDED
+                    || ($submission->relationLoaded('resolutionCase')
+                        && $submission->resolutionCase?->status === PaymentResolutionCase::REFUNDED);
+            });
+        }
+
+        return PaymentSubmission::query()
+            ->where('order_id', $order->id)
+            ->where(function (Builder $submissions): void {
+                $this->applyRefundedSubmissionCondition($submissions);
+            })
+            ->exists();
     }
 
     /**

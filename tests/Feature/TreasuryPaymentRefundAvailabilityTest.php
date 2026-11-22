@@ -19,6 +19,7 @@ use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /** Reuses A1 fixtures and canonical private-safe snapshots, including inherited regressions. */
 class TreasuryPaymentRefundAvailabilityTest extends TreasuryPaymentRefundServiceTest
@@ -29,7 +30,7 @@ class TreasuryPaymentRefundAvailabilityTest extends TreasuryPaymentRefundService
         config(['app.debug' => false, 'logging.default' => 'null']);
     }
 
-    /** @dataProvider availabilityMethods */
+    #[DataProvider('availabilityMethods')]
     public function test_availability_is_read_only_and_agrees_with_both_real_commands(string $method, bool $submission, bool $case = false): void
     {
         $fixture = $this->fixture($method, $submission, $case);
@@ -57,7 +58,7 @@ class TreasuryPaymentRefundAvailabilityTest extends TreasuryPaymentRefundService
         ];
     }
 
-    /** @dataProvider normalUnavailableStates */
+    #[DataProvider('normalUnavailableStates')]
     public function test_normal_business_exclusions_are_not_classified_as_corruption(string $state): void
     {
         $fixture = $this->fixture();
@@ -76,7 +77,7 @@ class TreasuryPaymentRefundAvailabilityTest extends TreasuryPaymentRefundService
         return ['not canceled' => ['not canceled'], 'delivered' => ['delivered'], 'picked up' => ['picked up']];
     }
 
-    /** @dataProvider transversalFinancialStates */
+    #[DataProvider('transversalFinancialStates')]
     public function test_transversal_integrity_precedes_normal_business_exclusions(string $business, string $financial): void
     {
         $withSubmission = ! in_array($financial, ['pending projection', 'refunded projection', 'orphan accounting', 'coherent'], true);
@@ -172,7 +173,7 @@ class TreasuryPaymentRefundAvailabilityTest extends TreasuryPaymentRefundService
         }
     }
 
-    /** @dataProvider manualReviewStates */
+    #[DataProvider('manualReviewStates')]
     public function test_related_incoherent_evidence_requires_manual_review_without_repair(string $state): void
     {
         $fixture = $this->fixture(withSubmission: true, withResolutionCase: true);

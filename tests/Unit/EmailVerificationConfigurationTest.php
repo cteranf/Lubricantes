@@ -9,6 +9,7 @@ use App\Services\CustomerEmailVerificationService;
 use App\Support\EmailVerificationMailer;
 use App\Support\EmailVerificationSettings;
 use Illuminate\Contracts\Notifications\Dispatcher;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Queue\DatabaseQueue;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
@@ -227,7 +228,7 @@ class EmailVerificationConfigurationTest extends TestCase
         $job = (new SendCustomerEmailVerification(null, $email, false))
             ->onConnection('email_verification')
             ->onQueue('email-verification');
-        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldBeEncrypted::class, $job);
+        $this->assertInstanceOf(ShouldBeEncrypted::class, $job);
 
         $queue = new class(DB::connection(), 'jobs') extends DatabaseQueue
         {
@@ -249,7 +250,7 @@ class EmailVerificationConfigurationTest extends TestCase
     public function test_sync_queue_connection_is_rejected_before_dispatch(): void
     {
         config(['queue.connections.email_verification.driver' => 'sync']);
-        $service = new CustomerEmailVerificationService($this->createMock(Dispatcher::class));
+        $service = new CustomerEmailVerificationService($this->createStub(Dispatcher::class));
 
         try {
             $service->queueResend('private@example.test');

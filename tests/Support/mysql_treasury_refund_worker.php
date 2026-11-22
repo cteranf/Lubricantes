@@ -1,10 +1,14 @@
 <?php
 
+use App\Exceptions\PaymentRefundConflictException;
 use App\Models\Order;
+use App\Models\PaymentRefund;
+use App\Models\User;
 use App\Services\InventoryBalanceLockService;
 use App\Services\TreasuryPaymentRefundService;
 use App\Services\TreasuryPaymentService;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -32,7 +36,8 @@ $app = require dirname(__DIR__, 2).'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 if (app()->environment() !== 'testing' || config('app.debug')
     || config('database.default') !== 'mysql'
-    || config('database.connections.mysql.database') !== 'lubristore_2b4_resolution_certification_test'
+    || config('database.connections.mysql.database') !== getenv('LARAVEL13_MYSQL_TEST_DATABASE')
+    || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) getenv('LARAVEL13_MYSQL_TEST_DATABASE')) !== 1
     || config('database.connections.mysql.url')) {
     echo json_encode(['result' => 'worker_error', 'ok' => false, 'stage' => 'configuration_guard']);
     exit(2);
@@ -45,8 +50,7 @@ $version = DB::selectOne('SELECT VERSION() AS version')->version ?? '';
 if (app()->environment() !== 'testing'
     || config('app.debug')
     || DB::connection()->getDriverName() !== 'mysql'
-    || $database !== 'lubristore_2b4_resolution_certification_test'
-    || ! str_ends_with((string) $database, '_test')
+    || $database !== getenv('LARAVEL13_MYSQL_TEST_DATABASE')
     || $database === 'lubricantes'
     || ! str_starts_with((string) $version, '8.')) {
     echo json_encode(['result' => 'worker_error', 'ok' => false, 'stage' => 'guard']);
@@ -134,7 +138,7 @@ try {
     {
         public int $attempts = 0;
 
-        public ?App\Models\PaymentRefund $lockedRefund = null;
+        public ?PaymentRefund $lockedRefund = null;
 
         public array $completionOrderHydrations = [];
 
@@ -237,7 +241,7 @@ try {
                         ($this->checkpoint)('requesting_peer_order');
                         Order::query()->whereKey($this->peerOrderId)->lockForUpdate()->firstOrFail();
                         ($this->checkpoint)('peer_order_locked');
-                    } catch (QueryException|Illuminate\Database\DeadlockException $exception) {
+                    } catch (QueryException|DeadlockException $exception) {
                         $source = $exception instanceof QueryException ? $exception : $exception->getPrevious();
                         $errorInfo = $source instanceof QueryException && is_array($source->errorInfo) ? $source->errorInfo : [];
                         $this->concurrencyFailures[] = [
@@ -262,11 +266,11 @@ try {
     $stage = 'model_loading';
     if ($action === 'mark_pending_deadlock') {
         $order = Order::findOrFail((int) $orderId);
-        $actor = App\Models\User::findOrFail((int) $actorId);
+        $actor = User::findOrFail((int) $actorId);
         $stage = 'mark_pending';
         $refund = $service->markPending($order, $actor, 'Solicitud de certificación física');
     } else {
-        $refundId = App\Models\PaymentRefund::query()->whereHas('originalPaymentTransaction', fn ($query) => $query->where('order_id', (int) $orderId))->sole()->id;
+        $refundId = PaymentRefund::query()->whereHas('originalPaymentTransaction', fn ($query) => $query->where('order_id', (int) $orderId))->sole()->id;
         $stage = 'complete';
         // Synthetic references stay in memory and never enter argv or diagnostics.
         $reference = $action === 'complete_different' ? 'certification-fixture-'.$role : 'certification-fixture';
@@ -287,7 +291,7 @@ try {
         if ($action === 'complete_snapshot') {
             if ($role === 'first') {
                 DB::beginTransaction();
-                $snapshotPending = App\Models\PaymentRefund::findOrFail($refundId)->status === App\Models\PaymentRefund::PENDING;
+                $snapshotPending = PaymentRefund::findOrFail($refundId)->status === PaymentRefund::PENDING;
                 if (! $snapshotPending || file_put_contents($snapshotPath, 'ready', LOCK_EX) !== 5) {
                     $failure('snapshot_precondition_failed');
                     throw new RuntimeException('Snapshot precondition failed.');
@@ -299,7 +303,7 @@ try {
         }
         $checkpoint('before_complete');
         $refund = $service->complete((int) $refundId, (int) $actorId, $reference);
-        $lockedCompleted = $service->lockedRefund?->status === App\Models\PaymentRefund::COMPLETED;
+        $lockedCompleted = $service->lockedRefund?->status === PaymentRefund::COMPLETED;
         if ($action === 'complete_snapshot') {
             if ($role === 'first') {
                 DB::commit();
@@ -340,7 +344,7 @@ try {
         'diagnostic' => $safeDiagnostic(),
     ]);
     exit(0);
-} catch (App\Exceptions\PaymentRefundConflictException) {
+} catch (PaymentRefundConflictException) {
     echo json_encode(['result' => 'conflict', 'ok' => false, 'stage' => $stage, 'release_observed' => true]);
     exit(0);
 } catch (Throwable $exception) {

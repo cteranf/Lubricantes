@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Services\PublicSeoMetadata;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class PublicSeoFrontendContractTest extends TestCase
@@ -305,11 +307,11 @@ class PublicSeoFrontendContractTest extends TestCase
         }
     }
 
-    /** @dataProvider invalidProductionAppUrlCases */
+    #[DataProvider('invalidProductionAppUrlCases')]
     public function test_production_without_a_public_app_url_fails_closed_for_seo(?string $appUrl): void
     {
         config(['app.env' => 'production', 'app.url' => $appUrl, 'app.asset_url' => null]);
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
 
         $this->assertFalse($seo->hasPublicBaseUrl());
         $payload = $seo->forRequest(Request::create('/'));
@@ -383,7 +385,7 @@ class PublicSeoFrontendContractTest extends TestCase
         ];
     }
 
-    /** @dataProvider invalidConfiguredPublicUrlCases */
+    #[DataProvider('invalidConfiguredPublicUrlCases')]
     public function test_invalid_organization_and_social_urls_are_not_published(string $url): void
     {
         config([
@@ -393,7 +395,7 @@ class PublicSeoFrontendContractTest extends TestCase
             'seo.social_image' => $url,
         ]);
 
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
         $config = $seo->clientConfig();
         $this->assertSame('https://store.example.org', $config['organization']['url']);
         $this->assertSame('https://store.example.org/images/lubristore-social.png', $config['socialImage']);
@@ -443,7 +445,7 @@ class PublicSeoFrontendContractTest extends TestCase
             'seo.social_image' => 'https://cdn.example.org/lubristore.png',
         ]);
 
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
         $this->assertTrue($seo->hasPublicBaseUrl());
         $config = $seo->clientConfig();
         $this->assertSame('https://brand.example.org/about', $config['organization']['url']);
@@ -459,7 +461,7 @@ class PublicSeoFrontendContractTest extends TestCase
     public function test_absolute_path_preserves_valid_absolute_origin_and_strips_query_and_fragment(): void
     {
         config(['app.env' => 'testing', 'app.url' => 'https://sitio.test/tienda']);
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
 
         $this->assertSame('https://cdn.example.test/ruta/imagen.png', $seo->absolutePath('https://cdn.example.test/ruta/imagen.png'));
         $this->assertSame(
@@ -482,7 +484,7 @@ class PublicSeoFrontendContractTest extends TestCase
     public function test_social_image_paths_use_the_shared_base_path_composition(): void
     {
         config(['app.env' => 'testing', 'app.url' => 'https://sitio.test/tienda']);
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
 
         foreach (['/images/social.png', '/tienda/images/social.png'] as $configuredPath) {
             config(['seo.social_image' => $configuredPath]);
@@ -510,7 +512,7 @@ class PublicSeoFrontendContractTest extends TestCase
     public function test_localhost_remains_available_for_local_and_testing_environments(): void
     {
         config(['app.env' => 'testing', 'app.url' => 'http://localhost']);
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
 
         $this->assertTrue($seo->hasPublicBaseUrl());
         $this->assertSame('http://localhost/', $seo->forRequest(Request::create('/'))['seo']['canonical']);
@@ -520,7 +522,7 @@ class PublicSeoFrontendContractTest extends TestCase
     public function test_public_metadata_preserves_app_url_subpath_without_duplicate_prefixes(): void
     {
         config(['app.env' => 'production', 'app.url' => 'https://example.org/tienda/']);
-        $seo = app(\App\Services\PublicSeoMetadata::class);
+        $seo = app(PublicSeoMetadata::class);
 
         $this->assertSame('https://example.org/tienda/catalogo', $seo->absolutePath('/catalogo'));
         $this->assertSame('https://example.org/tienda/catalogo', $seo->absolutePath('/tienda/catalogo'));

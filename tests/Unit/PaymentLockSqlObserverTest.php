@@ -4,12 +4,13 @@ namespace Tests\Unit;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\PaymentLockSqlObserver;
 
 class PaymentLockSqlObserverTest extends TestCase
 {
-    /** @dataProvider statements */
+    #[DataProvider('statements')]
     public function test_only_structural_tables_in_update_lock_queries_are_recorded(string $sql, string $driver, bool $intent, array $expected): void
     {
         $this->assertTrue(PaymentLockSqlObserver::tables($sql, $driver, $intent) === $expected, 'Observer must record only relevant locked tables in structural order.');

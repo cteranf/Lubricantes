@@ -17,6 +17,7 @@ use App\Models\WarehouseInventory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CustomerTransferPaymentOptionTest extends TestCase
@@ -129,7 +130,7 @@ class CustomerTransferPaymentOptionTest extends TestCase
         $this->getJson('/api/v1/orders/999999/payment-options')->assertNotFound();
     }
 
-    /** @dataProvider ineligibleOrderStates */
+    #[DataProvider('ineligibleOrderStates')]
     public function test_ineligible_order_or_reservation_is_rejected_by_options(string $field, mixed $value): void
     {
         [$owner, $order] = $this->order();

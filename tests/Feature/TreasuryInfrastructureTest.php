@@ -13,6 +13,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
 use PDOException;
@@ -24,7 +25,10 @@ class TreasuryInfrastructureTest extends TestCase
 
     public function test_public_registration_remains_customer_and_admin_can_create_treasury(): void
     {
-        $this->postJson('/api/v1/auth/register', ['name' => 'Cliente', 'email' => 'client@example.test', 'password' => 'password123', 'password_confirmation' => 'password123', 'role' => 'treasury'])->assertCreated()->assertJsonPath('user.role', 'customer');
+        $this->postJson('/api/v1/auth/register', ['name' => 'Cliente', 'email' => 'client@example.test', 'password' => 'password123', 'password_confirmation' => 'password123', 'role' => 'treasury'])
+            ->assertCreated()
+            ->assertJsonPath('code', 'email_verification_required');
+        $this->assertDatabaseHas('users', ['email' => 'client@example.test', 'role' => 'customer']);
         Sanctum::actingAs(User::factory()->create(['role' => 'admin']));
         $this->postJson('/api/v1/admin/users', ['name' => 'Caja', 'email' => 'treasury@example.test', 'password' => 'password123', 'password_confirmation' => 'password123', 'role' => 'treasury'])->assertCreated()->assertJsonPath('data.role', 'treasury');
     }
@@ -73,7 +77,7 @@ class TreasuryInfrastructureTest extends TestCase
             try {
                 $service->normalizeOperationNumber($invalid);
                 $this->fail('El número inválido fue aceptado.');
-            } catch (\Illuminate\Validation\ValidationException) {
+            } catch (ValidationException) {
                 $this->addToAssertionCount(1);
             }
         }
@@ -89,7 +93,7 @@ class TreasuryInfrastructureTest extends TestCase
             try {
                 $service->validateSubmission($channel, $last4, $bank);
                 $this->fail('El canal inválido fue aceptado.');
-            } catch (\Illuminate\Validation\ValidationException) {
+            } catch (ValidationException) {
                 $this->addToAssertionCount(1);
             }
         }
@@ -107,7 +111,7 @@ class TreasuryInfrastructureTest extends TestCase
             try {
                 $service->assertExpectedAmount($order, $invalid);
                 $this->fail('El importe inseguro fue aceptado.');
-            } catch (\Illuminate\Validation\ValidationException) {
+            } catch (ValidationException) {
                 $this->addToAssertionCount(1);
             }
         }
@@ -165,10 +169,18 @@ class TreasuryInfrastructureTest extends TestCase
         $user = User::factory()->create();
         $attributes = ['order_id' => $order->id, 'channel' => 'yape', 'expected_amount' => '25.50', 'operation_number' => 'OP12', 'normalized_operation_number' => 'OP12', 'duplicate_fingerprint' => hash('sha256', 'one'), 'declared_paid_at' => now(), 'receiving_account_snapshot' => ['identifier' => 'ACCOUNT1'], 'submitted_by' => $user->id, 'submitted_at' => now(), 'idempotency_key' => 'one'];
         $submission = PaymentSubmission::create($attributes);
+        PaymentSubmission::create(array_merge($attributes, [
+            'duplicate_fingerprint' => hash('sha256', 'two'),
+            'idempotency_key' => 'two',
+            'operation_number' => 'OP13',
+            'normalized_operation_number' => 'OP13',
+        ]));
+        $this->assertSame(2, PaymentSubmission::query()->where('order_id', $order->id)->count());
+
         try {
-            PaymentSubmission::create(array_merge($attributes, ['duplicate_fingerprint' => hash('sha256', 'two'), 'idempotency_key' => 'two']));
-            $this->fail('La restricción única por pedido no se aplicó.');
-        } catch (\Illuminate\Database\QueryException) {
+            PaymentSubmission::create(array_merge($attributes, ['duplicate_fingerprint' => hash('sha256', 'three'), 'operation_number' => 'OP14', 'normalized_operation_number' => 'OP14']));
+            $this->fail('La restricción única de idempotencia no se aplicó.');
+        } catch (QueryException) {
             $this->addToAssertionCount(1);
         }
 
@@ -222,6 +234,6 @@ class TreasuryInfrastructureTest extends TestCase
         $previous = new PDOException($message, $driverCode);
         $previous->errorInfo = [$state, $driverCode, $message];
 
-        return new QueryException('insert into payment_submissions values (?)', [], $previous);
+        return new QueryException('testing', 'insert into payment_submissions values (?)', [], $previous);
     }
 }

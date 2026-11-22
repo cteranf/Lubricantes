@@ -14,10 +14,11 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlTreasuryPaymentApprovalConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
@@ -61,7 +62,14 @@ class MySqlTreasuryPaymentApprovalConcurrencyTest extends TestCase
             $this->assertSame(0, PaymentTransaction::query()->where('payment_submission_id', $submission->id)->count());
             $this->assertSame(0, PaymentSubmissionHistory::query()->where('payment_submission_id', $submission->id)->where('event', 'approved')->count());
             $this->assertSame(0, InventoryMovement::query()->where('reference_type', 'order')->where('reference_id', (string) $order->id)->where('type', InventoryMovement::SALE)->count());
-            $this->assertSame(InventoryReservation::EXPIRED, InventoryReservation::query()->where('order_id', $order->id)->value('status'));
+            $this->assertSame(
+                InventoryReservation::ACTIVE,
+                InventoryReservation::query()->where('order_id', $order->id)->value('status'),
+                'A reservation tied to a transfer proof under review must remain protected from automatic expiry.'
+            );
+            $expiry = collect($results)->firstWhere('result', 'expired');
+            $this->assertIsArray($expiry);
+            $this->assertFalse($expiry['processed'] ?? true, 'Expiry must defer while the submitted transfer proof is awaiting review.');
             $this->assertSame('pending', $order->fresh()->payment_status);
             $this->assertContains('manual_resolution_required', array_filter(array_column($results, 'code')), json_encode($results));
         }
@@ -98,7 +106,10 @@ class MySqlTreasuryPaymentApprovalConcurrencyTest extends TestCase
 
     private function requireIsolatedMysql(): void
     {
-        if (DB::connection()->getDriverName() !== 'mysql' || ! str_ends_with(DB::connection()->getDatabaseName(), '_test')) {
+        $database = (string) DB::connection()->getDatabaseName();
+        if (DB::connection()->getDriverName() !== 'mysql'
+            || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $database) !== 1
+            || $database !== getenv('LARAVEL13_MYSQL_TEST_DATABASE')) {
             $this->markTestSkipped('Requires an isolated MySQL database ending in _test.');
         }
     }

@@ -73,12 +73,15 @@ class TreasuryPaymentReassignmentService
 
         $submissionId = (int) $submission->id;
         $actorId = (int) $actor->id;
+        // Resolve the parent before opening the transaction so the order row is
+        // the first read inside it. Under MySQL REPEATABLE READ, a consistent
+        // read here would pin an old snapshot before we wait for the order lock.
+        $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+        if (! $orderId) {
+            $this->conflict('La presentación de pago no existe.');
+        }
 
-        return DB::transaction(function () use ($submissionId, $actorId): PaymentResolutionCase {
-            $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
-            if (! $orderId) {
-                $this->conflict('La presentación de pago no existe.');
-            }
+        return DB::transaction(function () use ($submissionId, $actorId, $orderId): PaymentResolutionCase {
             // Shared lock order with customer submission and Treasury approval:
             // order, all submissions by id, financial rows, then inventory.
             $order = Order::query()->lockForUpdate()->find($orderId);

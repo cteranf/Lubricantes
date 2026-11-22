@@ -2,11 +2,17 @@
 
 namespace Tests\Feature;
 
-use App\Models\PaymentWebhookEvent;
 use App\Models\PaymentTransaction;
+use App\Models\PaymentWebhookEvent;
+use App\Models\Product;
+use App\Services\InventoryService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use MercadoPago\Exceptions\MPApiException;
+use MercadoPago\Net\MPResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -21,13 +27,22 @@ class PaymentWebhookNormalizationTest extends TestCase
     {
         parent::setUp();
         $this->secret = 'SYNTHETIC_'.bin2hex(random_bytes(16));
-        config(['payment.testing_legacy_webhook' => false, 'payment.mercadopago.webhook_secret' => $this->secret, 'payment.mock.enabled' => false, 'app.debug' => false]);
+        config(['payment.testing_legacy_webhook' => false, 'payment.mock.enabled' => false, 'app.debug' => false]);
+    }
+
+    private function withRemoteLinkWithSyntheticSecret(\Closure $callback): void
+    {
+        $this->withRemoteLink(function (...$arguments) use ($callback): void {
+            config(['payment.mercadopago.webhook_secret' => $this->secret]);
+            $callback(...$arguments);
+        });
     }
 
     private function headers(string $id): array
     {
         $requestId = 'synthetic-'.bin2hex(random_bytes(16));
         $ts = (string) time();
+
         return ['x-request-id' => $requestId, 'x-signature' => 'ts='.$ts.',v1='.hash_hmac('sha256', 'id:'.$id.';request-id:'.$requestId.';ts:'.$ts.';', $this->secret)];
     }
 
@@ -37,6 +52,7 @@ class PaymentWebhookNormalizationTest extends TestCase
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }
+
         return $this->call('POST', '/api/v1/payment/webhook'.($query === '' ? '' : '?'.$query), [], [], [], $server, $body ?? '');
     }
 
@@ -45,10 +61,10 @@ class PaymentWebhookNormalizationTest extends TestCase
         return json_encode(['type' => 'payment', 'data' => ['id' => $id], 'id' => $event ?? 'synthetic-'.bin2hex(random_bytes(16)), 'action' => 'payment.updated'], JSON_THROW_ON_ERROR);
     }
 
-    /** @dataProvider supportedFormats */
+    #[DataProvider('supportedFormats')]
     public function test_authenticated_supported_formats_use_real_sdk_evidence(string $format): void
     {
-        $this->withRemoteLink(function ($transport, $order) use ($format) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) use ($format) {
             $id = (string) $transport->paymentId;
             $query = match ($format) {
                 'json' => '',
@@ -71,43 +87,73 @@ class PaymentWebhookNormalizationTest extends TestCase
         return [['json'], ['query'], ['both'], ['encoded']];
     }
 
-    /** @dataProvider invalidEnvelopes */
+    #[DataProvider('invalidEnvelopes')]
     public function test_invalid_envelope_has_no_gateway_calls_events_or_writes(string $case): void
     {
-        $this->withRemoteLink(function ($transport) use ($case) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport) use ($case) {
             $id = (string) $transport->paymentId;
             $body = $this->payload($id);
             $query = '';
             switch ($case) {
-                case 'contradictory ids': $query = 'data.id='.($transport->paymentId + 1).'&type=payment'; break;
-                case 'literal duplicate': $query = 'data.id='.$id.'&data.id='.$id.'&type=payment'; break;
-                case 'encoded duplicate': $query = 'data.id='.$id.'&data%2Eid='.$id.'&type=payment'; break;
-                case 'encoded topic duplicate': $query = 'type=payment&%74ype=payment'; break;
-                case 'leading empty segment': $query = '&type=payment'; break;
-                case 'middle empty segment': $query = 'type=payment&&data.id='.$id; break;
-                case 'trailing empty segment': $query = 'type=payment&'; break;
-                case 'missing equals': $query = 'type=payment&data.id'; break;
-                case 'brackets': $query = 'data%5Bid%5D='.$id.'&type=payment'; break;
-                case 'array': $query = 'data.id%5B%5D='.$id.'&type=payment'; break;
-                case 'underscore alias': $query = 'data_id='.$id.'&type=payment'; break;
-                case 'space alias': $query = 'data+id='.$id.'&type=payment'; break;
-                case 'double encoded name': $query = 'data%252Eid='.$id.'&type=payment'; break;
-                case 'double encoded value': $query = 'data.id=%2531&type=payment'; break;
-                case 'bad percent': $query = 'data.id=%GG&type=payment'; break;
-                case 'empty id': $query = 'data.id=&type=payment'; break;
-                case 'missing topic': $body = json_encode(['data' => ['id' => $id]]); break;
-                case 'unknown topic': $body = json_encode(['type' => 'merchant_order', 'data' => ['id' => $id]]); break;
-                case 'contradictory topic': $query = 'type=merchant_order'; break;
-                case 'topic array': $body = json_encode(['type' => ['payment'], 'data' => ['id' => $id]]); break;
-                case 'ipn': $body = null; $query = 'topic=payment&id='.$id; break;
-                case 'body id array': $body = json_encode(['type' => 'payment', 'data' => ['id' => [$id]]]); break;
-                case 'body id null': $body = json_encode(['type' => 'payment', 'data' => ['id' => null]]); break;
-                case 'body id boolean': $body = json_encode(['type' => 'payment', 'data' => ['id' => true]]); break;
-                case 'body id empty': $body = json_encode(['type' => 'payment', 'data' => ['id' => '']]); break;
-                case 'malformed json': $body = '{'; break;
-                case 'json duplicate': $body = '{"type":"payment","type":"payment","data":{"id":"'.$id.'"}}'; break;
-                case 'json escaped duplicate': $body = '{"type":"payment","\u0074ype":"payment","data":{"id":"'.$id.'"}}'; break;
-                case 'nested duplicate': $body = '{"type":"payment","data":{"id":"'.$id.'","id":"'.$id.'"}}'; break;
+                case 'contradictory ids': $query = 'data.id='.($transport->paymentId + 1).'&type=payment';
+                    break;
+                case 'literal duplicate': $query = 'data.id='.$id.'&data.id='.$id.'&type=payment';
+                    break;
+                case 'encoded duplicate': $query = 'data.id='.$id.'&data%2Eid='.$id.'&type=payment';
+                    break;
+                case 'encoded topic duplicate': $query = 'type=payment&%74ype=payment';
+                    break;
+                case 'leading empty segment': $query = '&type=payment';
+                    break;
+                case 'middle empty segment': $query = 'type=payment&&data.id='.$id;
+                    break;
+                case 'trailing empty segment': $query = 'type=payment&';
+                    break;
+                case 'missing equals': $query = 'type=payment&data.id';
+                    break;
+                case 'brackets': $query = 'data%5Bid%5D='.$id.'&type=payment';
+                    break;
+                case 'array': $query = 'data.id%5B%5D='.$id.'&type=payment';
+                    break;
+                case 'underscore alias': $query = 'data_id='.$id.'&type=payment';
+                    break;
+                case 'space alias': $query = 'data+id='.$id.'&type=payment';
+                    break;
+                case 'double encoded name': $query = 'data%252Eid='.$id.'&type=payment';
+                    break;
+                case 'double encoded value': $query = 'data.id=%2531&type=payment';
+                    break;
+                case 'bad percent': $query = 'data.id=%GG&type=payment';
+                    break;
+                case 'empty id': $query = 'data.id=&type=payment';
+                    break;
+                case 'missing topic': $body = json_encode(['data' => ['id' => $id]]);
+                    break;
+                case 'unknown topic': $body = json_encode(['type' => 'merchant_order', 'data' => ['id' => $id]]);
+                    break;
+                case 'contradictory topic': $query = 'type=merchant_order';
+                    break;
+                case 'topic array': $body = json_encode(['type' => ['payment'], 'data' => ['id' => $id]]);
+                    break;
+                case 'ipn': $body = null;
+                    $query = 'topic=payment&id='.$id;
+                    break;
+                case 'body id array': $body = json_encode(['type' => 'payment', 'data' => ['id' => [$id]]]);
+                    break;
+                case 'body id null': $body = json_encode(['type' => 'payment', 'data' => ['id' => null]]);
+                    break;
+                case 'body id boolean': $body = json_encode(['type' => 'payment', 'data' => ['id' => true]]);
+                    break;
+                case 'body id empty': $body = json_encode(['type' => 'payment', 'data' => ['id' => '']]);
+                    break;
+                case 'malformed json': $body = '{';
+                    break;
+                case 'json duplicate': $body = '{"type":"payment","type":"payment","data":{"id":"'.$id.'"}}';
+                    break;
+                case 'json escaped duplicate': $body = '{"type":"payment","\u0074ype":"payment","data":{"id":"'.$id.'"}}';
+                    break;
+                case 'nested duplicate': $body = '{"type":"payment","data":{"id":"'.$id.'","id":"'.$id.'"}}';
+                    break;
             }
             $writes = new \ArrayObject;
             DB::listen(static function ($query) use ($writes) {
@@ -128,28 +174,41 @@ class PaymentWebhookNormalizationTest extends TestCase
     public static function invalidEnvelopes(): array
     {
         $cases = ['contradictory ids', 'literal duplicate', 'encoded duplicate', 'encoded topic duplicate', 'leading empty segment', 'middle empty segment', 'trailing empty segment', 'missing equals', 'brackets', 'array', 'underscore alias', 'space alias', 'double encoded name', 'double encoded value', 'bad percent', 'empty id', 'missing topic', 'unknown topic', 'contradictory topic', 'topic array', 'ipn', 'body id array', 'body id null', 'body id boolean', 'body id empty', 'malformed json', 'json duplicate', 'json escaped duplicate', 'nested duplicate'];
+
         return array_combine($cases, array_map(static fn ($case) => [$case], $cases));
     }
 
-    /** @dataProvider invalidAuthentication */
+    #[DataProvider('invalidAuthentication')]
     public function test_invalid_authentication_is_private_and_has_no_side_effects(string $case): void
     {
-        $this->withRemoteLink(function ($transport) use ($case) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport) use ($case) {
             $id = (string) $transport->paymentId;
             $headers = $this->headers($id);
             switch ($case) {
-                case 'wrong signature': $headers['x-signature'] = 'ts='.time().',v1='.str_repeat('0', 64); break;
-                case 'wrong signed id': $headers = $this->headers((string) ($transport->paymentId + 1)); break;
-                case 'missing signature': unset($headers['x-signature']); break;
-                case 'missing request': unset($headers['x-request-id']); break;
-                case 'bad request': $headers['x-request-id'] = 'invalid;request'; break;
-                case 'bad ts': $headers['x-signature'] = 'ts=invalid,v1='.str_repeat('0', 64); break;
-                case 'duplicate ts': $headers['x-signature'] .= ',ts='.time(); break;
-                case 'missing ts': $headers['x-signature'] = 'v1='.str_repeat('0', 64); break;
-                case 'old ts': $ts = (string) (time() - 1000); $headers['x-signature'] = 'ts='.$ts.',v1='.hash_hmac('sha256', 'id:'.$id.';request-id:'.$headers['x-request-id'].';ts:'.$ts.';', $this->secret); break;
+                case 'wrong signature': $headers['x-signature'] = 'ts='.time().',v1='.str_repeat('0', 64);
+                    break;
+                case 'wrong signed id': $headers = $this->headers((string) ($transport->paymentId + 1));
+                    break;
+                case 'missing signature': unset($headers['x-signature']);
+                    break;
+                case 'missing request': unset($headers['x-request-id']);
+                    break;
+                case 'bad request': $headers['x-request-id'] = 'invalid;request';
+                    break;
+                case 'bad ts': $headers['x-signature'] = 'ts=invalid,v1='.str_repeat('0', 64);
+                    break;
+                case 'duplicate ts': $headers['x-signature'] .= ',ts='.time();
+                    break;
+                case 'missing ts': $headers['x-signature'] = 'v1='.str_repeat('0', 64);
+                    break;
+                case 'old ts': $ts = (string) (time() - 1000);
+                    $headers['x-signature'] = 'ts='.$ts.',v1='.hash_hmac('sha256', 'id:'.$id.';request-id:'.$headers['x-request-id'].';ts:'.$ts.';', $this->secret);
+                    break;
             }
             $messages = new \ArrayObject;
-            Log::listen(static function ($event) use ($messages) { $messages->append([$event->message, $event->context]); });
+            Log::listen(static function ($event) use ($messages) {
+                $messages->append([$event->message, $event->context]);
+            });
             $response = $this->deliver('', $this->payload($id), $headers);
             $this->assertTrue($response->status() === 401, 'Invalid authentication must be rejected.');
             $this->assertSame(['status' => 'unauthorized'], $response->json());
@@ -163,12 +222,13 @@ class PaymentWebhookNormalizationTest extends TestCase
     public static function invalidAuthentication(): array
     {
         $cases = ['wrong signature', 'wrong signed id', 'missing signature', 'missing request', 'bad request', 'bad ts', 'duplicate ts', 'missing ts', 'old ts'];
+
         return array_combine($cases, array_map(static fn ($case) => [$case], $cases));
     }
 
     public function test_missing_secret_is_technical_failure_without_remote_calls_or_events(): void
     {
-        $this->withRemoteLink(function ($transport) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport) {
             $id = (string) $transport->paymentId;
             $headers = $this->headers($id);
             config(['payment.mercadopago.webhook_secret' => null, 'app.debug' => true]);
@@ -182,9 +242,9 @@ class PaymentWebhookNormalizationTest extends TestCase
 
     public function test_processed_approved_event_is_idempotent_including_inventory(): void
     {
-        $this->withRemoteLink(function ($transport, $order) {
-            $inventory = app(\App\Services\InventoryService::class);
-            $product = \App\Models\Product::create(['name' => 'Synthetic item', 'slug' => 'synthetic-'.bin2hex(random_bytes(16)), 'sku' => 'SYN-'.bin2hex(random_bytes(8)), 'price' => '10.25', 'is_active' => true]);
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) {
+            $inventory = app(InventoryService::class);
+            $product = Product::create(['name' => 'Synthetic item', 'slug' => 'synthetic-'.bin2hex(random_bytes(16)), 'sku' => 'SYN-'.bin2hex(random_bytes(8)), 'price' => '10.25', 'is_active' => true]);
             $warehouse = $inventory->defaultWarehouse();
             $inventory->initializeProduct($product, 5, $warehouse);
             $item = $order->items()->create(['product_id' => $product->id, 'warehouse_id' => $warehouse->id, 'quantity' => 1, 'price' => '10.25', 'subtotal' => '10.25']);
@@ -206,10 +266,10 @@ class PaymentWebhookNormalizationTest extends TestCase
         });
     }
 
-    /** @dataProvider ignoredReasons */
+    #[DataProvider('ignoredReasons')]
     public function test_only_categorized_missing_remote_preference_can_be_reevaluated(?string $reason, bool $recover): void
     {
-        $this->withRemoteLink(function ($transport, $order) use ($reason, $recover) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) use ($reason, $recover) {
             $id = (string) $transport->paymentId;
             $notification = 'synthetic-'.bin2hex(random_bytes(16));
             PaymentWebhookEvent::create(['gateway' => 'mercadopago', 'provider_event_id' => $notification, 'provider_payment_id' => $id, 'event_type' => 'payment', 'payload_hash' => hash('sha256', 'synthetic'), 'idempotency_key' => 'mp:event:'.$notification, 'status' => PaymentWebhookEvent::IGNORED, 'failure_reason' => $reason, 'received_at' => now()]);
@@ -229,16 +289,24 @@ class PaymentWebhookNormalizationTest extends TestCase
         return [[PaymentWebhookEvent::REMOTE_PREFERENCE_UNAVAILABLE, true], [PaymentWebhookEvent::LOCAL_LINK_NOT_FOUND, false], [null, false]];
     }
 
-    /** @dataProvider incompatibleLinks */
+    #[DataProvider('incompatibleLinks')]
     public function test_incoherent_remote_or_local_link_is_never_processed(string $case): void
     {
-        $this->withRemoteLink(function ($transport, $order) use ($case) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) use ($case) {
             switch ($case) {
-                case 'preference': $transport->merchant['preference_id'] = 'synthetic-'.bin2hex(random_bytes(16)); break;
-                case 'reference': $transport->merchant['external_reference'] = 'synthetic-'.bin2hex(random_bytes(16)); break;
-                case 'amount': $transport->payment['transaction_amount'] = 9; $transport->merchant['total_amount'] = 9; $transport->merchant['payments'][0]['transaction_amount'] = 9; break;
-                case 'currency': $transport->payment['currency_id'] = 'USD'; $transport->merchant['payments'][0]['currency_id'] = 'USD'; break;
-                case 'current preference': $order->update(['current_payment_preference_id' => null]); break;
+                case 'preference': $transport->merchant['preference_id'] = 'synthetic-'.bin2hex(random_bytes(16));
+                    break;
+                case 'reference': $transport->merchant['external_reference'] = 'synthetic-'.bin2hex(random_bytes(16));
+                    break;
+                case 'amount': $transport->payment['transaction_amount'] = 9;
+                    $transport->merchant['total_amount'] = 9;
+                    $transport->merchant['payments'][0]['transaction_amount'] = 9;
+                    break;
+                case 'currency': $transport->payment['currency_id'] = 'USD';
+                    $transport->merchant['payments'][0]['currency_id'] = 'USD';
+                    break;
+                case 'current preference': $order->update(['current_payment_preference_id' => null]);
+                    break;
             }
             $id = (string) $transport->paymentId;
             $response = $this->deliver('', $this->payload($id), $this->headers($id));
@@ -256,10 +324,10 @@ class PaymentWebhookNormalizationTest extends TestCase
         return [['preference'], ['reference'], ['amount'], ['currency'], ['current preference']];
     }
 
-    /** @dataProvider technicalFailures */
+    #[DataProvider('technicalFailures')]
     public function test_technical_failures_propagate_without_becoming_processed_events(string $kind): void
     {
-        $this->withRemoteLink(function ($transport, $order) use ($kind) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) use ($kind) {
             $notification = null;
             $sqlite = DB::connection()->getDriverName() === 'sqlite';
             $blocker = null;
@@ -302,7 +370,7 @@ class PaymentWebhookNormalizationTest extends TestCase
                 $failure = null;
             } else {
                 $failure = $kind === 'provider'
-                    ? new \MercadoPago\Exceptions\MPApiException('Synthetic provider failure', new \MercadoPago\Net\MPResponse(500, ['message' => 'synthetic']))
+                    ? new MPApiException('Synthetic provider failure', new MPResponse(500, ['message' => 'synthetic']))
                     : new \RuntimeException('Synthetic transport failure');
                 $transport->paymentFailure = $failure;
             }
@@ -319,7 +387,7 @@ class PaymentWebhookNormalizationTest extends TestCase
                 }
             }
             if ($kind === 'sql') {
-                $this->assertTrue($caught instanceof \Illuminate\Database\QueryException, 'SQL failure must propagate.');
+                $this->assertTrue($caught instanceof QueryException, 'SQL failure must propagate.');
                 $this->assertTrue(($caught->errorInfo[0] ?? null) === '23000'
                     && (int) ($caught->errorInfo[1] ?? 0) === ($sqlite ? 19 : 1062), 'The expected physical integrity constraint must fail.');
                 $this->assertTrue($canary['inside_transaction'] && $canary['attempts'] === 1, 'The canary must execute once inside event registration.');
@@ -352,7 +420,7 @@ class PaymentWebhookNormalizationTest extends TestCase
 
     public function test_distinct_authenticated_events_finalize_the_same_pending_remote_payment(): void
     {
-        $this->withRemoteLink(function ($transport, $order) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) {
             $id = (string) $transport->paymentId;
             $transport->payment['status'] = 'pending';
             $pending = $this->deliver('', $this->payload($id), $this->headers($id));
@@ -377,7 +445,7 @@ class PaymentWebhookNormalizationTest extends TestCase
 
     public function test_query_only_notifications_allow_later_approval_without_duplicate_financial_writes(): void
     {
-        $this->withRemoteLink(function ($transport, $order) {
+        $this->withRemoteLinkWithSyntheticSecret(function ($transport, $order) {
             $id = (string) $transport->paymentId;
             $query = 'data.id='.$id.'&type=payment';
             $transport->payment['status'] = 'pending';

@@ -10,11 +10,15 @@ use App\Services\PaymentProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use MercadoPago\Client\MerchantOrder\MerchantOrderClient;
+use MercadoPago\Client\Payment\PaymentClient;
 use MercadoPago\Exceptions\MPApiException;
 use MercadoPago\MercadoPagoConfig;
 use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
 use MercadoPago\Net\MPResponse;
+use MercadoPago\Serialization\Serializer;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -23,17 +27,17 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
     use RefreshDatabase;
     use SyntheticMercadoPagoLink;
 
-    /** @dataProvider uninitializedResources */
+    #[DataProvider('uninitializedResources')]
     public function test_uninitialized_sdk_property_is_incomplete_evidence(string $resource): void
     {
         $this->withRemoteLink(function ($transport) use ($resource) {
             if ($resource === 'payment') {
                 unset($transport->payment['status']);
-                $dto = (new \MercadoPago\Client\Payment\PaymentClient)->get((string) $transport->paymentId);
+                $dto = (new PaymentClient)->get((string) $transport->paymentId);
                 $this->assertFalse(isset($dto->status));
             } else {
                 unset($transport->merchant['preference_id']);
-                $dto = (new \MercadoPago\Client\MerchantOrder\MerchantOrderClient)->get($transport->merchant['id']);
+                $dto = (new MerchantOrderClient)->get($transport->merchant['id']);
                 $this->assertFalse(isset($dto->preference_id));
             }
             $this->assertRejectedWithoutWrites(fn () => (new MercadoPagoGateway)->verifyPayment((string) $transport->paymentId), LinkFailure::REMOTE_EVIDENCE_INCOMPLETE);
@@ -45,7 +49,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
         return [['payment'], ['merchant']];
     }
 
-    /** @dataProvider providerFailures */
+    #[DataProvider('providerFailures')]
     public function test_provider_and_transport_failures_propagate_unchanged(string $resource, string $kind): void
     {
         $this->withRemoteLink(function ($transport) use ($resource, $kind) {
@@ -53,7 +57,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
                 'error' => new \Error('Synthetic unexpected error'),
                 'error exception' => new \ErrorException('Synthetic unexpected error exception'),
                 'transport' => new \RuntimeException('Synthetic transport error'),
-                default => new MPApiException('Synthetic provider error', new \MercadoPago\Net\MPResponse((int) $kind, ['message' => 'synthetic'])),
+                default => new MPApiException('Synthetic provider error', new MPResponse((int) $kind, ['message' => 'synthetic'])),
             };
             $property = $resource === 'payment' ? 'paymentFailure' : 'merchantFailure';
             $transport->$property = $failure;
@@ -74,7 +78,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
         return $cases;
     }
 
-    /** @dataProvider sdkFailures */
+    #[DataProvider('sdkFailures')]
     public function test_sdk_deserialization_defects_propagate(string $case, string $expected): void
     {
         $this->withRemoteLink(function ($transport) use ($case, $expected) {
@@ -128,7 +132,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
             $this->assertTrue($failure === $original, 'The exact original exception must propagate.');
         }
         if ($fromSerializer) {
-            $this->assertTrue(count(array_filter($failure->getTrace(), static fn ($frame) => ($frame['class'] ?? null) === \MercadoPago\Serialization\Serializer::class)) > 0, 'Failure must originate in real SDK serialization.');
+            $this->assertTrue(count(array_filter($failure->getTrace(), static fn ($frame) => ($frame['class'] ?? null) === Serializer::class)) > 0, 'Failure must originate in real SDK serialization.');
         }
         $this->assertCount(0, $writes, 'Failures must execute no writes.');
         $this->assertDatabaseCount('payment_transactions', 0);
@@ -152,7 +156,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
         });
     }
 
-    /** @dataProvider equivalentIdentityRepresentations */
+    #[DataProvider('equivalentIdentityRepresentations')]
     public function test_equivalent_string_and_integer_remote_order_identities_are_accepted(string $representation): void
     {
         $this->withRemoteLink(function ($transport) use ($representation) {
@@ -351,7 +355,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
         return '1'.$digits;
     }
 
-    /** @dataProvider invalidRemoteIdentityRepresentations */
+    #[DataProvider('invalidRemoteIdentityRepresentations')]
     public function test_noncanonical_remote_identities_are_rejected(string $location, string $form): void
     {
         $this->withRemoteLink(function ($transport) use ($location, $form) {
@@ -483,7 +487,7 @@ class MercadoPagoMerchantOrderLinkTest extends TestCase
         });
     }
 
-    /** @dataProvider incompatibleEvidence */
+    #[DataProvider('incompatibleEvidence')]
     public function test_incompatible_or_incomplete_evidence_is_rejected(string $case, string $category): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($case, $category) {

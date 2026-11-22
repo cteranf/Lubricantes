@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AdminProductListingTest extends TestCase
@@ -49,7 +50,7 @@ class AdminProductListingTest extends TestCase
 
         $rows = collect($response->json('data'))->keyBy('id');
         $this->assertSame([
-            'id', 'name', 'sku', 'presentation', 'description', 'price', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
+            'id', 'name', 'sku', 'presentation', 'description', 'price', 'tax_affectation', 'is_active', 'allow_reviews', 'product_model_id', 'category', 'brand', 'product_model',
             'physical_stock', 'image_url', 'image_variants', 'image_srcset', 'image_dimensions', 'images',
         ], array_keys($rows[$product->id]));
         $this->assertIsArray($rows[$product->id]['image_variants']);
@@ -123,7 +124,7 @@ class AdminProductListingTest extends TestCase
         $this->getJson('/api/v1/admin/products?page=2&per_page=15&sort=name&direction=asc')->assertOk()->assertJsonPath('meta.current_page', 2)->assertJsonPath('meta.total', 17);
     }
 
-    /** @dataProvider invalidProductQueryStrings */
+    #[DataProvider('invalidProductQueryStrings')]
     public function test_invalid_query_names_duplicates_arrays_and_values_are_rejected(string $query, int $expectedStatus): void
     {
         Sanctum::actingAs($this->admin());

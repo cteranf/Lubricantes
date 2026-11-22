@@ -13,6 +13,7 @@ use App\Services\TreasuryPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /** Shares certified fixtures and private-safe snapshots, including A1 regressions. */
 class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
@@ -67,7 +68,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         }
     }
 
-    /** @dataProvider httpUnauthorizedActors */
+    #[DataProvider('httpUnauthorizedActors')]
     public function test_http_authorization_precedes_resource_lookup(string $action, ?string $role, bool $active): void
     {
         $fixture = $this->fixture();
@@ -107,7 +108,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         return $cases;
     }
 
-    /** @dataProvider httpAuthorizedActions */
+    #[DataProvider('httpAuthorizedActions')]
     public function test_http_authorized_scalar_identifiers_are_safe_and_reach_the_service(string $action): void
     {
         $fixture = $this->fixture();
@@ -137,7 +138,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         return ['pending' => ['pending'], 'complete' => ['complete']];
     }
 
-    /** @dataProvider httpInvalidPayloads */
+    #[DataProvider('httpInvalidPayloads')]
     public function test_http_rejects_invalid_payloads_without_writes(string $action, array $payload, bool $header = false, bool $file = false): void
     {
         $fixture = $this->fixture();
@@ -176,7 +177,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         return $cases;
     }
 
-    /** @dataProvider httpPresentations */
+    #[DataProvider('httpPresentations')]
     public function test_http_real_workflow_and_idempotent_retries_preserve_private_state(bool $submission, bool $case): void
     {
         $fixture = $this->fixture(withSubmission: $submission, withResolutionCase: $case);
@@ -225,7 +226,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         return ['without presentation' => [false, false], 'with presentation' => [true, false], 'with B2' => [true, true]];
     }
 
-    /** @dataProvider httpConflictStates */
+    #[DataProvider('httpConflictStates')]
     public function test_http_financial_conflicts_do_not_repair_or_write(string $state): void
     {
         $fixture = $this->fixture(withSubmission: true, withResolutionCase: true);
@@ -262,7 +263,7 @@ class TreasuryPaymentRefundHttpTest extends TreasuryPaymentRefundServiceTest
         return array_combine(['payment', 'order', 'partial', 'inventory', 'case', 'refund'], array_map(fn ($state) => [$state], ['payment', 'order', 'partial', 'inventory', 'case', 'refund']));
     }
 
-    /** @dataProvider httpUnexpectedErrors */
+    #[DataProvider('httpUnexpectedErrors')]
     public function test_http_unexpected_errors_reach_the_global_safe_500(string $action, string $kind): void
     {
         $fixture = $this->fixture();

@@ -24,12 +24,12 @@ class CustomerTrackingReservationStatusTest extends TestCase
         $this->reservation($fixture, 1, InventoryReservation::CONSUMED);
 
         $response = $this->submission($fixture)
-            ->assertJsonPath('data.status', PaymentSubmission::APPROVED)
-            ->assertJsonPath('data.message', 'Pago validado por Tesorería.')
-            ->assertJsonPath('data.reservation_status', InventoryReservation::CONSUMED)
-            ->assertJsonPath('data.reservation_expires_at', null)
-            ->assertJsonPath('data.operation_number_masked', '••••34');
-        $this->assertNotNull($response->json('data.validated_at'));
+            ->assertJsonPath('data.submissions.0.status', PaymentSubmission::APPROVED)
+            ->assertJsonPath('data.submissions.0.message', 'Pago validado por Tesorería.')
+            ->assertJsonPath('data.submissions.0.reservation_status', InventoryReservation::CONSUMED)
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', null)
+            ->assertJsonPath('data.submissions.0.operation_number_masked', '••••34');
+        $this->assertNotNull($response->json('data.submissions.0.validated_at'));
 
         $this->tracking($fixture)
             ->assertJsonPath('order.items.0.reservation.status', InventoryReservation::CONSUMED);
@@ -46,8 +46,8 @@ class CustomerTrackingReservationStatusTest extends TestCase
         $reservation = $this->reservation($fixture, 1, InventoryReservation::ACTIVE);
 
         $this->submission($fixture)
-            ->assertJsonPath('data.reservation_status', InventoryReservation::ACTIVE)
-            ->assertJsonPath('data.reservation_expires_at', $reservation->expires_at->toIso8601String());
+            ->assertJsonPath('data.submissions.0.reservation_status', InventoryReservation::ACTIVE)
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', $reservation->expires_at->toIso8601String());
     }
 
     public function test_expired_history_does_not_replace_the_consumed_current_reservation(): void
@@ -57,8 +57,8 @@ class CustomerTrackingReservationStatusTest extends TestCase
         $this->reservation($fixture, 2, InventoryReservation::CONSUMED);
 
         $this->submission($fixture)
-            ->assertJsonPath('data.reservation_status', InventoryReservation::CONSUMED)
-            ->assertJsonPath('data.reservation_expires_at', null);
+            ->assertJsonPath('data.submissions.0.reservation_status', InventoryReservation::CONSUMED)
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', null);
         $this->tracking($fixture)
             ->assertJsonPath('order.items.0.reservation.status', InventoryReservation::CONSUMED)
             ->assertJsonMissingPath('order.items.0.reservations');
@@ -72,8 +72,8 @@ class CustomerTrackingReservationStatusTest extends TestCase
         $this->reservation($second, 1, InventoryReservation::CONSUMED);
 
         $this->submission($fixture)
-            ->assertJsonPath('data.reservation_status', 'mixed')
-            ->assertJsonPath('data.reservation_expires_at', null);
+            ->assertJsonPath('data.submissions.0.reservation_status', 'mixed')
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', null);
 
         $panel = file_get_contents(resource_path('js/components/CustomerTransferPaymentPanel.vue'));
         $this->assertStringContainsString("submission.reservation_status === 'mixed'", $panel);
@@ -85,8 +85,8 @@ class CustomerTrackingReservationStatusTest extends TestCase
         $fixture = $this->fixture();
 
         $this->submission($fixture)
-            ->assertJsonPath('data.reservation_status', 'none')
-            ->assertJsonPath('data.reservation_expires_at', null);
+            ->assertJsonPath('data.submissions.0.reservation_status', 'none')
+            ->assertJsonPath('data.submissions.0.reservation_expires_at', null);
     }
 
     public function test_customer_payload_exposes_only_the_current_safe_reservation_summary(): void

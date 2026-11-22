@@ -70,7 +70,10 @@ class ProductCardCartDrawerFrontendTest extends TestCase
         $this->assertStringContainsString('cartStore.count', $drawer);
         $this->assertStringContainsString('cartPriceSummary.productSubtotal', $cart);
         $this->assertStringContainsString('summarizeCartPrices(cartStore.items)', $cart);
-        $this->assertStringContainsString('cartStore.total', $checkout);
+        $this->assertStringContainsString('const checkoutPriceSummary = computed(() => summarizeCartPrices(cartStore.items));', $checkout);
+        $this->assertStringContainsString('checkoutPriceSummary.productSubtotal', $checkout);
+        $this->assertStringContainsString('const quotedTotal = computed(() => fromMinor(toMinor(checkoutPriceSummary.value.productSubtotal)', $checkout);
+        $this->assertStringNotContainsString('cartStore.total', $checkout);
         $this->assertStringContainsString('cartStore.total', $drawer);
         $this->assertStringContainsString('normalizeCartQuantity', $store);
         $this->assertStringContainsString('localStorage.setItem(\'cartItems\'', $store);
@@ -132,9 +135,15 @@ class ProductCardCartDrawerFrontendTest extends TestCase
         $depth = 0;
         $length = strlen($source);
         for ($index = $openingBrace; $index < $length; $index++) {
-            if ($source[$index] === '{') $depth++;
-            if ($source[$index] === '}') $depth--;
-            if ($depth === 0) return substr($source, $openingBrace + 1, $index - $openingBrace - 1);
+            if ($source[$index] === '{') {
+                $depth++;
+            }
+            if ($source[$index] === '}') {
+                $depth--;
+            }
+            if ($depth === 0) {
+                return substr($source, $openingBrace + 1, $index - $openingBrace - 1);
+            }
         }
 
         $this->fail("Unbalanced body for source signature: {$signature}");

@@ -2,8 +2,17 @@
 
 use App\Models\Order;
 use App\Services\MockPaymentPreferenceResolver;
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Events\TransactionCommitted;
+use Illuminate\Database\Events\TransactionRolledBack;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 
 // Safe coordination evidence only: no requests, SQL, identifiers or exception messages.
 [$orderId, $action, $role, $directory] = array_slice($argv, 1) + array_fill(0, 4, null);
@@ -40,12 +49,12 @@ $checkpoint = function (string $name) use (&$diagnostic, $started, $diagnosticPa
 };
 $captureException = function (Throwable $exception) use (&$diagnostic, $checkpoint): void {
     $diagnostic['failure_stage'] = $diagnostic['last_checkpoint'];
-    $info = $exception instanceof \Illuminate\Database\QueryException ? $exception->errorInfo : ($exception instanceof PDOException ? $exception->errorInfo : null);
+    $info = $exception instanceof QueryException ? $exception->errorInfo : ($exception instanceof PDOException ? $exception->errorInfo : null);
     $diagnostic['sqlstate'] = is_array($info) ? (string) ($info[0] ?? '') : null;
     $diagnostic['driver_code'] = is_array($info) ? (int) ($info[1] ?? 0) : null;
     $diagnostic['deadlock_1213'] = $diagnostic['driver_code'] === 1213;
     $diagnostic['lock_timeout_1205'] = $diagnostic['driver_code'] === 1205;
-    $diagnostic['result'] = $diagnostic['deadlock_1213'] ? 'deadlock' : ($diagnostic['lock_timeout_1205'] ? 'lock_timeout' : ($exception instanceof \Illuminate\Validation\ValidationException ? 'domain_conflict' : 'unexpected_error'));
+    $diagnostic['result'] = $diagnostic['deadlock_1213'] ? 'deadlock' : ($diagnostic['lock_timeout_1205'] ? 'lock_timeout' : ($exception instanceof ValidationException ? 'domain_conflict' : 'unexpected_error'));
     $checkpoint('exception_caught');
 };
 $checkpoint('worker_started');
@@ -54,16 +63,17 @@ $exitCode = 0;
 try {
     require dirname(__DIR__, 2).'/vendor/autoload.php';
     $app = require dirname(__DIR__, 2).'/bootstrap/app.php';
-    $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+    $app->make(Kernel::class)->bootstrap();
     $checkpoint('bootstrap_completed');
-    app(\Illuminate\Contracts\Debug\ExceptionHandler::class)->reportable($captureException);
+    app(ExceptionHandler::class)->reportable($captureException);
     [$orderId, $action, $role, $directory] = array_slice($argv, 1) + array_fill(0, 4, null);
     if (count($argv) !== 5 || ! ctype_digit((string) $orderId)
         || ! in_array($action, ['approve', 'get', 'reject'], true) || ! in_array($role, ['first', 'second'], true)
         || ! is_dir((string) $directory) || ! preg_match('/\Alubristore-mock-race-[a-f0-9]{16}\z/', basename($directory))
         || app()->environment() !== 'testing' || config('app.debug') || app()->configurationIsCached()
         || config('database.default') !== 'mysql' || config('database.connections.mysql.url')
-        || ! preg_match('/\Alubristore_mock_atomic_[a-f0-9]{12}_test\z/', (string) config('database.connections.mysql.database'))
+        || ! preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) config('database.connections.mysql.database'))
+        || getenv('LARAVEL13_MYSQL_TEST_DATABASE') !== config('database.connections.mysql.database')
         || getenv('MOCK_PAYMENT_PHYSICAL_CERT') !== '1') {
         throw new RuntimeException('guard');
     }
@@ -77,7 +87,7 @@ try {
         $connection = DB::connection();
         $row = $connection->selectOne('SELECT CONNECTION_ID() AS id, @@server_uuid AS uuid, @@port AS port, DATABASE() AS db, @@autocommit AS ac, @@transaction_isolation AS isolation');
 
-        return ['connection_id' => (int) $row->id, 'server_hash' => hash('sha256', $row->uuid), 'port' => (int) $row->port, 'database' => str_ends_with($row->db, '_test') ? $row->db : null, 'driver' => $connection->getDriverName(), 'laravel_connection' => $connection->getName(), 'transaction_level' => $connection->transactionLevel(), 'autocommit' => (int) $row->ac, 'isolation' => $row->isolation];
+        return ['connection_id' => (int) $row->id, 'server_hash' => hash('sha256', $row->uuid), 'port' => (int) $row->port, 'database' => $row->db === getenv('LARAVEL13_MYSQL_TEST_DATABASE') ? $row->db : null, 'driver' => $connection->getDriverName(), 'laravel_connection' => $connection->getName(), 'transaction_level' => $connection->transactionLevel(), 'autocommit' => (int) $row->ac, 'isolation' => $row->isolation];
     };
     $diagnostic['connection_id'] = $identity()['connection_id'];
     DB::connection()->beforeExecuting(function ($query) use (&$diagnostic, $identity, $directory, $role, $checkpoint, $publish) {
@@ -91,13 +101,13 @@ try {
     });
     $checkpoint('preflight_completed');
     $events = app('events');
-    $events->listen(\Illuminate\Database\Events\TransactionCommitted::class, function ($event) use ($checkpoint) {
+    $events->listen(TransactionCommitted::class, function ($event) use ($checkpoint) {
         if ($event->connection->transactionLevel() === 0) {
             $checkpoint('committed');
         }
     });
-    $events->listen(\Illuminate\Database\Events\TransactionBeginning::class, fn () => $checkpoint('transaction_started'));
-    $events->listen(\Illuminate\Database\Events\TransactionRolledBack::class, fn () => $checkpoint('rolled_back'));
+    $events->listen(TransactionBeginning::class, fn () => $checkpoint('transaction_started'));
+    $events->listen(TransactionRolledBack::class, fn () => $checkpoint('rolled_back'));
     config(['payment.mock.enabled' => true, 'session.driver' => 'array']);
     $app->instance(MockPaymentPreferenceResolver::class, new class($directory, $role, $checkpoint, $diagnostic, $identity, $publish) extends MockPaymentPreferenceResolver
     {
@@ -150,15 +160,15 @@ try {
     $preference = $order->currentPaymentPreference;
     $checkpoint('fixture_loaded');
     if ($action === 'get') {
-        Illuminate\Support\Carbon::setTestNow($order->reserved_until->copy()->addMinute());
+        Carbon::setTestNow($order->reserved_until->copy()->addMinute());
     }
     $route = $action === 'get' ? 'mock.payment' : 'mock.payment.process';
     $url = URL::temporarySignedRoute($route, now()->addMinutes(30), ['paymentId' => $preference->provider_preference_id, 'order_id' => $order->id]);
     $session = app('session')->driver();
     $session->start();
     $request = $action === 'get'
-        ? Illuminate\Http\Request::create($url, 'GET')
-        : Illuminate\Http\Request::create($url, 'POST', ['_token' => $session->token(), 'action' => $action, 'scenario' => $action === 'reject' ? 'declined' : 'approved']);
+        ? Request::create($url, 'GET')
+        : Request::create($url, 'POST', ['_token' => $session->token(), 'action' => $action, 'scenario' => $action === 'reject' ? 'declined' : 'approved']);
     $diagnostic['signature_valid'] = URL::hasValidSignature($request);
     $checkpoint('signature_checked');
     if (! $diagnostic['signature_valid']) {
@@ -183,8 +193,8 @@ try {
         $diagnostic['transaction_level_final'] = DB::connection()->transactionLevel();
         DB::disconnect();
     }
-    if (class_exists(\Illuminate\Support\Carbon::class)) {
-        Illuminate\Support\Carbon::setTestNow();
+    if (class_exists(Carbon::class)) {
+        Carbon::setTestNow();
     }
     $checkpoint('worker_finished');
 }

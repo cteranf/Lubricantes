@@ -2,7 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\PaymentRefundReadConflictException;
+use App\Models\InventoryReservation;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Services\InventoryBalanceLockService;
 use App\Services\TreasuryPaymentRefundAvailabilityService;
+use App\Services\TreasuryPaymentRefundReadEvidence;
 use App\Services\TreasuryPaymentRefundService;
 use App\Services\TreasuryPaymentRefundWorklistService;
 use Illuminate\Database\Eloquent\Model;
@@ -11,10 +17,11 @@ use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Database\Events\TransactionCommitted;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServiceTest
 {
-    /** @dataProvider worklistMethods */
+    #[DataProvider('worklistMethods')]
     public function test_worklist_batch_and_single_availability_agree_for_every_method(string $method, bool $submission, bool $case): void
     {
         $f = $this->fixture($method, $submission, $case);
@@ -214,7 +221,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         try {
             $service->paginate(['refund_status' => 'not_started']);
             $this->fail('An unstable read must not return a page.');
-        } catch (\App\Exceptions\PaymentRefundReadConflictException) {
+        } catch (PaymentRefundReadConflictException) {
             $this->assertTrue($attempts === [1, 2, 3], 'Only the fixed read-attempt budget is allowed.');
         }
     }
@@ -264,7 +271,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         $this->assertTrue($outside->items() === [], 'An out-of-range page must preserve its exact total and empty data.');
     }
 
-    /** @dataProvider readLimits */
+    #[DataProvider('readLimits')]
     public function test_read_limits_never_return_a_partial_total(string $limit): void
     {
         $f = $this->fixture();
@@ -273,7 +280,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         try {
             app(TreasuryPaymentRefundWorklistService::class)->paginate(['payment_method' => 'card', 'refund_status' => $limit === 'candidates' ? 'pending' : 'manual_review']);
             $this->fail('A bounded read must fail without returning partial pagination.');
-        } catch (\App\Exceptions\PaymentRefundReadConflictException) {
+        } catch (PaymentRefundReadConflictException) {
             $this->assertTrue(hash_equals($before, $this->completeDigest()), 'Read limits must never repair or mutate fixtures.');
         }
     }
@@ -288,7 +295,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         $f = $this->fixture();
         $foreign = $this->addForeignActiveReservation($f);
         for ($i = 0; $i < 250; $i++) {
-            \App\Models\OrderItem::forceCreate(['order_id' => $foreign['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
+            OrderItem::forceCreate(['order_id' => $foreign['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
         }
         $dispatcher = DB::connection()->getEventDispatcher();
         $probe = clone $dispatcher;
@@ -305,7 +312,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         DB::connection()->setEventDispatcher($probe);
         Model::setEventDispatcher($modelProbe);
         try {
-            $evidence = new \App\Services\TreasuryPaymentRefundReadEvidence([$f['order']->id], app(\App\Services\InventoryBalanceLockService::class));
+            $evidence = new TreasuryPaymentRefundReadEvidence([$f['order']->id], app(InventoryBalanceLockService::class));
         } finally {
             DB::connection()->setEventDispatcher($dispatcher);
             Model::setEventDispatcher($modelDispatcher);
@@ -322,20 +329,20 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         $this->assertTrue(app(TreasuryPaymentRefundWorklistService::class)->forOrder($f['order']->id)['requires_manual_review']);
     }
 
-    /** @dataProvider evidenceLimits */
+    #[DataProvider('evidenceLimits')]
     public function test_evidence_row_limits_fail_privately_instead_of_loading_unbounded_rows(string $limit): void
     {
         $f = $this->fixture();
         if (in_array($limit, ['rows', 'queries'], true)) {
             $count = $limit === 'queries' ? 999 : 1000;
             for ($i = 0; $i < $count; $i++) {
-                \App\Models\OrderItem::forceCreate(['order_id' => $f['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $f['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
+                OrderItem::forceCreate(['order_id' => $f['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $f['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
             }
         } else {
             $foreign = $this->addForeignActiveReservation($f);
             for ($i = 0; $i < 200; $i++) {
-                $item = \App\Models\OrderItem::forceCreate(['order_id' => $foreign['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
-                \App\Models\InventoryReservation::forceCreate(['order_id' => $foreign['order']->id, 'order_item_id' => $item->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'reservation_sequence' => 1, 'status' => 'active', 'expires_at' => now()->addHour(), 'idempotency_key' => 'synthetic-evidence-'.$i]);
+                $item = OrderItem::forceCreate(['order_id' => $foreign['order']->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'price' => '25.00', 'subtotal' => '25.00']);
+                InventoryReservation::forceCreate(['order_id' => $foreign['order']->id, 'order_item_id' => $item->id, 'product_id' => $f['product']->id, 'warehouse_id' => $foreign['warehouse']->id, 'quantity' => 1, 'reservation_sequence' => 1, 'status' => 'active', 'expires_at' => now()->addHour(), 'idempotency_key' => 'synthetic-evidence-'.$i]);
             }
         }
         $before = $this->completeDigest();
@@ -349,7 +356,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
         try {
             app(TreasuryPaymentRefundWorklistService::class)->forOrder($f['order']->id);
             $this->fail('Evidence overflow must not return a partial row.');
-        } catch (\App\Exceptions\PaymentRefundReadConflictException) {
+        } catch (PaymentRefundReadConflictException) {
             DB::connection()->setEventDispatcher($dispatcher);
             $this->assertTrue(hash_equals($before, $this->completeDigest()), 'Evidence overflow must not mutate the fixtures.');
             if ($limit === 'queries') {
@@ -369,7 +376,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
     {
         $ids = [];
         for ($i = 0; $i < $count; $i++) {
-            $ids[] = \App\Models\Order::create(['user_id' => $f['customer']->id, 'status' => 'confirmed', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'card', 'payment_status' => 'refund_pending'])->id;
+            $ids[] = Order::create(['user_id' => $f['customer']->id, 'status' => 'confirmed', 'total' => '50.00', 'shipping_info' => ['address' => 'Fixture'], 'payment_method' => 'card', 'payment_status' => 'refund_pending'])->id;
         }
 
         return $ids;
@@ -377,7 +384,7 @@ class TreasuryPaymentRefundWorklistServiceTest extends TreasuryPaymentRefundServ
 
     private function readProbe(\Closure $after, ?\Closure $frontier = null): TreasuryPaymentRefundWorklistService
     {
-        return new class(app(TreasuryPaymentRefundAvailabilityService::class), app(\App\Services\InventoryBalanceLockService::class), $after, $frontier) extends TreasuryPaymentRefundWorklistService
+        return new class(app(TreasuryPaymentRefundAvailabilityService::class), app(InventoryBalanceLockService::class), $after, $frontier) extends TreasuryPaymentRefundWorklistService
         {
             public function __construct($availability, $locks, private \Closure $after, private ?\Closure $frontier)
             {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\ElectronicDocumentStatus;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class BillingOrderResource extends JsonResource
@@ -29,6 +30,7 @@ class BillingOrderResource extends JsonResource
                 'draft_reference' => $document->draft_reference,
                 'document_type' => $document->document_type,
                 'status' => $document->status,
+                'status_label' => ElectronicDocumentStatus::label($document->status),
                 'version' => (int) $document->version,
                 'prepared_at' => $document->prepared_at?->toISOString(),
             ])->all()),

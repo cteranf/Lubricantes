@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use LogicException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class PaymentRefundInfrastructureTest extends TestCase
@@ -281,7 +282,7 @@ class PaymentRefundInfrastructureTest extends TestCase
         ]);
     }
 
-    /** @dataProvider unsafeBackfillMutations */
+    #[DataProvider('unsafeBackfillMutations')]
     public function test_migration_backfill_leaves_unsafe_or_ambiguous_legacy_rows_unlinked(string $field, mixed $value): void
     {
         $original = $this->approvedPayment('unsafe-backfill-'.$field);
@@ -330,7 +331,7 @@ class PaymentRefundInfrastructureTest extends TestCase
         }
     }
 
-    /** @dataProvider unreconstructibleOriginalStates */
+    #[DataProvider('unreconstructibleOriginalStates')]
     public function test_down_rejects_each_unreconstructible_original_before_any_ddl(string $state): void
     {
         $original = $this->approvedPayment('down-predicate-'.$state);

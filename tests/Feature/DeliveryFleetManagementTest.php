@@ -12,6 +12,7 @@ use App\Models\OrderDeliveryHistory;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class DeliveryFleetManagementTest extends TestCase
@@ -219,9 +220,7 @@ class DeliveryFleetManagementTest extends TestCase
         $this->assertSame($reservationCount, InventoryReservation::count());
     }
 
-    /**
-     * @dataProvider invalidVehicleAtDispatchProvider
-     */
+    #[DataProvider('invalidVehicleAtDispatchProvider')]
     public function test_vehicle_revalidation_blocks_dispatch_without_history(string $field, mixed $value): void
     {
         Sanctum::actingAs($this->admin());

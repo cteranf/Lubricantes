@@ -5,23 +5,25 @@ namespace Tests\Feature;
 use App\Models\Branch;
 use App\Models\InventoryMovement;
 use App\Models\InventoryReceipt;
+use App\Models\InventoryReservation;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use App\Services\InventoryReceiptService;
+use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Database\Connection;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlInventoryReceiptConcurrencyTest extends TestCase
 {
-    private const DATABASE = 'lubristore_inventory_receipts_test';
+    private string $database;
 
     private string $workerDirectory;
 
@@ -39,7 +41,12 @@ class MySqlInventoryReceiptConcurrencyTest extends TestCase
             $this->markTestSkipped('Inventory receipt concurrency requires MySQL/InnoDB.');
         }
 
-        $this->assertSame(self::DATABASE, DB::connection()->selectOne('SELECT DATABASE() AS database_name')->database_name);
+        $database = getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+        $this->assertIsString($database, 'Set LARAVEL13_MYSQL_TEST_DATABASE to a dedicated disposable MySQL schema.');
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $database);
+        $this->database = $database;
+        $this->assertSame($database, config('database.connections.mysql.database'));
+        $this->assertSame($database, DB::connection()->selectOne('SELECT DATABASE() AS database_name')->database_name);
         $this->assertSame('INNODB', strtoupper((string) DB::connection()->selectOne('SELECT @@default_storage_engine AS engine_name')->engine_name));
 
         // This destructive operation is guarded above and may only touch the
@@ -213,7 +220,7 @@ class MySqlInventoryReceiptConcurrencyTest extends TestCase
         return User::factory()->create(['role' => 'admin', 'is_active' => true, 'email' => 'receipt-'.$suffix.'-'.Str::random(8).'@example.test']);
     }
 
-    private function reservationFixture(User $user, Warehouse $warehouse, Product $product, int $quantity): \App\Models\InventoryReservation
+    private function reservationFixture(User $user, Warehouse $warehouse, Product $product, int $quantity): InventoryReservation
     {
         $orderId = DB::table('orders')->insertGetId([
             'user_id' => $user->id,
@@ -247,7 +254,7 @@ class MySqlInventoryReceiptConcurrencyTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        return \App\Models\InventoryReservation::query()->where('order_item_id', $itemId)->firstOrFail();
+        return InventoryReservation::query()->where('order_item_id', $itemId)->firstOrFail();
     }
 
     private function draft(Warehouse $warehouse, Product $product, int $quantity, User $admin): InventoryReceipt
@@ -313,7 +320,7 @@ class MySqlInventoryReceiptConcurrencyTest extends TestCase
         config(['database.connections.receipt_lock_observer' => $configuration]);
         $this->lockObserver = DB::connection('receipt_lock_observer');
         $identity = $this->lockObserver->selectOne('SELECT CONNECTION_ID() AS id, DATABASE() AS database_name')->id;
-        $this->assertSame(self::DATABASE, $this->lockObserver->selectOne('SELECT DATABASE() AS database_name')->database_name);
+        $this->assertSame($this->database, $this->lockObserver->selectOne('SELECT DATABASE() AS database_name')->database_name);
         $this->assertNotSame((int) DB::connection()->selectOne('SELECT CONNECTION_ID() AS id')->id, (int) $identity);
         $this->assertSame(1, (int) $this->lockObserver->selectOne('SELECT @@performance_schema AS enabled')->enabled);
 

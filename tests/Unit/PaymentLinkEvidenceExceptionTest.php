@@ -3,11 +3,12 @@
 namespace Tests\Unit;
 
 use App\Exceptions\PaymentLinkEvidenceException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class PaymentLinkEvidenceExceptionTest extends TestCase
 {
-    /** @dataProvider validCategories */
+    #[DataProvider('validCategories')]
     public function test_valid_categories_are_preserved(string $category): void
     {
         $exception = new PaymentLinkEvidenceException($category);
@@ -27,7 +28,7 @@ class PaymentLinkEvidenceExceptionTest extends TestCase
         ];
     }
 
-    /** @dataProvider invalidCategories */
+    #[DataProvider('invalidCategories')]
     public function test_arbitrary_categories_are_replaced_without_leaking(string $input): void
     {
         $exception = new PaymentLinkEvidenceException($input);

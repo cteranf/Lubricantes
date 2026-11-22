@@ -14,10 +14,13 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
+use App\Services\TreasuryPaymentReviewService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TreasuryPaymentReviewTest extends TestCase
@@ -256,7 +259,7 @@ class TreasuryPaymentReviewTest extends TestCase
         $this->patchJson('/api/v1/treasury/payment-submissions/'.$terminal->id.'/reject', ['reason' => ['no válido']])->assertUnprocessable();
     }
 
-    /** @dataProvider terminalStatuses */
+    #[DataProvider('terminalStatuses')]
     public function test_terminal_statuses_cannot_be_observed_or_rejected(string $status): void
     {
         $submission = $this->submission(['status' => $status]);
@@ -294,7 +297,7 @@ class TreasuryPaymentReviewTest extends TestCase
         $treasury = $this->treasury();
         PaymentSubmissionHistory::creating(fn () => throw new \RuntimeException('forced history failure'));
         try {
-            app(\App\Services\TreasuryPaymentReviewService::class)->observe($submission->id, $treasury->id, 'Motivo válido');
+            app(TreasuryPaymentReviewService::class)->observe($submission->id, $treasury->id, 'Motivo válido');
             $this->fail('La transacción no se revirtió.');
         } catch (\RuntimeException $exception) {
             $this->assertSame('forced history failure', $exception->getMessage());
@@ -322,7 +325,7 @@ class TreasuryPaymentReviewTest extends TestCase
             $beforeInventory = $inventory->fresh()->only(['quantity', 'reserved_quantity']);
             $treasury = $this->treasury();
 
-            app(\App\Services\TreasuryPaymentReviewService::class)->observe($submission->id, $treasury->id, 'Revisar comprobante');
+            app(TreasuryPaymentReviewService::class)->observe($submission->id, $treasury->id, 'Revisar comprobante');
 
             $expected = now()->addMinutes(180)->toIso8601String();
             $this->assertSame($expected, $order->fresh()->reserved_until?->toIso8601String());
@@ -348,7 +351,7 @@ class TreasuryPaymentReviewTest extends TestCase
         [$submission, $order, $active] = $this->submissionWithInventory();
         $terminal = $this->additionalReservation($order, $active, now()->addHours(2), InventoryReservation::RELEASED);
         $terminalBefore = [$terminal->status, $terminal->expires_at?->toIso8601String()];
-        app(\App\Services\TreasuryPaymentReviewService::class)->observe($submission->id, $this->treasury()->id, 'Motivo válido');
+        app(TreasuryPaymentReviewService::class)->observe($submission->id, $this->treasury()->id, 'Motivo válido');
         $this->assertSame($terminalBefore, [$terminal->fresh()->status, $terminal->fresh()->expires_at?->toIso8601String()]);
         $this->assertSame(InventoryReservation::ACTIVE, $active->fresh()->status);
 
@@ -356,9 +359,9 @@ class TreasuryPaymentReviewTest extends TestCase
         $invalidReservation->update(['status' => InventoryReservation::RELEASED]);
         $before = [$invalidSubmission->status, $invalidOrder->reserved_until?->toIso8601String(), $invalidReservation->expires_at?->toIso8601String(), PaymentSubmissionHistory::count()];
         try {
-            app(\App\Services\TreasuryPaymentReviewService::class)->observe($invalidSubmission->id, $this->treasury()->id, 'Motivo válido');
+            app(TreasuryPaymentReviewService::class)->observe($invalidSubmission->id, $this->treasury()->id, 'Motivo válido');
             $this->fail('Una orden sin reserva activa y vigente fue observada.');
-        } catch (\Illuminate\Http\Exceptions\HttpResponseException $exception) {
+        } catch (HttpResponseException $exception) {
             $this->assertSame(409, $exception->getResponse()->getStatusCode());
         }
         $this->assertSame($before[0], $invalidSubmission->fresh()->status);
@@ -431,7 +434,7 @@ class TreasuryPaymentReviewTest extends TestCase
         }
     }
 
-    /** @dataProvider historyPrivacyEvents */
+    #[DataProvider('historyPrivacyEvents')]
     public function test_history_details_are_private_by_default(string $event, bool $authorized): void
     {
         $submission = $this->submission();
@@ -452,7 +455,7 @@ class TreasuryPaymentReviewTest extends TestCase
         $this->assertTrue($persisted->reason === $sentinel && $this->canonicalizeHistoryMetadata($persisted->safe_metadata) === $this->canonicalizeHistoryMetadata($metadata) && $persisted->event === $event, 'Serialization must preserve all persisted values.');
     }
 
-    /** @dataProvider historyMetadataComparisons */
+    #[DataProvider('historyMetadataComparisons')]
     public function test_history_metadata_canonicalization_preserves_types_and_list_order(mixed $actual, mixed $expected, bool $equivalent): void
     {
         $this->assertTrue(

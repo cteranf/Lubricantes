@@ -390,7 +390,7 @@ class AdminAuditLogViewerTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic audit failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic audit failure'));
             }
         };
         $this->app->instance(AuditService::class, $audit);

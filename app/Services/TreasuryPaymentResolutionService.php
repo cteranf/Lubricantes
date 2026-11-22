@@ -9,7 +9,6 @@ use App\Models\PaymentResolutionHistory;
 use App\Models\PaymentSubmission;
 use App\Models\PaymentSubmissionHistory;
 use App\Models\PaymentTransaction;
-use App\Support\TransferPaymentInstallments;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Collection;
@@ -26,7 +25,15 @@ class TreasuryPaymentResolutionService
     public function open(int $submissionId, int $actorId): PaymentResolutionCase
     {
         try {
-            return DB::transaction(fn () => $this->openWithinTransaction($submissionId, $actorId));
+            // Resolve the parent before beginning the transaction. Otherwise a
+            // consistent read can establish a stale REPEATABLE READ snapshot
+            // before this method waits for the canonical order lock.
+            $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
+            if (! $orderId) {
+                $this->notFound();
+            }
+
+            return DB::transaction(fn () => $this->openWithinTransaction($submissionId, $actorId, (int) $orderId));
         } catch (QueryException $exception) {
             if ($this->treasury->isUniqueViolation($exception)) {
                 $retry = $this->coherentExisting($submissionId);
@@ -73,12 +80,8 @@ class TreasuryPaymentResolutionService
         return $this->eligibilityConflict($submission, $order, $reservations, [PaymentSubmission::PENDING_REVIEW]) === null;
     }
 
-    private function openWithinTransaction(int $submissionId, int $actorId): PaymentResolutionCase
+    private function openWithinTransaction(int $submissionId, int $actorId, int $orderId): PaymentResolutionCase
     {
-        $orderId = PaymentSubmission::query()->whereKey($submissionId)->value('order_id');
-        if (! $orderId) {
-            $this->notFound();
-        }
         // All customer writes and Treasury decisions serialize order first.
         $order = Order::query()->lockForUpdate()->find($orderId);
         if (! $order) {

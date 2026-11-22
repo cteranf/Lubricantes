@@ -7,13 +7,16 @@ use App\Models\Product;
 use App\Models\User;
 use App\Services\InventoryService;
 use App\Services\PaymentPreferenceService;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\Process;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
@@ -23,7 +26,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
 
     private array $observation = [];
 
-    /** @dataProvider winners */
+    #[DataProvider('winners')]
     public function test_physical_approval_and_get_expiration_preserve_current_state(string $winner, int $iteration, ?string $peerAction = null): void
     {
         $peerAction ??= $winner === 'approve' ? 'get' : 'approve';
@@ -32,7 +35,9 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
         $this->assertFalse(app()->configurationIsCached());
         $this->assertSame('mysql', config('database.default'));
         $this->assertEmpty(config('database.connections.mysql.url'));
-        $this->assertTrue(preg_match('/\Alubristore_mock_atomic_[a-f0-9]{12}_test\z/', (string) config('database.connections.mysql.database')) === 1);
+        $database = (string) config('database.connections.mysql.database');
+        $this->assertTrue(preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $database) === 1);
+        $this->assertSame($database, getenv('LARAVEL13_MYSQL_TEST_DATABASE'));
         $this->assertSame('1', getenv('MOCK_PAYMENT_PHYSICAL_CERT'));
         $this->assertTrue(DB::selectOne('SELECT DATABASE() AS name')->name === config('database.connections.mysql.database'));
         $this->assertSame(1, DB::table('migrations')->where('migration', '2026_09_04_070500_create_payment_preferences_table')->count());
@@ -220,7 +225,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
         }
     }
 
-    /** @dataProvider rejectionRaces */
+    #[DataProvider('rejectionRaces')]
     public function test_physical_rejection_attempts_serialize_without_duplicate_effects(string $first, string $second): void
     {
         $this->test_physical_approval_and_get_expiration_preserve_current_state($first, 1, $second);
@@ -262,7 +267,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
             $secondary = true;
             try {
                 $probe->selectOne('SELECT COUNT(*) AS n FROM information_schema.innodb_trx');
-            } catch (\Illuminate\Database\QueryException) {
+            } catch (QueryException) {
                 $secondary = false;
             }
             $this->observation = ['observer' => $observer, 'innodb_trx_accessible' => $secondary];
@@ -270,7 +275,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
             return $probe;
         } catch (\Throwable $exception) {
             DB::purge('mock_diagnostic');
-            if ($exception instanceof \Illuminate\Database\QueryException) {
+            if ($exception instanceof QueryException) {
                 $this->fail('Observer preflight not satisfied; no fixtures or workers started.');
             }
             throw $exception;
@@ -281,7 +286,7 @@ class MySqlMockPaymentCheckoutConcurrencyTest extends TestCase
     {
         $row = $connection->selectOne('SELECT CONNECTION_ID() AS id, @@server_uuid AS uuid, @@port AS port, DATABASE() AS db, @@autocommit AS ac, @@transaction_isolation AS isolation');
 
-        return ['connection_id' => (int) $row->id, 'server_hash' => hash('sha256', $row->uuid), 'port' => (int) $row->port, 'database' => str_ends_with($row->db, '_test') ? $row->db : null, 'driver' => $connection->getDriverName(), 'laravel_connection' => $connection->getName(), 'transaction_level' => $connection->transactionLevel(), 'autocommit' => (int) $row->ac, 'isolation' => $row->isolation];
+        return ['connection_id' => (int) $row->id, 'server_hash' => hash('sha256', $row->uuid), 'port' => (int) $row->port, 'database' => $row->db === getenv('LARAVEL13_MYSQL_TEST_DATABASE') ? $row->db : null, 'driver' => $connection->getDriverName(), 'laravel_connection' => $connection->getName(), 'transaction_level' => $connection->transactionLevel(), 'autocommit' => (int) $row->ac, 'isolation' => $row->isolation];
     }
 
     private function waitUntil(callable $condition, array $workers): void

@@ -7,6 +7,7 @@ use App\Models\DeliveryVehicle;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -21,7 +22,7 @@ class DeliveryFleetCivilDatesTest extends TestCase
         $this->assertTrue($process->isSuccessful(), 'Civil date frontend contracts must pass. '.$process->getOutput().$process->getErrorOutput());
     }
 
-    /** @dataProvider fleetRecords */
+    #[DataProvider('fleetRecords')]
     public function test_existing_api_serializes_date_casts_and_round_trips_normalized_form_values(string $resource, array $fields, array $payload): void
     {
         Sanctum::actingAs(User::factory()->create(['role' => 'admin', 'is_active' => true]));
@@ -63,7 +64,7 @@ class DeliveryFleetCivilDatesTest extends TestCase
         $this->putJson($base.'/'.$id, $payload)->assertUnprocessable()->assertJsonValidationErrors($fields[0]);
     }
 
-    /** @dataProvider fleetRecords */
+    #[DataProvider('fleetRecords')]
     public function test_omitting_each_date_on_update_preserves_it_while_other_fields_change(string $resource, array $fields, array $payload): void
     {
         Sanctum::actingAs(User::factory()->create(['role' => 'admin', 'is_active' => true]));

@@ -13,4 +13,9 @@ class ElectronicDocumentAttempt extends Model
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
     ];
+
+    public function document()
+    {
+        return $this->belongsTo(ElectronicDocument::class, 'electronic_document_id');
+    }
 }

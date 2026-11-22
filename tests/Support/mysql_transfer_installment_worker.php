@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Order;
-use App\Models\PaymentSubmission;
 use App\Services\CustomerPaymentSubmissionService;
 use App\Services\TreasuryPaymentApprovalService;
 use Illuminate\Contracts\Console\Kernel;
@@ -15,7 +14,10 @@ $app = require dirname(__DIR__, 2).'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 [$action, $barrier, $ready, $orderId, $submissionId, $userId, $accountId, $amount, $operation, $key] = array_slice($argv, 1);
-if (DB::connection()->getDriverName() !== 'mysql' || DB::connection()->getDatabaseName() !== 'lubristore_payment_installments_test') {
+if (DB::connection()->getDriverName() !== 'mysql'
+    || ! is_string(getenv('LARAVEL13_MYSQL_TEST_DATABASE'))
+    || DB::connection()->getDatabaseName() !== getenv('LARAVEL13_MYSQL_TEST_DATABASE')
+    || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', DB::connection()->getDatabaseName()) !== 1) {
     fwrite(STDERR, "Worker refused non-isolated database.\n");
     exit(3);
 }

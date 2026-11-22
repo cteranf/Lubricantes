@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\BranchController as AdminBranchController;
 use App\Http\Controllers\Api\V1\Admin\BrandController as AdminBrandController;
+use App\Http\Controllers\Api\V1\Admin\BusinessProfileController;
+use App\Http\Controllers\Api\V1\Admin\BusinessTaxConfigurationController;
 use App\Http\Controllers\Api\V1\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ContactInquiryController as AdminContactInquiryController;
 use App\Http\Controllers\Api\V1\Admin\DashboardController;
@@ -10,16 +12,22 @@ use App\Http\Controllers\Api\V1\Admin\DeliveryDriverController as AdminDeliveryD
 use App\Http\Controllers\Api\V1\Admin\DeliveryVehicleController as AdminDeliveryVehicleController;
 use App\Http\Controllers\Api\V1\Admin\DepartmentController as AdminDepartmentController;
 use App\Http\Controllers\Api\V1\Admin\DistrictController as AdminDistrictController;
+use App\Http\Controllers\Api\V1\Admin\ElectronicInvoiceSettingsController;
 use App\Http\Controllers\Api\V1\Admin\InventoryController as AdminInventoryController;
 use App\Http\Controllers\Api\V1\Admin\InventoryMovementController as AdminInventoryMovementController;
+use App\Http\Controllers\Api\V1\Admin\InventoryReceiptController;
 use App\Http\Controllers\Api\V1\Admin\ManagementReportController;
 use App\Http\Controllers\Api\V1\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\V1\Admin\OrderDeliveryController as AdminOrderDeliveryController;
 use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFulfillmentController;
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
 use App\Http\Controllers\Api\V1\Admin\PaymentReceivingAccountController as AdminPaymentReceivingAccountController;
+use App\Http\Controllers\Api\V1\Admin\PaymentSettingController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\ProductImageController as AdminProductImageController;
+use App\Http\Controllers\Api\V1\Admin\ProductModelController;
+use App\Http\Controllers\Api\V1\Admin\ProductPromotionController;
+use App\Http\Controllers\Api\V1\Admin\ProductReviewSettingsController;
 use App\Http\Controllers\Api\V1\Admin\ProvinceController as AdminProvinceController;
 use App\Http\Controllers\Api\V1\Admin\ShippingRateController as AdminShippingRateController;
 use App\Http\Controllers\Api\V1\Admin\ShippingZoneController as AdminShippingZoneController;
@@ -27,18 +35,30 @@ use App\Http\Controllers\Api\V1\Admin\TerritoryImportController as AdminTerritor
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BillingElectronicDocumentController;
+use App\Http\Controllers\Api\V1\BillingOrderController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CheckoutPickupBranchController;
 use App\Http\Controllers\Api\V1\CheckoutShippingQuoteController;
 use App\Http\Controllers\Api\V1\ContactInquiryController;
+use App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController;
+use App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController;
 use App\Http\Controllers\Api\V1\EmailVerificationController;
 use App\Http\Controllers\Api\V1\LocationOptionController;
+use App\Http\Controllers\Api\V1\NewsController;
 use App\Http\Controllers\Api\V1\OrderController;
+use App\Http\Controllers\Api\V1\OrderTrackingController;
+use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\PaymentMethodController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductReviewController;
 use App\Http\Controllers\Api\V1\ProfileController;
+use App\Http\Controllers\Api\V1\SliderController;
+use App\Http\Controllers\Api\V1\TreasuryPaymentRefundController;
+use App\Http\Controllers\Api\V1\TreasuryPaymentRefundReadController;
+use App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController;
 use App\Http\Controllers\Api\V1\UserAddressController;
 use Illuminate\Support\Facades\Route;
 
@@ -66,15 +86,15 @@ Route::prefix('v1')->group(function () {
     Route::get('/products/{slug}/review-eligibility', [ProductReviewController::class, 'eligibility'])->name('products.reviews.eligibility');
     Route::apiResource('categories', CategoryController::class)->only(['index', 'show']);
     Route::apiResource('brands', BrandController::class)->only(['index', 'show']);
-    Route::get('/sliders', [App\Http\Controllers\Api\V1\SliderController::class, 'index']);
-    Route::get('/news', [App\Http\Controllers\Api\V1\NewsController::class, 'index']);
-    Route::get('/news/{slug}', [App\Http\Controllers\Api\V1\NewsController::class, 'show']);
+    Route::get('/sliders', [SliderController::class, 'index']);
+    Route::get('/news', [NewsController::class, 'index']);
+    Route::get('/news/{slug}', [NewsController::class, 'show']);
 
     // Public Payment Methods
-    Route::get('/payment-methods', [App\Http\Controllers\Api\V1\PaymentMethodController::class, 'index']);
+    Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 
     // Payment Webhook (public - no auth required)
-    Route::post('/payment/webhook', [App\Http\Controllers\Api\V1\PaymentController::class, 'webhook']);
+    Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
 
     // Protected Routes
     Route::middleware(['auth:sanctum', 'active_user'])->group(function () {
@@ -97,29 +117,29 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('addresses', UserAddressController::class)->only(['index', 'store', 'update']);
         Route::apiResource('orders', OrderController::class)->only(['index', 'store', 'show']);
         Route::get('/orders/{order}/repurchase-quote', [OrderController::class, 'repurchaseQuote']);
-        Route::get('/orders/{order}/payment-options', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'index']);
-        Route::get('/orders/{order}/payment-options/{account}/qr', [App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController::class, 'qr']);
-        Route::post('/orders/{order}/payment-submission', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'store']);
-        Route::put('/orders/{order}/payment-submission/correction', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'correct']);
-        Route::get('/orders/{order}/payment-submission', [App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController::class, 'show']);
-        Route::get('/orders/{id}/tracking', [App\Http\Controllers\Api\V1\OrderTrackingController::class, 'show']);
+        Route::get('/orders/{order}/payment-options', [CustomerTransferPaymentOptionController::class, 'index']);
+        Route::get('/orders/{order}/payment-options/{account}/qr', [CustomerTransferPaymentOptionController::class, 'qr']);
+        Route::post('/orders/{order}/payment-submission', [CustomerPaymentSubmissionController::class, 'store']);
+        Route::put('/orders/{order}/payment-submission/correction', [CustomerPaymentSubmissionController::class, 'correct']);
+        Route::get('/orders/{order}/payment-submission', [CustomerPaymentSubmissionController::class, 'show']);
+        Route::get('/orders/{id}/tracking', [OrderTrackingController::class, 'show']);
 
         // Treasury review queue: deliberately separate from administrative configuration.
         Route::middleware('is_treasury')->prefix('treasury')->as('treasury.')->group(function () {
-            Route::get('/refund-worklist', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundReadController::class, 'index'])->name('refund-worklist.index');
-            Route::get('/orders/{orderId}/refund-state', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundReadController::class, 'show'])->name('orders.refund-state');
-            Route::post('/orders/{orderId}/refunds', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'store'])
+            Route::get('/refund-worklist', [TreasuryPaymentRefundReadController::class, 'index'])->name('refund-worklist.index');
+            Route::get('/orders/{orderId}/refund-state', [TreasuryPaymentRefundReadController::class, 'show'])->name('orders.refund-state');
+            Route::post('/orders/{orderId}/refunds', [TreasuryPaymentRefundController::class, 'store'])
                 ->name('orders.refunds.store');
-            Route::post('/payment-refunds/{refundId}/complete', [App\Http\Controllers\Api\V1\TreasuryPaymentRefundController::class, 'complete'])
+            Route::post('/payment-refunds/{refundId}/complete', [TreasuryPaymentRefundController::class, 'complete'])
                 ->name('payment-refunds.complete');
-            Route::get('/payment-submissions', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'index'])->name('payment-submissions.index');
-            Route::get('/payment-submissions/{submission}', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'show'])->name('payment-submissions.show');
-            Route::get('/payment-submissions/{submission}/history', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'history'])->name('payment-submissions.history');
-            Route::patch('/payment-submissions/{submission}/observe', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'observe'])->name('payment-submissions.observe');
-            Route::patch('/payment-submissions/{submission}/reject', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'reject'])->name('payment-submissions.reject');
-            Route::patch('/payment-submissions/{submission}/approve', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'approve'])->name('payment-submissions.approve');
-            Route::post('/payment-submissions/{submission}/resolution', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'openResolution'])->name('payment-submissions.resolution');
-            Route::post('/payment-submissions/{submission}/resolution/reassign', [App\Http\Controllers\Api\V1\TreasuryPaymentSubmissionController::class, 'reassign'])
+            Route::get('/payment-submissions', [TreasuryPaymentSubmissionController::class, 'index'])->name('payment-submissions.index');
+            Route::get('/payment-submissions/{submission}', [TreasuryPaymentSubmissionController::class, 'show'])->name('payment-submissions.show');
+            Route::get('/payment-submissions/{submission}/history', [TreasuryPaymentSubmissionController::class, 'history'])->name('payment-submissions.history');
+            Route::patch('/payment-submissions/{submission}/observe', [TreasuryPaymentSubmissionController::class, 'observe'])->name('payment-submissions.observe');
+            Route::patch('/payment-submissions/{submission}/reject', [TreasuryPaymentSubmissionController::class, 'reject'])->name('payment-submissions.reject');
+            Route::patch('/payment-submissions/{submission}/approve', [TreasuryPaymentSubmissionController::class, 'approve'])->name('payment-submissions.approve');
+            Route::post('/payment-submissions/{submission}/resolution', [TreasuryPaymentSubmissionController::class, 'openResolution'])->name('payment-submissions.resolution');
+            Route::post('/payment-submissions/{submission}/resolution/reassign', [TreasuryPaymentSubmissionController::class, 'reassign'])
                 ->missing(fn () => response()->json([
                     'message' => 'La presentación de pago no existe.',
                     'code' => 'payment_submission_not_found',
@@ -128,24 +148,27 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::middleware('can_access_billing')->prefix('billing')->as('billing.')->group(function () {
-            Route::get('/electronic-invoicing/status', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'status'])->name('electronic-invoicing.status');
-            Route::get('/orders', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'index'])->name('orders.index');
-            Route::get('/orders/{order}', [App\Http\Controllers\Api\V1\BillingOrderController::class, 'show'])->name('orders.show');
-            Route::post('/orders/{order}/electronic-documents', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'prepare'])->name('electronic-documents.prepare');
-            Route::get('/electronic-documents/{id}', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'show'])->whereNumber('id')->name('electronic-documents.show');
-            Route::put('/electronic-documents/{id}', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'update'])->whereNumber('id')->name('electronic-documents.update');
-            Route::post('/electronic-documents/{id}/issue', [App\Http\Controllers\Api\V1\BillingElectronicDocumentController::class, 'issue'])->whereNumber('id')->name('electronic-documents.issue');
+            Route::get('/electronic-invoicing/status', [BillingElectronicDocumentController::class, 'status'])->name('electronic-invoicing.status');
+            Route::get('/orders', [BillingOrderController::class, 'index'])->name('orders.index');
+            Route::get('/orders/{order}', [BillingOrderController::class, 'show'])->name('orders.show');
+            Route::post('/orders/{order}/electronic-documents', [BillingElectronicDocumentController::class, 'prepare'])->name('electronic-documents.prepare');
+            Route::get('/electronic-documents/{id}', [BillingElectronicDocumentController::class, 'show'])->whereNumber('id')->name('electronic-documents.show');
+            Route::get('/electronic-documents/{id}/readiness', [BillingElectronicDocumentController::class, 'readiness'])->whereNumber('id')->name('electronic-documents.readiness');
+            Route::get('/electronic-documents/{id}/files/{type}', [BillingElectronicDocumentController::class, 'download'])->whereNumber('id')->whereIn('type', ['xml', 'archive', 'cdr', 'pdf'])->name('electronic-documents.files.download');
+            Route::put('/electronic-documents/{id}', [BillingElectronicDocumentController::class, 'update'])->whereNumber('id')->name('electronic-documents.update');
+            Route::post('/electronic-documents/{id}/issue', [BillingElectronicDocumentController::class, 'issue'])->whereNumber('id')->name('electronic-documents.issue');
+            Route::post('/electronic-documents/{id}/query', [BillingElectronicDocumentController::class, 'query'])->whereNumber('id')->name('electronic-documents.query');
         });
 
         // Payment
-        Route::post('/payment/create', [App\Http\Controllers\Api\V1\PaymentController::class, 'createPayment']);
-        Route::get('/payment/verify/{paymentId}', [App\Http\Controllers\Api\V1\PaymentController::class, 'verifyPayment']);
-        Route::get('/payment/return', [App\Http\Controllers\Api\V1\PaymentController::class, 'handleReturn']);
+        Route::post('/payment/create', [PaymentController::class, 'createPayment']);
+        Route::get('/payment/verify/{paymentId}', [PaymentController::class, 'verifyPayment']);
+        Route::get('/payment/return', [PaymentController::class, 'handleReturn']);
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
-            Route::get('/product-reviews/settings', [App\Http\Controllers\Api\V1\Admin\ProductReviewSettingsController::class, 'show'])->name('product-reviews.settings.show');
-            Route::put('/product-reviews/settings', [App\Http\Controllers\Api\V1\Admin\ProductReviewSettingsController::class, 'update'])->name('product-reviews.settings.update');
+            Route::get('/product-reviews/settings', [ProductReviewSettingsController::class, 'show'])->name('product-reviews.settings.show');
+            Route::put('/product-reviews/settings', [ProductReviewSettingsController::class, 'update'])->name('product-reviews.settings.update');
             Route::get('/product-reviews', [App\Http\Controllers\Api\V1\Admin\ProductReviewController::class, 'index'])->name('product-reviews.index');
             Route::patch('/product-reviews/{review}/moderation', [App\Http\Controllers\Api\V1\Admin\ProductReviewController::class, 'moderate'])->name('product-reviews.moderate');
             Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
@@ -180,11 +203,11 @@ Route::prefix('v1')->group(function () {
             Route::post('/contact-inquiries/{contactInquiry}/actions/email', [AdminContactInquiryController::class, 'email'])->name('contact-inquiries.actions.email');
             Route::post('/contact-inquiries/{contactInquiry}/actions/whatsapp', [AdminContactInquiryController::class, 'whatsapp'])->name('contact-inquiries.actions.whatsapp');
             Route::patch('/products/{product}/status', [AdminProductController::class, 'status'])->name('products.status');
-            Route::get('/product-promotions/products', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'productOptions'])->name('product-promotions.products');
-            Route::patch('/product-promotions/{productPromotion}/status', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'status'])->name('product-promotions.status');
-            Route::get('/product-promotions', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'index'])->name('product-promotions.index');
-            Route::post('/product-promotions', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'store'])->name('product-promotions.store');
-            Route::put('/product-promotions/{productPromotion}', [App\Http\Controllers\Api\V1\Admin\ProductPromotionController::class, 'update'])->name('product-promotions.update');
+            Route::get('/product-promotions/products', [ProductPromotionController::class, 'productOptions'])->name('product-promotions.products');
+            Route::patch('/product-promotions/{productPromotion}/status', [ProductPromotionController::class, 'status'])->name('product-promotions.status');
+            Route::get('/product-promotions', [ProductPromotionController::class, 'index'])->name('product-promotions.index');
+            Route::post('/product-promotions', [ProductPromotionController::class, 'store'])->name('product-promotions.store');
+            Route::put('/product-promotions/{productPromotion}', [ProductPromotionController::class, 'update'])->name('product-promotions.update');
             Route::post('/products/{product}/images', [AdminProductImageController::class, 'store'])->middleware('throttle:10,1')->name('products.images.store');
             Route::post('/products/{product}/images/reorder', [AdminProductImageController::class, 'reorder'])->name('products.images.reorder');
             Route::post('/products/{product}/images/{image}/replace', [AdminProductImageController::class, 'replace'])->middleware('throttle:10,1')->name('products.images.replace');
@@ -211,15 +234,15 @@ Route::prefix('v1')->group(function () {
             Route::get('/inventories/{product}', [AdminInventoryController::class, 'show'])->name('inventories.show');
             Route::post('/inventories/adjustments', [AdminInventoryController::class, 'adjustment'])->name('inventories.adjustments');
             Route::post('/inventories/transfers', [AdminInventoryController::class, 'transfer'])->name('inventories.transfers');
-            Route::get('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'index'])->name('inventory-receipts.index');
-            Route::get('/inventory-receipts/import-template', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'importTemplate'])->name('inventory-receipts.import-template');
-            Route::post('/inventory-receipts/import-preview', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'importPreview'])->name('inventory-receipts.import-preview');
-            Route::post('/inventory-receipts/resolve-product-code', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'resolveProductCode'])->middleware('throttle:60,1')->name('inventory-receipts.resolve-product-code');
-            Route::post('/inventory-receipts', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'store'])->name('inventory-receipts.store');
-            Route::get('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'show'])->name('inventory-receipts.show');
-            Route::put('/inventory-receipts/{receipt}', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'update'])->name('inventory-receipts.update');
-            Route::post('/inventory-receipts/{receipt}/confirm', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'confirm'])->name('inventory-receipts.confirm');
-            Route::post('/inventory-receipts/{receipt}/cancel', [App\Http\Controllers\Api\V1\Admin\InventoryReceiptController::class, 'cancel'])->name('inventory-receipts.cancel');
+            Route::get('/inventory-receipts', [InventoryReceiptController::class, 'index'])->name('inventory-receipts.index');
+            Route::get('/inventory-receipts/import-template', [InventoryReceiptController::class, 'importTemplate'])->name('inventory-receipts.import-template');
+            Route::post('/inventory-receipts/import-preview', [InventoryReceiptController::class, 'importPreview'])->name('inventory-receipts.import-preview');
+            Route::post('/inventory-receipts/resolve-product-code', [InventoryReceiptController::class, 'resolveProductCode'])->middleware('throttle:60,1')->name('inventory-receipts.resolve-product-code');
+            Route::post('/inventory-receipts', [InventoryReceiptController::class, 'store'])->name('inventory-receipts.store');
+            Route::get('/inventory-receipts/{receipt}', [InventoryReceiptController::class, 'show'])->name('inventory-receipts.show');
+            Route::put('/inventory-receipts/{receipt}', [InventoryReceiptController::class, 'update'])->name('inventory-receipts.update');
+            Route::post('/inventory-receipts/{receipt}/confirm', [InventoryReceiptController::class, 'confirm'])->name('inventory-receipts.confirm');
+            Route::post('/inventory-receipts/{receipt}/cancel', [InventoryReceiptController::class, 'cancel'])->name('inventory-receipts.cancel');
             Route::get('/inventory-movements', [AdminInventoryMovementController::class, 'index'])->name('inventory-movements.index');
             Route::apiResource('orders', AdminOrderController::class)->only(['index', 'update']);
             Route::put('/orders/{id}/tracking', [AdminOrderController::class, 'updateTracking'])->name('orders.tracking.update');
@@ -268,23 +291,24 @@ Route::prefix('v1')->group(function () {
             Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'status'])->name('categories.status');
             Route::apiResource('categories', AdminCategoryController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
             Route::get('/brands/options', [AdminBrandController::class, 'options'])->name('brands.options');
-            Route::get('/product-models/options', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'options'])->name('product-models.options');
-            Route::get('/brands/{brand}/product-models', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'index'])->name('brands.product-models.index');
-            Route::get('/brands/{brand}/product-models/options', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'brandOptions'])->name('brands.product-models.options');
-            Route::post('/brands/{brand}/product-models', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'store'])->name('brands.product-models.store');
-            Route::put('/product-models/{productModel}', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'update'])->name('product-models.update');
-            Route::patch('/product-models/{productModel}/status', [App\Http\Controllers\Api\V1\Admin\ProductModelController::class, 'status'])->name('product-models.status');
+            Route::get('/product-models/options', [ProductModelController::class, 'options'])->name('product-models.options');
+            Route::get('/brands/{brand}/product-models', [ProductModelController::class, 'index'])->name('brands.product-models.index');
+            Route::get('/brands/{brand}/product-models/options', [ProductModelController::class, 'brandOptions'])->name('brands.product-models.options');
+            Route::post('/brands/{brand}/product-models', [ProductModelController::class, 'store'])->name('brands.product-models.store');
+            Route::put('/product-models/{productModel}', [ProductModelController::class, 'update'])->name('product-models.update');
+            Route::patch('/product-models/{productModel}/status', [ProductModelController::class, 'status'])->name('product-models.status');
             Route::delete('/brands/{brand}/image', [AdminBrandController::class, 'removeImage'])->name('brands.image.destroy');
             Route::patch('/brands/{brand}/status', [AdminBrandController::class, 'status'])->name('brands.status');
             Route::apiResource('brands', AdminBrandController::class)->only(['index', 'show', 'store', 'update', 'destroy']);
-            Route::get('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'show'])->name('payment-settings.show');
-            Route::put('/payment-settings', [App\Http\Controllers\Api\V1\Admin\PaymentSettingController::class, 'update'])->name('payment-settings.update');
-            Route::get('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'show'])->name('business-profile.show');
-            Route::put('/business-profile', [App\Http\Controllers\Api\V1\Admin\BusinessProfileController::class, 'update'])->name('business-profile.update');
-            Route::get('/electronic-invoicing/settings', [App\Http\Controllers\Api\V1\Admin\ElectronicInvoiceSettingsController::class, 'show'])->name('electronic-invoicing.settings.show');
-            Route::put('/electronic-invoicing/settings', [App\Http\Controllers\Api\V1\Admin\ElectronicInvoiceSettingsController::class, 'update'])->name('electronic-invoicing.settings.update');
-            Route::get('/electronic-invoicing/tax-configuration', [App\Http\Controllers\Api\V1\Admin\BusinessTaxConfigurationController::class, 'show'])->name('electronic-invoicing.tax-configuration.show');
-            Route::put('/electronic-invoicing/tax-configuration', [App\Http\Controllers\Api\V1\Admin\BusinessTaxConfigurationController::class, 'update'])->name('electronic-invoicing.tax-configuration.update');
+            Route::get('/payment-settings', [PaymentSettingController::class, 'show'])->name('payment-settings.show');
+            Route::put('/payment-settings', [PaymentSettingController::class, 'update'])->name('payment-settings.update');
+            Route::get('/business-profile', [BusinessProfileController::class, 'show'])->name('business-profile.show');
+            Route::put('/business-profile', [BusinessProfileController::class, 'update'])->name('business-profile.update');
+            Route::get('/electronic-invoicing/settings', [ElectronicInvoiceSettingsController::class, 'show'])->name('electronic-invoicing.settings.show');
+            Route::put('/electronic-invoicing/settings', [ElectronicInvoiceSettingsController::class, 'update'])->name('electronic-invoicing.settings.update');
+            Route::put('/electronic-invoicing/series', [ElectronicInvoiceSettingsController::class, 'updateSeries'])->name('electronic-invoicing.series.update');
+            Route::get('/electronic-invoicing/tax-configuration', [BusinessTaxConfigurationController::class, 'show'])->name('electronic-invoicing.tax-configuration.show');
+            Route::put('/electronic-invoicing/tax-configuration', [BusinessTaxConfigurationController::class, 'update'])->name('electronic-invoicing.tax-configuration.update');
             Route::get('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'index'])->name('treasury.receiving-accounts.index');
             Route::post('/treasury/receiving-accounts', [AdminPaymentReceivingAccountController::class, 'store'])->name('treasury.receiving-accounts.store');
             Route::get('/treasury/receiving-accounts/{account}', [AdminPaymentReceivingAccountController::class, 'show'])->name('treasury.receiving-accounts.show');

@@ -53,7 +53,7 @@ class ElectronicDocumentService
                     $changed[] = $field;
                 }
             }
-            if (ElectronicDocumentAttempt::query()->where('status', 'uncertain')->exists()
+            if (ElectronicDocumentAttempt::query()->whereIn('status', ['queued', 'processing', 'submitted', 'uncertain'])->exists()
                 && (in_array('connection_type', $changed, true) || in_array('environment', $changed, true))) {
                 abort(409, 'No se puede cambiar la conexión o el entorno mientras haya una operación con resultado incierto.');
             }
@@ -136,6 +136,12 @@ class ElectronicDocumentService
                         'shipping_amount' => $this->moneyValue($order->shipping_amount),
                         'total' => $this->moneyValue($order->total),
                         'currency' => config('payment.currency', 'PEN'),
+                        'operation_type' => '0101',
+                        'payment_terms' => [
+                            'type' => $order->payment_status === 'approved' ? 'cash' : 'unsupported',
+                            'amount' => $this->moneyValue($order->total),
+                            'source' => 'order_payment_status',
+                        ],
                         'source' => 'order_snapshot',
                         'missing_fields' => $missing,
                         'tax_calculation_status' => $taxStatus,

@@ -17,6 +17,7 @@ use MercadoPago\MercadoPagoConfig;
 use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
 use MercadoPago\Net\MPResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -66,7 +67,7 @@ class PaymentGatewayCompatibilityTest extends TestCase
         $this->assertSame(0, $this->guard->calls);
     }
 
-    /** @dataProvider absentOrInvalidCredentials */
+    #[DataProvider('absentOrInvalidCredentials')]
     public function test_factory_and_constructor_fail_safely_for_absent_or_invalid_credentials(?string $token, bool $factory): void
     {
         if ($factory) {
@@ -87,7 +88,7 @@ class PaymentGatewayCompatibilityTest extends TestCase
         return [[null, false], ['', false], ['   ', false], [null, true], ['', true], [" \t ", true], [' SYNTHETIC', false], ['SYNTHETIC ', false], [' SYNTHETIC', true], ['SYNTHETIC ', true]];
     }
 
-    /** @dataProvider fallbackCredentials */
+    #[DataProvider('fallbackCredentials')]
     public function test_null_or_empty_constructor_uses_valid_configuration_without_altering_credential(?string $input): void
     {
         $token = 'SYNTHETIC_'.bin2hex(random_bytes(16));
@@ -214,6 +215,7 @@ class PaymentGatewayCompatibilityTest extends TestCase
             $transport->payment['status'] = 'under_review';
             $evidence = (new MercadoPagoGateway)->verifyPayment((string) $transport->paymentId);
             $connection = DB::connection();
+            $databaseManager = app('db');
             DB::shouldReceive('transaction')->once()->with(\Mockery::type(\Closure::class), 3)
                 ->andReturnUsing(static fn ($callback, $attempts) => $connection->transaction($callback, $attempts));
             try {
@@ -221,6 +223,8 @@ class PaymentGatewayCompatibilityTest extends TestCase
                 $this->fail('Unsupported remote status must be routed to manual review.');
             } catch (PaymentFinancialReviewException $exception) {
                 $this->assertSame(PaymentFinancialReviewException::UNSUPPORTED_REMOTE_STATUS, $exception->category);
+            } finally {
+                DB::swap($databaseManager);
             }
         });
     }

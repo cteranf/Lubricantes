@@ -42,7 +42,7 @@ class AdminSidebarFrontendTest extends TestCase
             ':aria-expanded="isGroupExpanded(group.id)"',
             ':aria-current="activeGroupId === group.id ? \'location\' : undefined"',
             'visibleAdminGroups = computed(() => !isAdmin.value ? []',
-            'directNavigation = computed(() => isTreasury.value ? treasuryNavigation : isAdmin.value ? dashboardNavigation : [])',
+            'directNavigation = computed(() => isTreasury.value ? treasuryNavigation : isBilling.value ? billingNavigation : isAdmin.value ? dashboardNavigation : [])',
             'if (event.key === \'Escape\')',
             'document.body.style.overflow = \'hidden\'',
             'document.body.style.overflow = previousOverflow',

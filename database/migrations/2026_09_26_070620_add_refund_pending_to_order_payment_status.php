@@ -21,7 +21,7 @@ return new class extends Migration
     public function down(): void
     {
         if (DB::table('orders')->where('payment_status', 'refund_pending')->exists()) {
-            throw new \RuntimeException('No se puede retirar refund_pending mientras existan pedidos con ese estado.');
+            throw new RuntimeException('No se puede retirar refund_pending mientras existan pedidos con ese estado.');
         }
 
         if (DB::connection()->getDriverName() === 'sqlite') {
@@ -37,18 +37,41 @@ return new class extends Migration
     {
         $definition = DB::selectOne("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'")?->sql;
         if (! is_string($definition)) {
-            throw new \RuntimeException('No se encontró la definición SQLite de orders.');
+            throw new RuntimeException('No se encontró la definición SQLite de orders.');
         }
 
         $quotedStatuses = implode(', ', array_map(fn (string $status) => "'{$status}'", $statuses));
         $updated = preg_replace(
-            '/check\s*\(\s*"payment_status"\s+in\s*\([^)]*\)\s*\)/i',
+            '/check\s*\(\s*["`]?payment_status["`]?\s+in\s*\([^)]*\)\s*\)/i',
             'check ("payment_status" in ('.$quotedStatuses.'))',
             $definition,
-            1
+            1,
+            $replacementCount
         );
-        if (! is_string($updated) || $updated === $definition) {
-            throw new \RuntimeException('No se pudo actualizar de forma segura el CHECK SQLite de payment_status.');
+
+        if (! is_string($updated)) {
+            throw new RuntimeException('No se pudo actualizar de forma segura el CHECK SQLite de payment_status.');
+        }
+
+        if ($replacementCount === 0) {
+            if (preg_match('/check\s*\([^)]*["`]?payment_status["`]?/i', $definition)) {
+                throw new RuntimeException('No se pudo actualizar de forma segura el CHECK SQLite de payment_status.');
+            }
+
+            if (! in_array('refund_pending', $statuses, true)) {
+                return;
+            }
+
+            $updated = preg_replace(
+                '/\)\s*$/',
+                ', CONSTRAINT "orders_payment_status_check" CHECK ("payment_status" IN ('.$quotedStatuses.')))',
+                $definition,
+                1
+            );
+
+            if (! is_string($updated) || $updated === $definition) {
+                throw new RuntimeException('No se pudo agregar de forma segura el CHECK SQLite de payment_status.');
+            }
         }
 
         $indexes = DB::select("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'orders' AND sql IS NOT NULL");
@@ -70,7 +93,7 @@ return new class extends Migration
         }
 
         if (DB::select('PRAGMA foreign_key_check') !== []) {
-            throw new \RuntimeException('La reconstrucción SQLite de orders dejó claves foráneas inválidas.');
+            throw new RuntimeException('La reconstrucción SQLite de orders dejó claves foráneas inválidas.');
         }
     }
 };

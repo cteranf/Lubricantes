@@ -33,6 +33,7 @@ use Illuminate\Support\Str;
 use Mockery;
 use PDO;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TreasuryPaymentReassignmentServiceTest extends TestCase
@@ -259,7 +260,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         $before = $this->snapshot($fixture);
         $previous = new PDOException('unrelated database failure', 9999);
         $previous->errorInfo = ['HY000', 9999, 'unrelated database failure'];
-        $failure = new QueryException('test statement', [], $previous);
+        $failure = new QueryException('testing', 'test statement', [], $previous);
         $inventory = Mockery::mock(app(InventoryService::class))->makePartial();
         $inventory->shouldReceive('reserveVersionedForResolutionCaseWithLockedEvidence')
             ->once()
@@ -360,7 +361,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         $ddlPdo = null;
     }
 
-    /** @dataProvider initialSubmissionAnomalies */
+    #[DataProvider('initialSubmissionAnomalies')]
     public function test_each_initial_submission_anomaly_is_a_conflict_without_repair(string $field, mixed $value): void
     {
         $fixture = $this->fixture();
@@ -388,7 +389,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider initialTransactionAnomalies */
+    #[DataProvider('initialTransactionAnomalies')]
     public function test_each_initial_transaction_anomaly_is_a_conflict_without_repair(string $field, mixed $value): void
     {
         $fixture = $this->fixture();
@@ -417,7 +418,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider initialCaseAnomalies */
+    #[DataProvider('initialCaseAnomalies')]
     public function test_each_initial_resolution_case_anomaly_is_a_conflict_without_repair(string $field, mixed $value): void
     {
         $fixture = $this->fixture();
@@ -445,7 +446,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider initialOrderAnomalies */
+    #[DataProvider('initialOrderAnomalies')]
     public function test_each_initial_order_or_operation_anomaly_is_a_conflict_without_repair(string $kind): void
     {
         $fixture = $this->fixture($kind === 'mixed_cancellation' ? 2 : 1);
@@ -480,7 +481,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider openingEvidenceAnomalies */
+    #[DataProvider('openingEvidenceAnomalies')]
     public function test_each_b1_opening_evidence_anomaly_is_a_conflict_without_repair(string $kind): void
     {
         $fixture = $this->fixture();
@@ -615,7 +616,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         $this->assertReassignmentConflictWithoutMutation($fixture);
     }
 
-    /** @dataProvider finalStateAnomalies */
+    #[DataProvider('finalStateAnomalies')]
     public function test_each_partial_or_corrupt_final_state_is_a_conflict_without_repair(string $kind): void
     {
         $fixture = $this->fixture();
@@ -697,7 +698,7 @@ class TreasuryPaymentReassignmentServiceTest extends TestCase
         }
     }
 
-    /** @dataProvider invalidActors */
+    #[DataProvider('invalidActors')]
     public function test_only_an_active_treasury_actor_can_reassign(string $role, bool $active): void
     {
         $fixture = $this->fixture();

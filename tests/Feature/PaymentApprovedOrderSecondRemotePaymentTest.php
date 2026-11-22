@@ -3,13 +3,10 @@
 namespace Tests\Feature;
 
 use App\Exceptions\PaymentFinancialReviewException;
-use App\Models\InventoryMovement;
-use App\Models\InventoryReservation;
 use App\Models\PaymentPreference;
 use App\Models\PaymentTransaction;
 use App\Models\PaymentWebhookEvent;
 use App\Models\Product;
-use App\Models\WarehouseInventory;
 use App\Services\InventoryService;
 use App\Services\OrderPaymentService;
 use App\Services\OrderStateService;
@@ -18,6 +15,7 @@ use App\Services\PaymentGateway\PaymentGatewayInterface;
 use App\Services\PaymentProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -33,8 +31,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
         parent::setUp();
         $this->secret = 'SYNTHETIC_'.bin2hex(random_bytes(16));
         $token = 'SYNTHETIC_'.bin2hex(random_bytes(16));
-        config(['payment.testing_legacy_webhook' => false, 'payment.mercadopago.access_token' => $token,
-            'payment.mercadopago.webhook_secret' => $this->secret, 'payment.mock.enabled' => false]);
+        config(['payment.testing_legacy_webhook' => false, 'payment.mock.enabled' => false]);
         // Force the factory to use a synthetic adapter credential, never a persisted provider token.
         $this->app->instance(PaymentGatewayInterface::class, new MercadoPagoGateway($token));
     }
@@ -93,7 +90,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
         });
     }
 
-    /** @dataProvider incompatibleExistingStatuses */
+    #[DataProvider('incompatibleExistingStatuses')]
     public function test_approved_order_with_pending_or_failed_same_payment_requires_review(string $status): void
     {
         $this->withApprovedInventoryFixture(function ($transport, $order, $preference, $product) use ($status) {
@@ -121,7 +118,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
         return [[PaymentTransaction::PENDING], [PaymentTransaction::FAILED]];
     }
 
-    /** @dataProvider incoherentReplayEvidence */
+    #[DataProvider('incoherentReplayEvidence')]
     public function test_approved_order_rejects_incoherent_payment_identity_for_review(string $field): void
     {
         $this->withApprovedInventoryFixture(function ($transport, $order, $preference, $product) use ($field) {
@@ -190,6 +187,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
     private function withApprovedInventoryFixture(\Closure $callback): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($callback) {
+            config(['payment.mercadopago.webhook_secret' => $this->secret]);
             $product = Product::create([
                 'name' => 'Synthetic review item', 'slug' => 'review-'.bin2hex(random_bytes(12)),
                 'sku' => 'REV-'.strtoupper(bin2hex(random_bytes(6))), 'price' => '10.25', 'is_active' => true,
@@ -223,6 +221,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
         $transport->merchant['payments'] = [[
             'id' => $paymentId, 'transaction_amount' => 10.25, 'currency_id' => 'PEN',
         ]];
+
         return (string) $paymentId;
     }
 
@@ -239,6 +238,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
     private function signedHeaders(string $paymentId, string $requestId): array
     {
         $timestamp = (string) time();
+
         return [
             'x-request-id' => $requestId,
             'x-signature' => 'ts='.$timestamp.',v1='.hash_hmac('sha256', 'id:'.$paymentId.';request-id:'.$requestId.';ts:'.$timestamp.';', $this->secret),
@@ -258,6 +258,7 @@ class PaymentApprovedOrderSecondRemotePaymentTest extends TestCase
             DB::table('order_fulfillment_histories')->where('order_id', $order->id)->orderBy('id')->get()->all(),
             DB::table('payment_webhook_events')->where('provider_payment_id', $paymentId)->orderBy('id')->get()->all(),
         ];
+
         return hash('sha256', json_encode($rows, JSON_THROW_ON_ERROR));
     }
 }

@@ -19,15 +19,16 @@ use App\Models\WarehouseInventory;
 use App\Services\TreasuryPaymentResolutionService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
 
-    private const DATABASE = 'lubristore_2b4_resolution_certification_test';
+    private string $database;
 
     public function test_reassignment_barrier_after_bootstrap_uses_financial_worker_without_models(): void
     {
@@ -218,7 +219,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
         $this->requireIsolatedMysql();
         $stocks = $this->adversarialStocks('reassign-expire');
         $reassignment = $this->multiWarehouseReassignmentFixture('reassign-expire-owner', $stocks);
-        $expiration = $this->multiWarehouseReservationFixture('reassign-expire-target', $stocks, true);
+        $expiration = $this->multiWarehouseReservationFixture('reassign-expire-target', $stocks, true, PaymentSubmission::REJECTED);
         $results = $this->race([
             'first' => [$reassignment['submission']->id, $reassignment['treasury']->id, 'reassign'],
             'second' => [$expiration['submission']->id, $expiration['treasury']->id, 'expire_reservation'],
@@ -255,7 +256,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
     {
         $this->requireIsolatedMysql();
         $stocks = $this->adversarialStocks('expire-cancel');
-        $expiration = $this->multiWarehouseReservationFixture('expire-cancel-expiration', $stocks, true);
+        $expiration = $this->multiWarehouseReservationFixture('expire-cancel-expiration', $stocks, true, PaymentSubmission::REJECTED);
         $cancellation = $this->multiWarehouseReservationFixture('expire-cancel-cancellation', $stocks, true);
         $results = $this->race([
             'first' => [$expiration['submission']->id, $expiration['treasury']->id, 'expire_reservation'],
@@ -323,7 +324,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
                     'product' => $stock['product'],
                     'inventory' => $stock['highInventory'],
                 ],
-            ], true);
+            ], true, PaymentSubmission::REJECTED);
             $results = $this->race([
                 'first' => [$stock['product']->id, $expiration['treasury']->id, 'transfer_inventory', $this->transferPayload($stock, false, 2)],
                 'second' => [$expiration['submission']->id, $expiration['treasury']->id, 'expire_reservation'],
@@ -377,8 +378,10 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
         $this->assertSame('testing', app()->environment());
         $this->assertFalse((bool) config('app.debug'));
         $this->assertSame('mysql', DB::connection()->getDriverName());
-        $this->assertSame(self::DATABASE, $database);
-        $this->assertTrue(str_ends_with((string) $database, '_test'));
+        $this->database = (string) getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $this->database);
+        $this->assertSame($this->database, $database);
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) $database);
         $this->assertNotSame('lubricantes', $database);
         $this->assertTrue(str_starts_with((string) $version, '8.'));
         foreach (['070570', '070580', '070590', '070600', '070610', '070620'] as $suffix) {
@@ -616,7 +619,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
         return compact('treasury', 'customer', 'order', 'items', 'originals', 'submission', 'case', 'transaction', 'stocks');
     }
 
-    private function multiWarehouseReservationFixture(string $label, array $stocks, bool $due): array
+    private function multiWarehouseReservationFixture(string $label, array $stocks, bool $due, string $submissionStatus = PaymentSubmission::PENDING_REVIEW): array
     {
         $suffix = $this->uniqueFixtureSuffix($label);
         $treasury = User::factory()->create(['name' => 'Treasury '.$suffix, 'email' => "treasury-{$suffix}@example.test", 'role' => 'treasury', 'is_active' => true]);
@@ -639,7 +642,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
             ]);
             $stock['inventory']->increment('reserved_quantity');
         }
-        $submission = $this->locatorSubmission($order, $customer, $suffix);
+        $submission = $this->locatorSubmission($order, $customer, $suffix, $submissionStatus);
 
         return compact('treasury', 'customer', 'order', 'reservations', 'submission');
     }
@@ -672,12 +675,12 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
         ]);
     }
 
-    private function locatorSubmission(Order $order, User $customer, string $suffix): PaymentSubmission
+    private function locatorSubmission(Order $order, User $customer, string $suffix, string $status = PaymentSubmission::PENDING_REVIEW): PaymentSubmission
     {
         return PaymentSubmission::create([
             'order_id' => $order->id,
             'channel' => 'yape',
-            'status' => PaymentSubmission::PENDING_REVIEW,
+            'status' => $status,
             'expected_amount' => '40.00',
             'currency' => 'PEN',
             'operation_number' => 'AD'.strtoupper(substr(hash('sha256', 'operation-'.$suffix), 0, 8)),
@@ -890,7 +893,7 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
             'APP_ENV' => 'testing',
             'APP_DEBUG' => 'false',
             'DB_CONNECTION' => 'mysql',
-            'DB_DATABASE' => self::DATABASE,
+            'DB_DATABASE' => $this->database,
         ]);
 
         try {
@@ -1287,8 +1290,8 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
         $versionStatement = $pdo->query('SELECT VERSION()');
         $effectiveDatabase = $databaseStatement === false ? null : $databaseStatement->fetchColumn();
         $version = $versionStatement === false ? null : $versionStatement->fetchColumn();
-        $this->assertSame(self::DATABASE, $effectiveDatabase);
-        $this->assertTrue(str_ends_with((string) $effectiveDatabase, '_test'));
+        $this->assertSame($this->database, $effectiveDatabase);
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) $effectiveDatabase);
         $this->assertNotSame('lubricantes', $effectiveDatabase);
         $this->assertTrue(str_starts_with((string) $version, '8.'));
         $this->assertGreaterThan(0, $this->connectionId($pdo));
@@ -1385,6 +1388,8 @@ class MySqlTreasuryPaymentReassignmentConcurrencyTest extends TestCase
                 'ok' => $result['json']['ok'] ?? null,
                 'status' => $result['json']['status'] ?? null,
                 'code' => $result['json']['code'] ?? null,
+                'reason' => $result['json']['reason'] ?? null,
+                'state' => $result['json']['state'] ?? null,
                 'message' => isset($result['json']['message']) ? substr(strip_tags((string) $result['json']['message']), 0, 200) : null,
                 'exception_class' => $result['json']['exception_class'] ?? null,
                 'stage' => $result['json']['stage'] ?? null,

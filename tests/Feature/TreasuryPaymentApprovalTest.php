@@ -18,18 +18,18 @@ use App\Services\OrderPaymentService;
 use App\Services\TreasuryPaymentApprovalService;
 use App\Services\TreasuryPaymentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TreasuryPaymentApprovalTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * @dataProvider transferChannels
-     */
+    #[DataProvider('transferChannels')]
     public function test_treasury_approves_a_pending_transfer_atomically_and_consumes_inventory(string $channel): void
     {
         [$submission, $order, $reservation, $inventory, $product] = $this->fixture($channel);
@@ -134,7 +134,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(['quantity' => 1, 'reserved_quantity' => 0], $inventory->fresh()->only(['quantity', 'reserved_quantity']));
     }
 
-    public function transferChannels(): array
+    public static function transferChannels(): array
     {
         return [['yape'], ['plin'], ['bank_transfer']];
     }
@@ -188,9 +188,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(PaymentSubmission::APPROVED, $submission->fresh()->status);
     }
 
-    /**
-     * @dataProvider inconsistent_approved_transaction_fields
-     */
+    #[DataProvider('inconsistent_approved_transaction_fields')]
     public function test_each_incompatible_approved_transaction_field_is_a_safe_conflict(string $field, mixed $value): void
     {
         [$submission, $order] = $this->fixture();
@@ -209,7 +207,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function inconsistent_approved_transaction_fields(): array
+    public static function inconsistent_approved_transaction_fields(): array
     {
         return [
             'amount' => ['amount', '19.99'],
@@ -223,9 +221,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider inconsistent_approved_submission_and_order_fields
-     */
+    #[DataProvider('inconsistent_approved_submission_and_order_fields')]
     public function test_each_incompatible_approved_submission_or_order_field_is_a_safe_conflict(string $model, string $field, mixed $value): void
     {
         [$submission, $order] = $this->fixture();
@@ -247,7 +243,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function inconsistent_approved_submission_and_order_fields(): array
+    public static function inconsistent_approved_submission_and_order_fields(): array
     {
         return [
             'submission expected amount' => ['submission', 'expected_amount', '19.99'],
@@ -258,9 +254,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider terminal_approved_order_states
-     */
+    #[DataProvider('terminal_approved_order_states')]
     public function test_an_approved_submission_on_a_terminal_order_is_a_safe_conflict(string $status, string $trackingStatus): void
     {
         [$submission, $order] = $this->fixture();
@@ -277,7 +271,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function terminal_approved_order_states(): array
+    public static function terminal_approved_order_states(): array
     {
         return [
             'canceled' => ['canceled', 'canceled'],
@@ -328,9 +322,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    /**
-     * @dataProvider treasury_approval_key_collisions
-     */
+    #[DataProvider('treasury_approval_key_collisions')]
     public function test_an_expected_treasury_key_occupied_by_another_transaction_is_a_safe_conflict(string $field): void
     {
         [$submission, $order] = $this->fixture();
@@ -357,7 +349,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function treasury_approval_key_collisions(): array
+    public static function treasury_approval_key_collisions(): array
     {
         return [
             'idempotency key' => ['idempotency_key'],
@@ -401,9 +393,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(0, PaymentTransaction::count());
     }
 
-    /**
-     * @dataProvider inventory_eligibility_inconsistencies
-     */
+    #[DataProvider('inventory_eligibility_inconsistencies')]
     public function test_reservation_and_inventory_eligibility_inconsistencies_are_rejected_without_mutation(string $scenario, string $code): void
     {
         if (DB::connection()->getDriverName() === 'mysql' && in_array($scenario, ['negative_stock', 'negative_reserved'], true)) {
@@ -424,7 +414,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function inventory_eligibility_inconsistencies(): array
+    public static function inventory_eligibility_inconsistencies(): array
     {
         return [
             'no reservations' => ['no_reservations', 'manual_resolution_required'],
@@ -444,9 +434,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider approved_reservation_inconsistencies
-     */
+    #[DataProvider('approved_reservation_inconsistencies')]
     public function test_approved_retry_with_inconsistent_reservations_is_a_safe_conflict(string $scenario): void
     {
         [$submission, $order] = $this->fixture();
@@ -462,7 +450,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function approved_reservation_inconsistencies(): array
+    public static function approved_reservation_inconsistencies(): array
     {
         return [
             'reservation reverted to active' => ['active'],
@@ -474,9 +462,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider approved_sale_movement_inconsistencies
-     */
+    #[DataProvider('approved_sale_movement_inconsistencies')]
     public function test_approved_retry_with_inconsistent_sale_movement_is_a_safe_conflict(string $scenario): void
     {
         [$submission, $order, $reservation] = $this->fixture();
@@ -493,7 +479,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function approved_sale_movement_inconsistencies(): array
+    public static function approved_sale_movement_inconsistencies(): array
     {
         return [
             'expected movement absent' => ['missing'],
@@ -518,9 +504,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(0, PaymentTransaction::count());
     }
 
-    /**
-     * @dataProvider non_approvable_submission_statuses
-     */
+    #[DataProvider('non_approvable_submission_statuses')]
     public function test_terminal_or_observed_submission_is_never_approved(string $status): void
     {
         [$submission, $order, $reservation, $inventory] = $this->fixture();
@@ -535,7 +519,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame(0, PaymentTransaction::count());
     }
 
-    public function non_approvable_submission_statuses(): array
+    public static function non_approvable_submission_statuses(): array
     {
         return [[PaymentSubmission::OBSERVED], [PaymentSubmission::REJECTED], [PaymentSubmission::EXPIRED], [PaymentSubmission::CANCELED]];
     }
@@ -566,9 +550,8 @@ class TreasuryPaymentApprovalTest extends TestCase
 
     /**
      * SQLite triggers fail at the same physical INSERT/UPDATE used in production.
-     *
-     * @dataProvider approval_write_failure_points
      */
+    #[DataProvider('approval_write_failure_points')]
     public function test_database_write_failures_rollback_the_outer_approval_transaction(string $table, string $operation): void
     {
         if (DB::connection()->getDriverName() !== 'sqlite') {
@@ -583,7 +566,7 @@ class TreasuryPaymentApprovalTest extends TestCase
             app(TreasuryPaymentApprovalService::class)->approve($submission->id, User::factory()->create(['role' => 'treasury'])->id);
             $this->fail('La aprobación debía fallar por el trigger SQLite.');
         } catch (\Throwable $exception) {
-            $this->assertNotInstanceOf(\Illuminate\Http\Exceptions\HttpResponseException::class, $exception);
+            $this->assertNotInstanceOf(HttpResponseException::class, $exception);
         } finally {
             DB::unprepared("DROP TRIGGER IF EXISTS {$trigger}");
         }
@@ -591,7 +574,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function approval_write_failure_points(): array
+    public static function approval_write_failure_points(): array
     {
         return [
             ['payment_transactions', 'INSERT'],
@@ -658,7 +641,7 @@ class TreasuryPaymentApprovalTest extends TestCase
             app(TreasuryPaymentApprovalService::class)->approve($submission->id, User::factory()->create(['role' => 'treasury'])->id);
             $this->fail('La segunda reserva debía fallar después de modificar la primera.');
         } catch (\Throwable $exception) {
-            $this->assertNotInstanceOf(\Illuminate\Http\Exceptions\HttpResponseException::class, $exception);
+            $this->assertNotInstanceOf(HttpResponseException::class, $exception);
         } finally {
             DB::unprepared('DROP TRIGGER IF EXISTS approval_second_reservation_failure');
         }
@@ -666,9 +649,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    /**
-     * @dataProvider approvalActors
-     */
+    #[DataProvider('approvalActors')]
     public function test_approval_authorization_rejections_are_safe(string $role, bool $active, int $status, ?string $code): void
     {
         [$submission, $order] = $this->fixture();
@@ -682,7 +663,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function approvalActors(): array
+    public static function approvalActors(): array
     {
         return [
             'customer active' => ['customer', true, 403, null],
@@ -717,9 +698,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         }
     }
 
-    /**
-     * @dataProvider forbiddenApprovalBodies
-     */
+    #[DataProvider('forbiddenApprovalBodies')]
     public function test_approval_accepts_only_an_empty_body(array $body): void
     {
         [$submission, $order] = $this->fixture();
@@ -735,7 +714,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function forbiddenApprovalBodies(): array
+    public static function forbiddenApprovalBodies(): array
     {
         $fields = ['amount', 'currency', 'status', 'order_id', 'payment_submission_id', 'transaction_id', 'payment_status', 'paid_at', 'confirmed_by', 'confirmed_at', 'reviewed_by', 'reviewed_at', 'idempotency_key', 'approved_scope_key', 'operation_number', 'fingerprint', 'snapshot', 'metadata', 'reservation', 'inventory', 'foo'];
         $cases = [];
@@ -762,9 +741,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         }
     }
 
-    /**
-     * @dataProvider legacySubmissionStatuses
-     */
+    #[DataProvider('legacySubmissionStatuses')]
     public function test_legacy_approve_transfer_is_blocked_for_every_payment_submission_status(string $status): void
     {
         [$submission, $order] = $this->fixture();
@@ -778,7 +755,7 @@ class TreasuryPaymentApprovalTest extends TestCase
         $this->assertSame($before, $this->snapshot($submission, $order));
     }
 
-    public function legacySubmissionStatuses(): array
+    public static function legacySubmissionStatuses(): array
     {
         return array_map(fn (string $status) => [$status], [
             PaymentSubmission::PENDING_REVIEW,

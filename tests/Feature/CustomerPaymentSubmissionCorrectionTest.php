@@ -14,11 +14,15 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
+use App\Services\CustomerPaymentSubmissionCorrectionService;
+use App\Services\TreasuryPaymentService;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CustomerPaymentSubmissionCorrectionTest extends TestCase
@@ -130,7 +134,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         }
     }
 
-    /** @dataProvider invalidAccountVariants */
+    #[DataProvider('invalidAccountVariants')]
     public function test_invalid_receiving_accounts_leave_the_observed_submission_untouched(array $overrides): void
     {
         [$owner, $order, $submission, $reservation] = $this->fixture();
@@ -159,7 +163,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         ];
     }
 
-    /** @dataProvider ineligibleOrderVariants */
+    #[DataProvider('ineligibleOrderVariants')]
     public function test_ineligible_orders_and_submission_states_are_controlled(string $field, mixed $value): void
     {
         [$owner, $order, $submission, $reservation] = $this->fixture();
@@ -217,7 +221,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         }
     }
 
-    /** @dataProvider semanticDifferenceVariants */
+    #[DataProvider('semanticDifferenceVariants')]
     public function test_same_idempotency_key_with_semantic_difference_conflicts_without_writes(string $field, mixed $value): void
     {
         [$owner, $order, $submission, $reservation] = $this->fixture();
@@ -303,7 +307,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $fingerprintResponse = $this->withHeader('Idempotency-Key', 'other-correction-key')->putJson($this->correctionUrl($otherOrder), $payload)->assertConflict();
         $this->assertSafeCorrectionConflict($fingerprintResponse, ['other-correction-key', '001234567']);
         $this->assertSame($otherBefore, $this->persistentCorrectionState($otherSubmission, $otherOrder, $otherReservation));
-        $service = app(\App\Services\TreasuryPaymentService::class);
+        $service = app(TreasuryPaymentService::class);
         $this->assertSame($service->duplicateFingerprint('yape', $account->code, '001234567'), $service->duplicateFingerprint('yape', $account->code, '00-123 4567'));
         $this->assertNotSame($service->duplicateFingerprint('yape', $account->code, '001234567'), $service->duplicateFingerprint('plin', $account->code, '001234567'));
         $otherAccount = $this->account('plin');
@@ -379,7 +383,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         PaymentSubmissionHistory::creating(fn () => throw new \RuntimeException('forced corrected history failure'));
 
         try {
-            app(\App\Services\CustomerPaymentSubmissionCorrectionService::class)->correct(
+            app(CustomerPaymentSubmissionCorrectionService::class)->correct(
                 $order,
                 $owner->id,
                 $this->correctionPayload('yape', $account->id, '009876543', now()->subMinute()->toIso8601String()),
@@ -400,7 +404,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
 
     public function test_reservation_update_failure_rolls_back_the_complete_correction_after_history_and_order_mutations(): void
     {
-        if (\Illuminate\Support\Facades\DB::connection()->getDriverName() !== 'sqlite') {
+        if (DB::connection()->getDriverName() !== 'sqlite') {
             $this->markTestSkipped('SQLite-specific RAISE(ABORT) trigger; rollback is covered in SQLite and MySQL transactional/concurrency certification.');
         }
 
@@ -412,10 +416,10 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $orderBefore = $this->financialOrderState($order);
         $itemsBefore = $order->items()->orderBy('id')->get()->map(fn ($item) => $item->only(['id', 'quantity']))->all();
         $inventoryBefore = $inventory->fresh()->only(['quantity', 'reserved_quantity']);
-        \Illuminate\Support\Facades\DB::statement("CREATE TRIGGER force_reservation_expiry_failure BEFORE UPDATE OF expires_at ON inventory_reservations BEGIN SELECT RAISE(ABORT, 'forced reservation expiry failure'); END");
+        DB::statement("CREATE TRIGGER force_reservation_expiry_failure BEFORE UPDATE OF expires_at ON inventory_reservations BEGIN SELECT RAISE(ABORT, 'forced reservation expiry failure'); END");
 
         try {
-            app(\App\Services\CustomerPaymentSubmissionCorrectionService::class)->correct(
+            app(CustomerPaymentSubmissionCorrectionService::class)->correct(
                 $order,
                 $owner->id,
                 $this->correctionPayload('yape', $account->id, '009876543', now()->subMinute()->toIso8601String()),
@@ -425,7 +429,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         } catch (QueryException $exception) {
             $this->assertStringContainsString('forced reservation expiry failure', $exception->getMessage());
         } finally {
-            \Illuminate\Support\Facades\DB::statement('DROP TRIGGER IF EXISTS force_reservation_expiry_failure');
+            DB::statement('DROP TRIGGER IF EXISTS force_reservation_expiry_failure');
         }
 
         $this->assertSame($before, $this->persistentCorrectionState($submission, $order, $first));
@@ -528,7 +532,7 @@ class CustomerPaymentSubmissionCorrectionTest extends TestCase
         $previous = new PDOException('UNIQUE constraint failed: payment_submission_histories.id', 19);
         $previous->errorInfo = ['HY000', 19, 'UNIQUE constraint failed: payment_submission_histories.id'];
 
-        return new QueryException('insert into payment_submission_histories values (?)', [], $previous);
+        return new QueryException('testing', 'insert into payment_submission_histories values (?)', [], $previous);
     }
 
     private function correctionUrl(Order $order): string

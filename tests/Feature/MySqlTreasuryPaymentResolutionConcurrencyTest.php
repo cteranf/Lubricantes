@@ -16,10 +16,11 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseInventory;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlTreasuryPaymentResolutionConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
@@ -136,10 +137,18 @@ class MySqlTreasuryPaymentResolutionConcurrencyTest extends TestCase
             $this->assertSame('pending', $freshOrder->payment_status);
             $this->assertNull($freshOrder->paid_at);
             $this->assertSame(0, PaymentTransaction::query()->where('order_id', $order->id)->where('status', 'approved')->count());
-            $this->assertSame(InventoryReservation::EXPIRED, $freshReservation->status);
-            $this->assertSame('canceled', $freshOrder->status);
+            if ($cases->isNotEmpty()) {
+                // Once the payment enters manual review, expiration must defer
+                // release until Treasury resolves the submitted proof.
+                $this->assertSame(InventoryReservation::ACTIVE, $freshReservation->status, $summary);
+                $this->assertSame('pending', $freshOrder->status, $summary);
+                $this->assertSame($fixture['initial']['inventory']['reserved_quantity'], (int) $freshInventory->reserved_quantity, $summary);
+            } else {
+                $this->assertSame(InventoryReservation::EXPIRED, $freshReservation->status, $summary);
+                $this->assertSame('canceled', $freshOrder->status, $summary);
+                $this->assertSame(0, (int) $freshInventory->reserved_quantity, $summary);
+            }
             $this->assertSame($fixture['initial']['inventory']['quantity'], $freshInventory->quantity);
-            $this->assertSame(0, (int) $freshInventory->reserved_quantity);
             $this->assertSame($fixture['initial']['product_stock'], $fixture['product']->fresh()->stock);
             $this->assertGreaterThanOrEqual(0, (int) $freshInventory->quantity);
             $this->assertGreaterThanOrEqual(0, (int) $freshInventory->reserved_quantity);
@@ -224,7 +233,11 @@ class MySqlTreasuryPaymentResolutionConcurrencyTest extends TestCase
     {
         $database = DB::selectOne('SELECT DATABASE() AS name')->name ?? null;
         $version = DB::selectOne('SELECT VERSION() AS version')->version ?? '';
-        if (app()->environment() !== 'testing' || config('app.debug') || DB::connection()->getDriverName() !== 'mysql' || $database !== 'lubristore_2b4_resolution_certification_test' || ! str_starts_with($version, '8.')) {
+        $expectedDatabase = getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+        if (app()->environment() !== 'testing' || config('app.debug') || DB::connection()->getDriverName() !== 'mysql'
+            || ! is_string($expectedDatabase)
+            || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $expectedDatabase) !== 1
+            || $database !== $expectedDatabase || ! str_starts_with($version, '8.')) {
             $this->fail('The isolated MySQL certification guard failed.');
         }
     }
@@ -282,7 +295,7 @@ class MySqlTreasuryPaymentResolutionConcurrencyTest extends TestCase
         }
         $worker = base_path('tests/Support/mysql_treasury_resolution_worker.php');
         $workers = [];
-        $environment = array_merge(getenv() ?: [], ['APP_ENV' => 'testing', 'APP_DEBUG' => 'false', 'DB_CONNECTION' => 'mysql', 'DB_DATABASE' => 'lubristore_2b4_resolution_certification_test']);
+        $environment = array_merge(getenv() ?: [], ['APP_ENV' => 'testing', 'APP_DEBUG' => 'false', 'DB_CONNECTION' => 'mysql', 'DB_DATABASE' => getenv('LARAVEL13_MYSQL_TEST_DATABASE')]);
 
         try {
             foreach (['first' => [$first, $firstReady], 'second' => [$second, $secondReady]] as $name => [$action, $readyPath]) {

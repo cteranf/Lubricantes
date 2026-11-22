@@ -20,6 +20,7 @@ use App\Services\TreasuryPaymentResolutionService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TreasuryPaymentResolutionOpeningTest extends TestCase
@@ -233,7 +234,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         }
     }
 
-    /** @dataProvider transactionAnomalies */
+    #[DataProvider('transactionAnomalies')]
     public function test_incompatible_received_transaction_is_never_repaired(string $column, mixed $value): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -248,7 +249,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function transactionAnomalies(): array
+    public static function transactionAnomalies(): array
     {
         return [
             'amount' => ['amount', '12.49'],
@@ -264,7 +265,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         ];
     }
 
-    /** @dataProvider caseAnomalies */
+    #[DataProvider('caseAnomalies')]
     public function test_incompatible_resolution_case_is_never_repaired(string $column, mixed $value): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -288,7 +289,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function caseAnomalies(): array
+    public static function caseAnomalies(): array
     {
         return [
             'missing received transaction' => ['received_payment_transaction_id', null],
@@ -303,7 +304,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         ];
     }
 
-    /** @dataProvider submissionAnomalies */
+    #[DataProvider('submissionAnomalies')]
     public function test_incompatible_submission_or_order_is_never_repaired(string $table, string $column, mixed $value): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -314,7 +315,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function submissionAnomalies(): array
+    public static function submissionAnomalies(): array
     {
         return [
             'submission status' => ['payment_submissions', 'status', PaymentSubmission::OBSERVED],
@@ -332,7 +333,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         ];
     }
 
-    /** @dataProvider submissionHistoryAnomalies */
+    #[DataProvider('submissionHistoryAnomalies')]
     public function test_incompatible_resolution_opened_submission_history_is_never_repaired(string $column, mixed $value): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -346,7 +347,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function submissionHistoryAnomalies(): array
+    public static function submissionHistoryAnomalies(): array
     {
         return [
             'from status' => ['from_status', PaymentSubmission::APPROVED],
@@ -359,7 +360,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         ];
     }
 
-    /** @dataProvider resolutionHistoryAnomalies */
+    #[DataProvider('resolutionHistoryAnomalies')]
     public function test_incompatible_opened_resolution_history_is_never_repaired(string $column, mixed $value): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -374,7 +375,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function resolutionHistoryAnomalies(): array
+    public static function resolutionHistoryAnomalies(): array
     {
         return [
             'from status' => ['from_status', PaymentResolutionCase::OPEN],
@@ -396,12 +397,12 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertNull(PaymentResolutionCase::firstOrFail()->requested_by);
         $this->assertNull($submission->fresh()->reviewed_by);
 
-        $case = app(\App\Services\TreasuryPaymentResolutionService::class)->open($submission->id, 999999);
+        $case = app(TreasuryPaymentResolutionService::class)->open($submission->id, 999999);
         $this->assertSame(PaymentResolutionCase::firstOrFail()->id, $case->id);
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    /** @dataProvider removableHistoryTables */
+    #[DataProvider('removableHistoryTables')]
     public function test_missing_opening_history_is_a_conflict_and_is_not_recreated(string $table, string $event): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -415,7 +416,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function removableHistoryTables(): array
+    public static function removableHistoryTables(): array
     {
         return [
             'submission history' => ['payment_submission_histories', 'resolution_opened'],
@@ -458,7 +459,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    /** @dataProvider crossLinkAnomalies */
+    #[DataProvider('crossLinkAnomalies')]
     public function test_crossed_financial_link_is_a_conflict_without_repair(string $link): void
     {
         [$treasury, $order, $submission] = $this->openedFixture();
@@ -485,7 +486,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    public function crossLinkAnomalies(): array
+    public static function crossLinkAnomalies(): array
     {
         return [
             'transaction order' => ['transaction.order_id'],
@@ -524,7 +525,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame($before, $this->resolutionSnapshot($order, $submission));
     }
 
-    /** @dataProvider historyNotNullColumns */
+    #[DataProvider('historyNotNullColumns')]
     public function test_history_required_columns_are_enforced_by_the_database(string $table, string $ownerColumn, string $event, string $field): void
     {
         [, , $submission] = $this->openedFixture();
@@ -547,7 +548,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertNotNull(DB::table($table)->where($ownerColumn, $owner)->first());
     }
 
-    public function historyNotNullColumns(): array
+    public static function historyNotNullColumns(): array
     {
         return [
             'submission event' => ['payment_submission_histories', 'payment_submission_id', 'resolution_opened', 'event'],
@@ -559,7 +560,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         ];
     }
 
-    /** @dataProvider incompatibleSubmissionStatuses */
+    #[DataProvider('incompatibleSubmissionStatuses')]
     public function test_incompatible_submission_statuses_cannot_open_a_resolution(string $status): void
     {
         [$treasury, , $submission] = $this->fixture(InventoryReservation::EXPIRED, $status);
@@ -570,7 +571,7 @@ class TreasuryPaymentResolutionOpeningTest extends TestCase
         $this->assertSame(0, PaymentResolutionCase::count());
     }
 
-    public function incompatibleSubmissionStatuses(): array
+    public static function incompatibleSubmissionStatuses(): array
     {
         return [
             'rejected' => [PaymentSubmission::REJECTED],

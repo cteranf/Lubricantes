@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Order;
 use App\Models\PaymentPreference;
 use App\Models\PaymentTransaction;
+use App\Models\PaymentWebhookEvent;
 use App\Models\Product;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
@@ -13,6 +15,7 @@ use App\Services\PaymentGateway\MercadoPagoGateway;
 use App\Services\PaymentProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -27,11 +30,10 @@ class PaymentRemoteManualReviewTest extends TestCase
     {
         parent::setUp();
         $this->secret = 'SYNTHETIC_'.bin2hex(random_bytes(16));
-        config(['payment.testing_legacy_webhook' => false, 'payment.mercadopago.webhook_secret' => $this->secret,
-            'payment.mock.enabled' => false, 'app.debug' => false]);
+        config(['payment.testing_legacy_webhook' => false, 'payment.mock.enabled' => false, 'app.debug' => false]);
     }
 
-    /** @dataProvider reversalStatuses */
+    #[DataProvider('reversalStatuses')]
     public function test_approved_order_reversals_are_terminal_manual_review_events(string $status): void
     {
         $this->withInventoryFixture(function ($transport, $order, $preference, $product) use ($status) {
@@ -46,7 +48,7 @@ class PaymentRemoteManualReviewTest extends TestCase
 
             $this->assertSame(202, $response->status());
             $this->assertSame(['status' => 'review_required', 'code' => 'manual_reconciliation_required'], $response->json());
-            $event = \App\Models\PaymentWebhookEvent::sole();
+            $event = PaymentWebhookEvent::sole();
             $this->assertSame('review_required', $event->status);
             $this->assertSame('manual_reconciliation_required', $event->failure_reason);
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product));
@@ -57,8 +59,8 @@ class PaymentRemoteManualReviewTest extends TestCase
             $this->assertSame($response->json(), $repeated->json());
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product));
             $this->assertSame($beforeCalls + 2, count($transport->calls));
-            $this->assertSame(1, \App\Models\PaymentWebhookEvent::count());
-            $this->assertSame(0, \App\Models\PaymentWebhookEvent::where('status', 'processed')->count());
+            $this->assertSame(1, PaymentWebhookEvent::count());
+            $this->assertSame(0, PaymentWebhookEvent::where('status', 'processed')->count());
         });
     }
 
@@ -67,7 +69,7 @@ class PaymentRemoteManualReviewTest extends TestCase
         return [['refunded'], ['charged_back'], ['cancelled']];
     }
 
-    /** @dataProvider unknownStatuses */
+    #[DataProvider('unknownStatuses')]
     public function test_unknown_remote_status_is_terminal_review_for_pending_or_approved_order(string $orderState, bool $approveFirst): void
     {
         $this->withInventoryFixture(function ($transport, $order, $preference, $product) use ($approveFirst, $orderState) {
@@ -84,7 +86,7 @@ class PaymentRemoteManualReviewTest extends TestCase
 
             $this->assertSame(202, $response->status());
             $this->assertSame(['status' => 'review_required', 'code' => 'unsupported_remote_status'], $response->json());
-            $event = \App\Models\PaymentWebhookEvent::sole();
+            $event = PaymentWebhookEvent::sole();
             $this->assertSame('review_required', $event->status);
             $this->assertSame('unsupported_remote_status', $event->failure_reason);
             $this->assertSame($orderState, $order->refresh()->payment_status);
@@ -96,8 +98,8 @@ class PaymentRemoteManualReviewTest extends TestCase
             $this->assertSame($response->json(), $repeated->json());
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product));
             $this->assertSame($beforeCalls + 2, count($transport->calls));
-            $this->assertSame(1, \App\Models\PaymentWebhookEvent::count());
-            $this->assertSame(0, \App\Models\PaymentWebhookEvent::where('status', 'processed')->count());
+            $this->assertSame(1, PaymentWebhookEvent::count());
+            $this->assertSame(0, PaymentWebhookEvent::where('status', 'processed')->count());
         });
     }
 
@@ -106,7 +108,7 @@ class PaymentRemoteManualReviewTest extends TestCase
         return [['pending', false], ['approved', true]];
     }
 
-    /** @dataProvider staleApprovedLinks */
+    #[DataProvider('staleApprovedLinks')]
     public function test_approved_order_with_absent_or_substituted_current_preference_requires_review(string $case): void
     {
         $this->withInventoryFixture(function ($transport, $order, $preference, $product) use ($case) {
@@ -129,7 +131,7 @@ class PaymentRemoteManualReviewTest extends TestCase
 
             $this->assertSame(202, $response->status());
             $this->assertSame(['status' => 'review_required', 'code' => 'financial_review_required'], $response->json());
-            $event = \App\Models\PaymentWebhookEvent::sole();
+            $event = PaymentWebhookEvent::sole();
             $this->assertSame('review_required', $event->status);
             $this->assertSame('financial_review_required', $event->failure_reason);
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product));
@@ -140,8 +142,8 @@ class PaymentRemoteManualReviewTest extends TestCase
             $this->assertSame($response->json(), $repeated->json());
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product));
             $this->assertSame($beforeCalls + 2, count($transport->calls));
-            $this->assertSame(1, \App\Models\PaymentWebhookEvent::count());
-            $this->assertSame(0, \App\Models\PaymentWebhookEvent::where('status', 'processed')->count());
+            $this->assertSame(1, PaymentWebhookEvent::count());
+            $this->assertSame(0, PaymentWebhookEvent::where('status', 'processed')->count());
         });
     }
 
@@ -163,7 +165,7 @@ class PaymentRemoteManualReviewTest extends TestCase
                     parent::__construct($money, $states, $payments, $inventory);
                 }
 
-                protected function afterRemoteOrderLock(\App\Models\Order $order): void
+                protected function afterRemoteOrderLock(Order $order): void
                 {
                     PaymentPreference::whereKey($this->preferenceId)->update(['state' => PaymentPreference::SUPERSEDED, 'superseded_at' => now()]);
                     $order->update(['current_payment_preference_id' => null]);
@@ -177,13 +179,13 @@ class PaymentRemoteManualReviewTest extends TestCase
 
             $this->assertSame(202, $response->status());
             $this->assertSame(['status' => 'review_required', 'code' => 'financial_review_required'], $response->json());
-            $this->assertSame('review_required', \App\Models\PaymentWebhookEvent::sole()->status);
+            $this->assertSame('review_required', PaymentWebhookEvent::sole()->status);
             $this->assertSame($before, $this->financialSnapshot($order, $preference, $product), 'The local interleaving must roll back with the review decision.');
             $this->assertSame($beforeCalls + 2, count($transport->calls));
         });
     }
 
-    /** @dataProvider pendingStaleLinks */
+    #[DataProvider('pendingStaleLinks')]
     public function test_pending_order_with_stale_local_preference_fails_closed(string $case): void
     {
         $this->withInventoryFixture(function ($transport, $order, $preference, $product) use ($case) {
@@ -201,7 +203,7 @@ class PaymentRemoteManualReviewTest extends TestCase
 
             $this->assertSame(422, $response->status());
             $this->assertSame(['status' => 'invalid'], $response->json());
-            $event = \App\Models\PaymentWebhookEvent::sole();
+            $event = PaymentWebhookEvent::sole();
             $this->assertSame('failed', $event->status);
             $this->assertNotSame('review_required', $event->status);
             $this->assertSame('pending', $order->refresh()->payment_status);
@@ -218,6 +220,7 @@ class PaymentRemoteManualReviewTest extends TestCase
     private function withInventoryFixture(\Closure $callback): void
     {
         $this->withRemoteLink(function ($transport, $order, $preference) use ($callback) {
+            config(['payment.mercadopago.webhook_secret' => $this->secret]);
             $product = Product::create(['name' => 'Synthetic manual review item', 'slug' => 'manual-review-'.bin2hex(random_bytes(12)),
                 'sku' => 'MR-'.strtoupper(bin2hex(random_bytes(6))), 'price' => '10.25', 'is_active' => true]);
             $inventory = app(InventoryService::class);

@@ -2,15 +2,24 @@
 
 use App\Exceptions\InsufficientVersionedInventoryStockException;
 use App\Exceptions\PaymentReassignmentConflictException;
+use App\Models\InventoryReservation;
+use App\Models\OrderFulfillmentHistory;
+use App\Models\PaymentRefund;
+use App\Models\PaymentResolutionCase;
+use App\Models\PaymentResolutionHistory;
 use App\Models\PaymentSubmission;
+use App\Models\PaymentSubmissionHistory;
+use App\Models\PaymentTransaction;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\OrderFulfillmentService;
+use App\Services\PaymentReassignmentFinalState;
 use App\Services\TreasuryPaymentReassignmentService;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -69,8 +78,8 @@ $version = DB::selectOne('SELECT VERSION() AS version')->version ?? '';
 if (app()->environment() !== 'testing'
     || config('app.debug')
     || DB::connection()->getDriverName() !== 'mysql'
-    || $database !== 'lubristore_2b4_resolution_certification_test'
-    || ! str_ends_with((string) $database, '_test')
+    || $database !== getenv('LARAVEL13_MYSQL_TEST_DATABASE')
+    || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) getenv('LARAVEL13_MYSQL_TEST_DATABASE')) !== 1
     || $database === 'lubricantes'
     || ! str_starts_with((string) $version, '8.')) {
     echo json_encode(['result' => 'worker_error', 'ok' => false]);
@@ -142,18 +151,75 @@ try {
     ]);
     exit(0);
 } catch (PaymentReassignmentConflictException|ValidationException $exception) {
+    $reason = match ($exception->getMessage()) {
+        'La reasignación existente está incompleta o es incompatible.' => 'existing_final_inconsistent',
+        'La estructura financiera de la reasignación es incompatible.' => 'initial_financial_structure',
+        'La presentación, transacción o resolución no cumple el contrato financiero.' => 'initial_financial_contract',
+        'El pedido ya inició una operación incompatible con la reasignación.' => 'operational_state',
+        'El pedido tiene picking, packing o cancelación operativa iniciada.' => 'handling_started',
+        'Existe otra resolución cerrada para el pedido.' => 'other_resolution_closed',
+        'La evidencia original de reservas es incompleta o incompatible.' => 'reservation_provenance',
+        default => 'other_allowlisted_conflict',
+    };
+    $submission = PaymentSubmission::query()->with('order')->find((int) $submissionId);
+    $order = $submission?->order;
+    $linkedTransactions = $submission ? PaymentTransaction::query()->where('payment_submission_id', $submission->id)->orderBy('id')->get() : collect();
+    $transaction = $linkedTransactions->first();
+    $cases = $submission ? PaymentResolutionCase::query()->where('payment_submission_id', $submission->id)->orderBy('id')->get() : collect();
+    $case = $cases->first();
+    $state = null;
+    if ($submission && $order && $transaction && $case) {
+        $reservations = InventoryReservation::query()->where('resolution_case_id', $case->id)->get();
+        try {
+            DB::transaction(fn () => app(InventoryService::class)->assertCoherentConsumedReservationsForResolutionCase($order, $case));
+            $inventoryCoherent = true;
+        } catch (Throwable) {
+            $inventoryCoherent = false;
+        }
+        $state = [
+            'submission_status' => $submission->status,
+            'order_status' => $order->status,
+            'tracking_status' => $order->tracking_status,
+            'order_fulfillment' => $order->fulfillment_status,
+            'payment_status' => $order->payment_status,
+            'transaction_status' => $transaction->status,
+            'scope_matches' => $transaction->approved_scope_key === PaymentTransaction::approvedScopeKeyForOrder($order->id),
+            'linked_transaction_count' => $linkedTransactions->count(),
+            'case_count' => $cases->count(),
+            'approved_transaction_count' => PaymentTransaction::query()->where('order_id', $order->id)->where('transaction_type', PaymentTransaction::PAYMENT)->where('status', PaymentTransaction::APPROVED)->count(),
+            'approved_transaction_matches_linked' => (int) PaymentTransaction::query()->where('order_id', $order->id)->where('transaction_type', PaymentTransaction::PAYMENT)->where('status', PaymentTransaction::APPROVED)->value('id') === (int) $transaction->id,
+            'refund_exists' => PaymentRefund::query()->where('payment_resolution_case_id', $case->id)->exists(),
+            'case_status' => $case->status,
+            'case_type' => $case->type,
+            'reservation_statuses' => $reservations->pluck('status')->all(),
+            'reservation_expiry_matches' => $order->reserved_until !== null && $reservations->every(fn ($reservation) => $reservation->expires_at?->getTimestamp() === $order->reserved_until->getTimestamp()),
+            'consumed_inventory_coherent' => $inventoryCoherent,
+            'final_snapshot_coherent' => PaymentReassignmentFinalState::isCoherent(
+                $order,
+                $submission,
+                $transaction,
+                $case,
+                PaymentSubmissionHistory::query()->where('payment_submission_id', $submission->id)->get(),
+                PaymentResolutionHistory::query()->where('payment_resolution_case_id', $case->id)->get(),
+                OrderFulfillmentHistory::query()->where('order_id', $order->id)->get(),
+                $reservations->count(),
+            ),
+        ];
+    }
     echo json_encode([
         'result' => 'domain_conflict',
         'ok' => false,
         'status' => 409,
         'code' => 'payment_reassignment_conflict',
         'message' => 'La reasignación no puede completarse en el estado actual.',
+        'reason' => $reason,
+        'state' => $state,
         'previous_exception_class' => $exception->getPrevious() ? get_class($exception->getPrevious()) : null,
         'release_observed' => true,
     ]);
     exit(0);
 } catch (Throwable $exception) {
-    $isQueryException = $exception instanceof Illuminate\Database\QueryException;
+    $isQueryException = $exception instanceof QueryException;
     $errorInfo = $isQueryException && is_array($exception->errorInfo) ? $exception->errorInfo : [];
     $previousException = $exception->getPrevious();
     echo json_encode([

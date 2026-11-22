@@ -556,9 +556,20 @@ class VersionedInventoryReservationPrimitiveTest extends TestCase
                 $case->setAttribute('id', $fixture['case']->id);
             } else {
                 $this->assertSame('sqlite', $originalConnection->getDriverName());
-                $this->assertSame(0, $originalConnection->transactionLevel());
-                $order = $fixture['order'];
-                $case = $fixture['case'];
+                $temporaryConnection = 'sqlite_without_outer_tx_'.bin2hex(random_bytes(4));
+                config(["database.connections.{$temporaryConnection}" => [
+                    'driver' => 'sqlite',
+                    'database' => ':memory:',
+                    'prefix' => '',
+                    'foreign_key_constraints' => true,
+                ]]);
+                DB::purge($temporaryConnection);
+                DB::setDefaultConnection($temporaryConnection);
+
+                $order = (new Order)->setConnection($temporaryConnection);
+                $order->setAttribute('id', $fixture['order']->id);
+                $case = (new PaymentResolutionCase)->setConnection($temporaryConnection);
+                $case->setAttribute('id', $fixture['case']->id);
             }
 
             $isolated = DB::connection();

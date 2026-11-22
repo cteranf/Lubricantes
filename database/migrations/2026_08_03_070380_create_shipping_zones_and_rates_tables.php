@@ -29,7 +29,7 @@ return new class extends Migration
             $table->string('normalized_department', 100);
             $table->string('normalized_province', 100);
             $table->string('normalized_district', 100);
-            $table->unsignedDecimal('amount', 10, 2);
+            $table->decimal('amount', 10, 2)->unsigned();
             $table->unsignedSmallInteger('estimated_days_min')->nullable();
             $table->unsignedSmallInteger('estimated_days_max')->nullable();
             $table->boolean('is_active')->default(true)->index();

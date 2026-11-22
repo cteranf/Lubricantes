@@ -25,8 +25,10 @@ use App\Services\TreasuryPaymentService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -71,7 +73,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         $this->assertSame(0, PaymentTransaction::where('transaction_type', PaymentTransaction::REFUND)->where('order_id', $fixture['order']->id)->count());
     }
 
-    /** @dataProvider paymentMethodsWithoutSubmission */
+    #[DataProvider('paymentMethodsWithoutSubmission')]
     public function test_supports_approved_payment_methods_without_fabricating_a_submission_or_resolution_case(string $method): void
     {
         $fixture = $this->fixture(paymentMethod: $method);
@@ -110,7 +112,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
             ->where('event', PaymentSubmissionHistory::REFUND_MARKED_PENDING)->count());
     }
 
-    /** @dataProvider invalidReasons */
+    #[DataProvider('invalidReasons')]
     public function test_rejects_an_invalid_reason_without_writes(string $reason): void
     {
         $fixture = $this->fixture();
@@ -191,7 +193,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         $this->assertFalse(hash_equals($integer['confidential_digest'], $string['confidential_digest']), 'Private scalar types must remain strict.');
     }
 
-    /** @dataProvider globalReservationStates */
+    #[DataProvider('globalReservationStates')]
     public function test_global_reservations_reconcile_all_product_balances_without_writes(string $state): void
     {
         $fixture = $this->fixture();
@@ -244,7 +246,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         return $this->confidentialDigest(array_map(fn ($model) => $model->fresh()->getAttributes(), $foreign));
     }
 
-    /** @dataProvider invalidActorStates */
+    #[DataProvider('invalidActorStates')]
     public function test_rejects_an_invalid_actor_without_writes(string $role, bool $active): void
     {
         $fixture = $this->fixture();
@@ -271,7 +273,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider invalidOrderStates */
+    #[DataProvider('invalidOrderStates')]
     public function test_rejects_ineligible_order_states_without_repair(array $changes): void
     {
         $fixture = $this->fixture();
@@ -358,7 +360,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         }
     }
 
-    /** @dataProvider invalidPaymentMutations */
+    #[DataProvider('invalidPaymentMutations')]
     public function test_rejects_missing_or_incompatible_original_payment(string $field, mixed $value): void
     {
         $fixture = $this->fixture();
@@ -386,7 +388,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider reservationStructureCorruptions */
+    #[DataProvider('reservationStructureCorruptions')]
     public function test_rejects_crossed_incomplete_or_ambiguous_reservation_evidence(string $corruption): void
     {
         $fixture = $this->fixture();
@@ -434,7 +436,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider reassignmentEvidenceCorruptions */
+    #[DataProvider('reassignmentEvidenceCorruptions')]
     public function test_rejects_an_incomplete_or_incompatible_b2_final_state(string $corruption): void
     {
         $fixture = $this->fixture(withSubmission: true, withResolutionCase: true);
@@ -472,7 +474,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         ];
     }
 
-    /** @dataProvider inventoryCorruptions */
+    #[DataProvider('inventoryCorruptions')]
     public function test_rejects_uncompensated_or_corrupt_inventory_without_writes(string $corruption): void
     {
         $fixture = $this->fixture();
@@ -596,7 +598,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         }
     }
 
-    /** @dataProvider rollbackStages */
+    #[DataProvider('rollbackStages')]
     public function test_rolls_back_every_write_stage(string $stage): void
     {
         $fixture = $this->fixture(withSubmission: true, withResolutionCase: true);
@@ -624,7 +626,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
     {
         $fixture = $this->fixture();
         $before = $this->snapshot($fixture);
-        $exception = new QueryException('refund probe', [], new PDOException('synthetic syntax failure', 9999));
+        $exception = new QueryException('testing', 'refund probe', [], new PDOException('synthetic syntax failure', 9999));
         $service = $this->instrumentedService('financial', $exception);
 
         try {
@@ -646,6 +648,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
 
         $fixture = $this->fixture();
         $before = $this->inventorySnapshot($fixture);
+        $this->commitInMemoryTransactionForTopLevelRetry();
         $service = $this->instrumentedService('refund', $this->recognizedConcurrencyException(), false);
 
         $refund = $service->markPending($fixture['order'], $fixture['treasury'], 'Solicitud manual');
@@ -668,6 +671,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
 
         $fixture = $this->fixture();
         $before = $this->snapshot($fixture);
+        $this->commitInMemoryTransactionForTopLevelRetry();
         $exception = $this->recognizedConcurrencyException();
         $service = $this->instrumentedService('financial', $exception, true);
 
@@ -752,7 +756,16 @@ class TreasuryPaymentRefundServiceTest extends TestCase
 
     private function recognizedConcurrencyException(): QueryException
     {
-        return new QueryException('refund retry probe', [], new PDOException('database is locked', 40001));
+        return new QueryException('testing', 'refund retry probe', [], new PDOException('database is locked', 40001));
+    }
+
+    protected function commitInMemoryTransactionForTopLevelRetry(): void
+    {
+        // Laravel 13 raises DeadlockException instead of retrying a simulated
+        // concurrency error nested under RefreshDatabase's outer transaction.
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+        DB::commit();
     }
 
     private function uniqueException(): QueryException
@@ -760,7 +773,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
         $previous = new PDOException('UNIQUE constraint failed: payment_refunds.idempotency_key', 19);
         $previous->errorInfo = ['23000', 19, 'UNIQUE constraint failed: payment_refunds.idempotency_key'];
 
-        return new QueryException('refund unique probe', [], $previous);
+        return new QueryException('testing', 'refund unique probe', [], $previous);
     }
 
     /** @return array<string, mixed> */
@@ -1052,7 +1065,7 @@ class TreasuryPaymentRefundServiceTest extends TestCase
 
     private function rowsIfPresent(string $table, callable $scope): array
     {
-        return \Illuminate\Support\Facades\Schema::hasTable($table) ? $this->rows($table, $scope) : [];
+        return Schema::hasTable($table) ? $this->rows($table, $scope) : [];
     }
 
     private function isConfidentialSnapshotField(string $field): bool

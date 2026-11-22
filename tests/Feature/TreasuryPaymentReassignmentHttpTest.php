@@ -31,6 +31,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Mockery;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class TreasuryPaymentReassignmentHttpTest extends TestCase
@@ -164,9 +165,7 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
             ->assertHeader('Pragma', 'no-cache');
     }
 
-    /**
-     * @dataProvider incoherentAvailabilityProvider
-     */
+    #[DataProvider('incoherentAvailabilityProvider')]
     public function test_treasury_detail_hides_reassignment_for_each_incoherent_b1_state_without_writes(string $anomaly): void
     {
         $fixture = $this->fixture();
@@ -184,7 +183,7 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
         $this->assertSnapshotUnchanged($before, $this->snapshot($fixture));
     }
 
-    /** @dataProvider nonCanceledReservationEvidenceProvider */
+    #[DataProvider('nonCanceledReservationEvidenceProvider')]
     public function test_non_canceled_orders_require_the_same_complete_reservation_evidence_in_get_and_post(string $anomaly): void
     {
         $fixture = $this->fixture();
@@ -372,7 +371,7 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
         $fixture = $this->fixture();
         $pdo = new PDOException('sensitive availability query detail', 1);
         $pdo->errorInfo = ['42000', 1, 'sensitive availability query detail'];
-        $query = new QueryException('sensitive availability sql', [], $pdo);
+        $query = new QueryException('testing', 'sensitive availability sql', [], $pdo);
         $original = $this->app->make(TreasuryPaymentReassignmentService::class);
         $service = new class($this->app->make(InventoryService::class), $query) extends TreasuryPaymentReassignmentService
         {
@@ -567,7 +566,7 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
         $this->assertSnapshotUnchanged($before, $this->snapshot($fixture));
     }
 
-    /** @dataProvider containerServiceStates */
+    #[DataProvider('containerServiceStates')]
     public function test_unexpected_inventory_reservation_conflict_is_translated_to_a_generic_safe_conflict(string $containerState): void
     {
         $fixture = $this->fixture();
@@ -647,7 +646,7 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
         $fixture = $this->fixture();
         $pdo = new PDOException('internal syntax detail', 1);
         $pdo->errorInfo = ['42000', 1, 'internal syntax detail'];
-        $query = new QueryException('invalid internal sql', [], $pdo);
+        $query = new QueryException('testing', 'invalid internal sql', [], $pdo);
         $original = $this->app->make(TreasuryPaymentReassignmentService::class);
         $service = new class($this->app->make(InventoryService::class), $query) extends TreasuryPaymentReassignmentService
         {
@@ -764,6 +763,13 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
                     : 'order_canceled',
             ],
         ]);
+
+        if ($expireAutomatically) {
+            // Keep the fixture aligned with expiration policy: submitted
+            // proofs prevent automatic release and require manual review.
+            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
+        }
+
         $submission = PaymentSubmission::create([
             'order_id' => $order->id,
             'channel' => 'yape',
@@ -779,11 +785,6 @@ class TreasuryPaymentReassignmentHttpTest extends TestCase
             'submitted_at' => now(),
             'idempotency_key' => 'http-reassignment-submission-'.$suffix,
         ]);
-
-        if ($expireAutomatically) {
-            app(InventoryReservationExpirationService::class)->expireOrder($order->id);
-        }
-
         $case = $transaction = null;
         if ($openResolution) {
             $case = app(TreasuryPaymentResolutionService::class)->open($submission->id, $treasury->id);

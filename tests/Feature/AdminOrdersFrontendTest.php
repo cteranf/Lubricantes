@@ -211,7 +211,7 @@ class AdminOrdersFrontendTest extends TestCase
         $this->assertStringNotContainsString('loading-message=', $view);
         $this->assertStringNotContainsString('mobile-details-label=', $view);
         foreach ([
-            'search-placeholder="Buscar productos por nombre o SKU"',
+            'search-placeholder="Buscar productos por nombre, SKU o modelo"',
             'current-page-report-template="Mostrando {first} a {last} de {totalRecords} productos"',
             'loading-message="Cargando productos…"',
             'mobile-details-label="Detalles del producto {id}"',

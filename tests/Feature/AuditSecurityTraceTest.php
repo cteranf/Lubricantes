@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\AuditSanitizer;
 use App\Services\AuditService;
+use App\Services\CustomerEmailVerificationService;
 use App\Services\UserAdministrationService;
 use App\Support\AuditEventContract;
 use App\Support\AuditEventData;
@@ -169,7 +170,7 @@ class AuditSecurityTraceTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
         $this->app->instance(AuditService::class, $brokenAudit);
@@ -406,10 +407,10 @@ class AuditSecurityTraceTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
-        $service = new UserAdministrationService($brokenAudit, app(\App\Services\CustomerEmailVerificationService::class));
+        $service = new UserAdministrationService($brokenAudit, app(CustomerEmailVerificationService::class));
 
         try {
             $service->create([
@@ -433,10 +434,10 @@ class AuditSecurityTraceTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
-        $service = new \App\Services\UserAdministrationService($brokenAudit, app(\App\Services\CustomerEmailVerificationService::class));
+        $service = new UserAdministrationService($brokenAudit, app(CustomerEmailVerificationService::class));
 
         foreach ([
             fn () => $service->update($actor, $target, ['name' => 'Synthetic Changed', 'email' => 'changed@example.test', 'role' => 'treasury']),
@@ -465,7 +466,7 @@ class AuditSecurityTraceTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
         $this->app->instance(AuditService::class, $brokenAudit);
@@ -498,7 +499,7 @@ class AuditSecurityTraceTest extends TestCase
         {
             protected function persist(AuditEventData $event): AuditLog
             {
-                throw new QueryException('insert into audit_logs', [], new PDOException('synthetic failure'));
+                throw new QueryException('testing', 'insert into audit_logs', [], new PDOException('synthetic failure'));
             }
         };
         $this->app->instance(AuditService::class, $brokenAudit);
@@ -992,6 +993,6 @@ final class AuditRequestContextTestHelper
 {
     public static function isUuid(string $value): bool
     {
-        return \App\Http\Middleware\AuditRequestContext::isUuid($value);
+        return AuditRequestContext::isUuid($value);
     }
 }

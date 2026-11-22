@@ -2,6 +2,7 @@
 
 use App\Models\InventoryReceipt;
 use App\Models\User;
+use App\Models\Warehouse;
 use App\Services\InventoryReceiptService;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
@@ -17,8 +18,11 @@ config(['database.default' => 'mysql', 'database.connections.mysql' => $connecti
 DB::purge('mysql');
 
 try {
-    if (DB::connection('mysql')->getDriverName() !== 'mysql'
-        || DB::connection('mysql')->selectOne('SELECT DATABASE() AS database_name')->database_name !== 'lubristore_inventory_receipts_test') {
+    $expectedDatabase = getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+    if (! is_string($expectedDatabase)
+        || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $expectedDatabase) !== 1
+        || DB::connection('mysql')->getDriverName() !== 'mysql'
+        || DB::connection('mysql')->selectOne('SELECT DATABASE() AS database_name')->database_name !== $expectedDatabase) {
         throw new RuntimeException('Database safety guard failed.');
     }
 
@@ -27,7 +31,7 @@ try {
         if ($mode === 'hold-header') {
             InventoryReceipt::on('mysql')->whereKey((int) $receiptId)->lockForUpdate()->firstOrFail();
         } else {
-            \App\Models\Warehouse::on('mysql')->orderBy('id')->lockForUpdate()->get(['id']);
+            Warehouse::on('mysql')->orderBy('id')->lockForUpdate()->get(['id']);
         }
         file_put_contents($readyPath, (string) DB::connection('mysql')->selectOne('SELECT CONNECTION_ID() AS connection_id')->connection_id);
         waitForSignal($releasePath);

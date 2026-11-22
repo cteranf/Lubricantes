@@ -19,15 +19,17 @@ use App\Models\WarehouseInventory;
 use App\Services\TreasuryPaymentRefundService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\TestCase;
 
-/** @group mysql */
+#[Group('mysql')]
 class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
 
-    private const DATABASE = 'lubristore_2b4_resolution_certification_test';
+    private string $database;
 
     public function test_real_mysql_deadlock_retries_the_complete_mark_pending_transaction(): void
     {
@@ -135,7 +137,7 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
         $this->test_physical_completion_races_preserve_atomicity_and_privacy('complete_snapshot', true);
     }
 
-    /** @dataProvider completionRaces */
+    #[DataProvider('completionRaces')]
     public function test_physical_completion_races_preserve_atomicity_and_privacy(string $action, bool $withSubmission): void
     {
         $this->requireIsolatedMysql();
@@ -324,15 +326,17 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
         $this->assertSame('testing', app()->environment());
         $this->assertFalse((bool) config('app.debug'));
         $this->assertSame('mysql', config('database.default'));
-        $this->assertSame(self::DATABASE, config('database.connections.mysql.database'));
+        $this->database = (string) getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $this->database);
+        $this->assertSame($this->database, config('database.connections.mysql.database'));
         $this->assertEmpty(config('database.connections.mysql.url'));
         $database = DB::selectOne('SELECT DATABASE() AS name')->name ?? null;
         $version = DB::selectOne('SELECT VERSION() AS version')->version ?? '';
         $this->assertSame('testing', app()->environment());
         $this->assertFalse((bool) config('app.debug'));
         $this->assertSame('mysql', DB::connection()->getDriverName());
-        $this->assertSame(self::DATABASE, $database);
-        $this->assertTrue(str_ends_with((string) $database, '_test'));
+        $this->assertSame($this->database, $database);
+        $this->assertMatchesRegularExpression('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', (string) $database);
         $this->assertNotSame('lubricantes', $database);
         $this->assertTrue(str_starts_with((string) $version, '8.'));
         foreach (['2026_09_26_070600_create_payment_refunds_table', '2026_09_26_070620_add_refund_pending_to_order_payment_status', '2026_10_11_070630_generalize_payment_refunds_for_total_refunds'] as $migration) {
@@ -346,7 +350,7 @@ class MySqlTreasuryPaymentRefundConcurrencyTest extends TestCase
             'APP_ENV' => 'testing',
             'APP_DEBUG' => 'false',
             'DB_CONNECTION' => 'mysql',
-            'DB_DATABASE' => self::DATABASE,
+            'DB_DATABASE' => $this->database,
         ]);
         $command = array_merge([PHP_BINARY, $workerPath], array_map(static fn ($argument) => (string) $argument, $arguments));
         $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, base_path(), $environment);

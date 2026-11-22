@@ -20,13 +20,13 @@ use MercadoPago\MercadoPagoConfig;
 use MercadoPago\Net\MPHttpClient;
 use MercadoPago\Net\MPRequest;
 use MercadoPago\Net\MPResponse;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Concerns\RequiresMySqlDriver;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
-/** @group mysql
- * Physical MySQL races; intentionally does not use RefreshDatabase.
- */
+/** Physical MySQL races; intentionally does not use RefreshDatabase. */
+#[Group('mysql')]
 class RemotePaymentPhysicalConcurrencyTest extends TestCase
 {
     use RequiresMySqlDriver;
@@ -259,7 +259,8 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         $savedClient = $clientProperty->getValue();
 
         try {
-            $transport = new class implements MPHttpClient {
+            $transport = new class implements MPHttpClient
+            {
                 public string $preferenceId;
 
                 public function __construct()
@@ -272,6 +273,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
                     if ($request->getMethod() !== 'POST' || $request->getUri() !== '/checkout/preferences') {
                         throw new \LogicException('Unexpected fixture SDK request.');
                     }
+
                     return new MPResponse(201, [
                         'id' => $this->preferenceId,
                         'init_point' => 'https://example.invalid/physical-checkout',
@@ -335,6 +337,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
             $raceId = $scenario.'-'.$round.'-'.bin2hex(random_bytes(8));
             $eventA = 'event-a-'.$raceId;
             $eventB = $sameEvent ? $eventA : 'event-b-'.$raceId;
+
             return [
                 'marker_root' => $root,
                 'order_id' => (int) $order->id,
@@ -473,7 +476,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         $preferenceId = $order->fetchColumn();
         $this->assertNotFalse($preferenceId, 'Committed synthetic order must be visible to another connection.');
         $this->assertSame((int) $fixture['preference_id_local'], (int) $preferenceId);
-        $reservation = $pdo->prepare("SELECT status FROM inventory_reservations WHERE order_id = ?");
+        $reservation = $pdo->prepare('SELECT status FROM inventory_reservations WHERE order_id = ?');
         $reservation->execute([$fixture['order_id']]);
         $this->assertSame('active', $reservation->fetchColumn());
         $pdo = null;
@@ -498,6 +501,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
     private function innodbDeadlocks(): int
     {
         $row = DB::selectOne("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'");
+
         return is_object($row) ? (int) ($row->Value ?? 0) : 0;
     }
 
@@ -511,12 +515,15 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
             'DB_CONNECTION' => 'mysql', 'DB_HOST' => (string) $connection['host'], 'DB_PORT' => (string) $connection['port'],
             'DB_DATABASE' => (string) $connection['database'], 'DB_USERNAME' => (string) $connection['username'],
             'DB_PASSWORD' => (string) $connection['password'], 'DB_URL' => '',
-            'MERCADOPAGO_ACCESS_TOKEN' => '', 'MERCADOPAGO_PUBLIC_KEY' => '', 'MERCADOPAGO_WEBHOOK_SECRET' => '',
+            'MERCADOPAGO_ACCESS_TOKEN' => 'TEST-SYNTHETIC-ACCESS-TOKEN',
+            'MERCADOPAGO_PUBLIC_KEY' => 'TEST-SYNTHETIC-PUBLIC-KEY',
+            'MERCADOPAGO_WEBHOOK_SECRET' => 'synthetic-local-webhook-secret',
             'SYNTHETIC_MP_RACE_FIXTURE' => $fixture['fixture_path'], 'SYNTHETIC_MP_RACE_ROLE' => $role,
         ]);
         foreach (['DB_READ_HOST', 'DB_WRITE_HOST', 'DB_SOCKET'] as $unset) {
             unset($environment[$unset]);
         }
+
         return $environment;
     }
 
@@ -531,6 +538,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         $fixture['fixture_path'] = $root.DIRECTORY_SEPARATOR.'worker-fixture.json';
         $process = proc_open($command, $descriptors, $pipes, base_path(), $this->workerEnvironment($role, $fixture), ['bypass_shell' => true]);
         $this->assertTrue(is_resource($process), 'An isolated PHP worker process must start.');
+
         return $process;
     }
 
@@ -546,6 +554,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
             usleep(20000);
         }
         $closed = proc_close($process);
+
         return $exit ?? (int) $closed;
     }
 
@@ -567,6 +576,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         while (! is_file($path) && microtime(true) < $deadline) {
             usleep(20000);
         }
+
         return is_file($path);
     }
 
@@ -586,6 +596,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         if (! is_array($data)) {
             throw new \RuntimeException('Owned harness marker is invalid.');
         }
+
         return $data;
     }
 
@@ -595,6 +606,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
         if (! mkdir($root, 0700)) {
             throw new \RuntimeException('Owned race directory could not be created.');
         }
+
         return $root;
     }
 
@@ -624,7 +636,7 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
             return;
         }
         $paymentIds = array_values(array_unique(array_filter(array_map('strval', $owned['payment_ids'] ?? [$owned['payment_id'] ?? '']))));
-        DB::transaction(function () use ($owned, $orderId, $productId, $userId, $paymentIds) {
+        DB::transaction(function () use ($orderId, $productId, $userId, $paymentIds) {
             $ids = static fn (string $table, string $column, int $value): array => $value > 0 ? DB::table($table)->where($column, $value)->pluck('id')->all() : [];
             $transactionIds = $ids('payment_transactions', 'order_id', $orderId);
             $historyIds = $ids('order_fulfillment_histories', 'order_id', $orderId);
@@ -678,5 +690,4 @@ class RemotePaymentPhysicalConcurrencyTest extends TestCase
             $this->assertSame(0, DB::table('payment_transactions')->whereIn('provider_payment_id', $paymentIds)->count());
         }
     }
-
 }

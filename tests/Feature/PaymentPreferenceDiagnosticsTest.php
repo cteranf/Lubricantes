@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\PaymentPreference;
 use App\Models\PaymentSetting;
 use App\Models\User;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Laravel\Sanctum\Sanctum;
 use MercadoPago\Exceptions\MPBadRequestException;
 use MercadoPago\Net\MPResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class PaymentPreferenceDiagnosticsTest extends TestCase
@@ -163,7 +165,7 @@ class PaymentPreferenceDiagnosticsTest extends TestCase
         $this->assertTrue($caught === $failure, 'State transition errors must propagate without replacement.');
     }
 
-    /** @dataProvider runtimeOrigins */
+    #[DataProvider('runtimeOrigins')]
     public function test_runtime_origins_are_relative_or_unknown_and_categories_are_fixed(string $path, bool $windows, string $component, string $file, string $prefix, int $severity, string $category): void
     {
         if (str_starts_with($path, '@root/')) {
@@ -234,7 +236,7 @@ class PaymentPreferenceDiagnosticsTest extends TestCase
         }
     }
 
-    /** @dataProvider physicalOriginPolicies */
+    #[DataProvider('physicalOriginPolicies')]
     public function test_origin_policy_requires_canonical_files_and_rejects_links_portably(bool $windows, string $scenario): void
     {
         // A deterministic filesystem abstraction exercises Windows and POSIX on either host.
@@ -351,7 +353,17 @@ class PaymentPreferenceDiagnosticsTest extends TestCase
     {
         $this->assertTrue(config('database.default') === 'sqlite' && config('database.connections.sqlite.database') === ':memory:', 'Diagnostics tests require isolated SQLite memory.');
 
-        return Order::create(['user_id' => User::factory()->create()->id, 'status' => 'pending', 'total' => 10, 'shipping_info' => [], 'payment_method' => 'card', 'payment_status' => 'pending', 'delivery_type' => 'delivery', 'tracking_status' => 'pending']);
+        $order = Order::create(['user_id' => User::factory()->create()->id, 'status' => 'pending', 'total' => 10, 'shipping_amount' => 0, 'shipping_info' => [], 'payment_method' => 'card', 'payment_status' => 'pending', 'delivery_type' => 'delivery', 'tracking_status' => 'pending']);
+        OrderItem::create([
+            'order_id' => $order->id,
+            'product_id' => null,
+            'product_name' => 'Producto de prueba de diagnóstico',
+            'quantity' => 1,
+            'price' => 10,
+            'subtotal' => 10,
+        ]);
+
+        return $order;
     }
 
     private function gateway(\Throwable $failure): MockPaymentGateway

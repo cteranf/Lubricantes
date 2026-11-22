@@ -60,7 +60,11 @@ $app->make(Kernel::class)->bootstrap();
 DB::purge();
 DB::reconnect();
 $database = DB::selectOne('SELECT DATABASE() AS name')->name ?? null;
-if (app()->environment() !== 'testing' || config('app.debug') || DB::connection()->getDriverName() !== 'mysql' || $database !== 'lubristore_2b4_resolution_certification_test') {
+$expectedDatabase = getenv('LARAVEL13_MYSQL_TEST_DATABASE');
+if (app()->environment() !== 'testing' || config('app.debug') || DB::connection()->getDriverName() !== 'mysql'
+    || ! is_string($expectedDatabase)
+    || preg_match('/\Alubristore_php85_laravel13_[a-z0-9_]+\z/', $expectedDatabase) !== 1
+    || $database !== $expectedDatabase) {
     echo json_encode(['result' => 'worker_error', 'ok' => false]);
     exit(2);
 }

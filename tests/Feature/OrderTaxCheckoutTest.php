@@ -6,8 +6,10 @@ use App\Models\Branch;
 use App\Models\BusinessTaxConfiguration;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ShippingRate;
 use App\Models\User;
 use App\Services\InventoryService;
+use App\Services\TerritoryNormalizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -137,7 +139,7 @@ class OrderTaxCheckoutTest extends TestCase
             'payment_method' => 'transferencia', 'expected_total' => '153.00',
             'items' => [['product_id' => $taxable->id, 'quantity' => 1], ['product_id' => $exempt->id, 'quantity' => 1]],
         ], $customer);
-        \App\Models\ShippingRate::query()->where('active_district_key', app(\App\Services\TerritoryNormalizer::class)->identityKey('Lima', 'Lima', 'Distrito de pruebas'))->update(['amount' => '15.00']);
+        ShippingRate::query()->where('active_district_key', app(TerritoryNormalizer::class)->identityKey('Lima', 'Lima', 'Distrito de pruebas'))->update(['amount' => '15.00']);
 
         $cartQuote = $this->postJson('/api/v1/cart', [
             'items' => $payload['items'], 'shipping_amount' => '15.00',
@@ -158,7 +160,9 @@ class OrderTaxCheckoutTest extends TestCase
         $draft = $this->postJson('/api/v1/billing/orders/'.$order->id.'/electronic-documents', ['preparation_key' => (string) Str::uuid()])
             ->assertCreated()->assertJsonPath('data.tax_calculation_status', 'review_required')
             ->assertJsonPath('data.amounts.tax_snapshot.missing_fields.0', 'shipping_mixed_affectations');
-        $this->postJson('/api/v1/billing/electronic-documents/'.$draft->json('data.id').'/issue')->assertStatus(409);
+        $this->postJson('/api/v1/billing/electronic-documents/'.$draft->json('data.id').'/issue', [
+            'version' => $draft->json('data.version'),
+        ])->assertStatus(409);
         $this->assertDatabaseCount('electronic_document_attempts', 0);
         $this->assertSame('153.00', $order->fresh()->total);
     }

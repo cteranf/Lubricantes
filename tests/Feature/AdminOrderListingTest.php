@@ -14,6 +14,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\SyntheticMercadoPagoLink;
 use Tests\TestCase;
 
@@ -122,7 +123,7 @@ class AdminOrderListingTest extends TestCase
             ->assertJsonPath('meta.operational_counts.ready', 1);
     }
 
-    /** @dataProvider supportedPageSizes */
+    #[DataProvider('supportedPageSizes')]
     public function test_supported_page_sizes_are_used_exactly(string $size): void
     {
         $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
@@ -134,7 +135,7 @@ class AdminOrderListingTest extends TestCase
             ->assertJsonPath('meta.per_page', (int) $size);
     }
 
-    /** @dataProvider invalidPageSizes */
+    #[DataProvider('invalidPageSizes')]
     public function test_unsupported_page_sizes_are_rejected_without_order_queries(string $size): void
     {
         Sanctum::actingAs(User::factory()->create(['role' => 'admin', 'is_active' => true]));
@@ -152,7 +153,7 @@ class AdminOrderListingTest extends TestCase
         $this->assertRejectedWithoutOrderQueries('/api/v1/admin/orders?per_page%5B%5D=15');
     }
 
-    /** @dataProvider invalidPages */
+    #[DataProvider('invalidPages')]
     public function test_noncanonical_or_out_of_range_page_values_are_rejected(string $page): void
     {
         Sanctum::actingAs(User::factory()->create(['role' => 'admin', 'is_active' => true]));
