@@ -7,6 +7,7 @@ use App\Models\BusinessProfile;
 use App\Models\ElectronicDocument;
 use App\Models\ElectronicInvoiceSetting;
 use App\Models\ElectronicReceiptSummary;
+use App\Models\ElectronicReceiptSummaryEvent;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\User;
@@ -14,14 +15,18 @@ use App\Services\ElectronicReceiptIssuanceService;
 use App\Services\ElectronicReceiptSummaryCommunicationService;
 use App\Services\ElectronicReceiptSummaryOutboxPublisher;
 use App\Services\ElectronicReceiptSummaryRecoveryService;
+use App\Services\SunatBetaElectronicReceiptSummaryTransport;
+use App\Services\SunatReceiptSummaryCdrProcessor;
 use App\Services\SunatSchemaBundle;
 use App\Services\SunatUblReceiptSummaryBuilder;
 use App\Services\SunatXmlSignatureService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Support\SyntheticCertificate;
 use Tests\TestCase;
 
@@ -34,6 +39,7 @@ class ElectronicReceiptSummaryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Http::preventStrayRequests();
         if (DB::connection()->getDriverName() === 'mysql') {
             $expectedDatabase = (string) getenv('ELECTRONIC_RECEIPT_MYSQL_TEST_DB');
             $connection = DB::selectOne('SELECT DATABASE() AS db, @@default_storage_engine AS engine');
@@ -76,7 +82,7 @@ class ElectronicReceiptSummaryTest extends TestCase
         $response = $this->postJson('/api/v1/billing/receipt-summaries', [
             'documents' => [['id' => $document->id, 'version' => $document->version]],
         ])->assertAccepted()->assertJsonPath('data.status', 'queued')
-            ->assertJsonPath('data.communication_mode', 'local_simulation_only');
+            ->assertJsonPath('data.communication_mode', 'local_simulation');
 
         $summary = ElectronicReceiptSummary::query()->with('items.document')->findOrFail($response->json('data.id'));
         $this->assertSame('queued', $summary->status);
@@ -111,9 +117,12 @@ class ElectronicReceiptSummaryTest extends TestCase
 
         $zip = new \ZipArchive;
         $this->assertTrue($zip->open(Storage::disk('local')->path($summary->zip_path)));
-        $this->assertSame(1, $zip->numFiles);
-        $xmlName = $zip->getNameIndex(0);
-        $this->assertSame($summary->xml_hash, hash('sha256', $zip->getFromIndex(0)));
+        $this->assertSame(2, $zip->numFiles);
+        $this->assertNotFalse($zip->locateName('dummy/'));
+        $xmlIndex = $zip->locateName($summary->issuer_tax_id.'-'.$summary->document_id.'.xml');
+        $this->assertNotFalse($xmlIndex);
+        $xmlName = $zip->getNameIndex($xmlIndex);
+        $this->assertSame($summary->xml_hash, hash('sha256', $zip->getFromIndex($xmlIndex)));
         $this->assertSame($summary->issuer_tax_id.'-'.$summary->document_id.'.xml', $xmlName);
         $zip->close();
         $this->assertDatabaseCount('electronic_document_attempts', 0);
@@ -414,6 +423,308 @@ class ElectronicReceiptSummaryTest extends TestCase
         $this->assertSame('summary_pending', $document->fresh()->status);
     }
 
+    public function test_beta_transport_uses_wsdl_soap_base64_and_persists_external_ticket_separately(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        $actor = User::factory()->create(['role' => 'billing', 'is_active' => true]);
+        Sanctum::actingAs($actor);
+        $document = $this->issueReceipt($this->eligibleReceipt(), $actor);
+        $summary = $this->createAndProcessSummary($document, $actor);
+        $attempt = $summary->attempts()->firstOrFail();
+        $this->setSummaryBetaMode($summary, $attempt, 'processing', 'processing');
+        config(['electronic_invoicing.receipt_beta.enabled' => true]);
+        $zip = Storage::disk('local')->get((string) $summary->zip_path);
+        $captured = null;
+        Http::fake(function ($request) use (&$captured) {
+            $captured = $request;
+
+            return Http::response('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:s="http://service.sunat.gob.pe"><soap:Body><s:sendSummaryResponse><ticket>202611220000001</ticket></s:sendSummaryResponse></soap:Body></soap:Envelope>', 200, ['Content-Type' => 'text/xml; charset=utf-8']);
+        });
+
+        $result = app(SunatBetaElectronicReceiptSummaryTransport::class)->sendSummary($summary->fresh(), $zip);
+
+        $this->assertSame('ticket', $result['type'], json_encode($result));
+        $this->assertFalse($result['simulated']);
+        $this->assertSame('sunat_beta', $result['mode']);
+        $this->assertSame('202611220000001', $result['external_ticket']);
+        $this->assertNull($result['local_simulation_id'] ?? null);
+        $this->assertNotNull($captured);
+        $this->assertSame('POST', $captured->method());
+        $this->assertSame('urn:sendSummary', $captured->header('SOAPAction')[0] ?? null);
+        $this->assertStringContainsString('text/xml', $captured->header('Content-Type')[0] ?? '');
+        $soap = new \DOMDocument;
+        $this->assertTrue($soap->loadXML($captured->body(), LIBXML_NONET));
+        $this->assertSame('https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService', $captured->url());
+        $this->assertSame('20123456789MODDATOS', $soap->getElementsByTagNameNS('http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd', 'Username')->item(0)->textContent);
+        $this->assertSame('MODDATOS', $soap->getElementsByTagNameNS('http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd', 'Password')->item(0)->textContent);
+        $this->assertSame($summary->issuer_tax_id.'-'.$summary->document_id.'.zip', $soap->getElementsByTagNameNS('http://service.sunat.gob.pe', 'fileName')->item(0)->textContent);
+        $this->assertSame($zip, base64_decode($soap->getElementsByTagNameNS('http://service.sunat.gob.pe', 'contentFile')->item(0)->textContent, true));
+        Http::assertSentCount(1);
+
+        app(ElectronicReceiptSummaryCommunicationService::class)->persistSubmission((int) $summary->id, (int) $attempt->id, $result);
+        $summary->refresh();
+        $attempt->refresh();
+        $this->assertSame('202611220000001', $summary->external_ticket);
+        $this->assertSame('202611220000001', $attempt->external_ticket);
+        $this->assertNull($summary->local_simulation_id);
+        $this->assertNull($attempt->local_simulation_id);
+        $this->assertNull($summary->ticket);
+        $this->assertSame('beta_processing_pending', $summary->status);
+        $this->assertSame('ticket_pending', $summary->communication_status);
+        $evidence = $attempt->request_snapshot['transport_evidence'];
+        $this->assertSame('https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService', $evidence['endpoint']);
+        $this->assertSame('urn:sendSummary', $evidence['action']);
+        $this->assertSame(hash('sha256', $zip), $evidence['zip_sha256']);
+        $this->assertSame(strlen($zip), $evidence['zip_bytes']);
+        $this->assertSame(strlen(base64_encode($zip)), $evidence['content_file_base64_bytes']);
+        $this->assertArrayNotHasKey('username', $evidence);
+        $this->assertArrayNotHasKey('password', $evidence);
+    }
+
+    public function test_beta_get_status_pending_uses_only_persisted_external_ticket_and_never_queries_local_sim_ids(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        $actor = User::factory()->create(['role' => 'billing', 'is_active' => true]);
+        Sanctum::actingAs($actor);
+        $document = $this->issueReceipt($this->eligibleReceipt(), $actor);
+        $summary = $this->createAndProcessSummary($document, $actor);
+        $attempt = $summary->attempts()->firstOrFail();
+        $this->setSummaryBetaMode($summary, $attempt, 'beta_processing_pending', 'beta_processing_pending', '202611220000002');
+        config(['electronic_invoicing.receipt_beta.enabled' => true]);
+        $summary->communication_status = 'ticket_pending';
+        $attempt->communication_status = 'ticket_pending';
+        $summary->save();
+        $attempt->save();
+        $captured = null;
+        Http::fake(function ($request) use (&$captured) {
+            $captured = $request;
+
+            return Http::response('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:s="http://service.sunat.gob.pe"><soap:Body><s:getStatusResponse><status><statusCode>98</statusCode></status></s:getStatusResponse></soap:Body></soap:Envelope>', 200, ['Content-Type' => 'text/xml; charset=utf-8']);
+        });
+
+        $updated = app(ElectronicReceiptSummaryCommunicationService::class)->query((int) $summary->id, $actor);
+
+        $this->assertSame('beta_processing_pending', $updated->status);
+        $this->assertSame('ticket_pending', $updated->communication_status);
+        $this->assertSame('202611220000002', $updated->external_ticket);
+        $this->assertSame('urn:getStatus', $captured->header('SOAPAction')[0] ?? null);
+        $this->assertSame('202611220000002', $this->xmlElement($captured->body(), 'ticket'));
+        Http::assertSentCount(1);
+
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        $localDocument = $this->issueReceipt($this->eligibleReceipt(), $actor);
+        $localSummary = $this->createAndProcessSummary($localDocument, $actor);
+        config(['electronic_invoicing.receipt_simulation.scenario' => 'pending']);
+        $before = Http::recorded()->count();
+        app(ElectronicReceiptSummaryCommunicationService::class)->query((int) $localSummary->id, $actor);
+        $this->assertSame($before, Http::recorded()->count(), 'LOCAL-SIM must never be sent to the external adapter.');
+    }
+
+    public function test_beta_adapter_classifies_soap_fault_http_error_and_unbounded_or_invalid_responses_without_acceptance(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        $actor = User::factory()->create(['role' => 'billing', 'is_active' => true]);
+        Sanctum::actingAs($actor);
+        $summary = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+        $attempt = $summary->attempts()->firstOrFail();
+        $this->setSummaryBetaMode($summary, $attempt, 'processing', 'processing');
+        config(['electronic_invoicing.receipt_beta.enabled' => true]);
+        $zip = Storage::disk('local')->get((string) $summary->zip_path);
+        $transport = app(SunatBetaElectronicReceiptSummaryTransport::class);
+
+        Http::fakeSequence()
+            ->push('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Client</faultcode><faultstring>sanitized fault</faultstring><detail><Password>synthetic-secret</Password></detail></soap:Fault></soap:Body></soap:Envelope>', 200)
+            ->push('upstream unavailable', 503)
+            ->push('<not-soap/>', 200)
+            ->push(str_repeat('x', 6 * 1024 * 1024 + 10), 200)
+            ->push('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:s="http://service.sunat.gob.pe"><soap:Body><s:sendSummaryResponse/></soap:Body></soap:Envelope>', 200);
+        $fault = $transport->sendSummary($summary->fresh(), $zip);
+        $this->assertSame('soap_fault', $fault['type']);
+        $this->assertStringNotContainsString('synthetic-secret', (string) $fault['response_xml']);
+        $this->assertStringContainsString('[dato omitido]', (string) $fault['response_xml']);
+
+        $http = $transport->sendSummary($summary->fresh(), $zip);
+        $this->assertSame('http_error', $http['type']);
+        $this->assertNotSame('accepted', $http['type']);
+
+        $invalid = $transport->sendSummary($summary->fresh(), $zip);
+        $this->assertSame('uncertain', $invalid['type']);
+
+        $oversized = $transport->sendSummary($summary->fresh(), $zip);
+        $this->assertSame('uncertain', $oversized['type']);
+        $missingTicket = $transport->sendSummary($summary->fresh(), $zip);
+        $this->assertSame('uncertain', $missingTicket['type']);
+        $this->assertSame('external_ticket_invalid', $missingTicket['code']);
+        Http::assertSentCount(5);
+    }
+
+    public function test_beta_get_status_validates_cdr_correspondence_and_projects_documented_results_once(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        Sanctum::actingAs($actor = User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $fingerprint = strtoupper(str_replace(':', '', (string) openssl_x509_fingerprint($this->certificate['certificate_pem'], 'sha256')));
+        config(['electronic_invoicing.receipt_beta.cdr_certificate_sha256' => $fingerprint]);
+        $cases = [
+            ['0', '0', null, 'beta_accepted', 'accepted'],
+            ['0', '0', 'Observación sintética', 'beta_accepted_observed', 'accepted_observed'],
+            ['99', '2000', null, 'beta_rejected', 'rejected'],
+        ];
+        $sequence = Http::fakeSequence();
+        $summaries = [];
+        foreach ($cases as [$status, $code, $note, $expectedStatus, $expectedCommunication]) {
+            config(['electronic_invoicing.receipt_beta.enabled' => false]);
+            $summary = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+            $attempt = $summary->attempts()->firstOrFail();
+            $ticket = '20261122'.str_pad((string) (count($summaries) + 10), 6, '0', STR_PAD_LEFT);
+            $this->setSummaryBetaMode($summary, $attempt, 'beta_processing_pending', 'beta_processing_pending', $ticket);
+            config(['electronic_invoicing.receipt_beta.enabled' => true]);
+            $summary->communication_status = 'ticket_pending';
+            $summary->save();
+            $attempt->communication_status = 'ticket_pending';
+            $attempt->save();
+            $cdr = $this->signedSummaryCdrZip($summary, $code, $note);
+            $processedCdr = app(SunatReceiptSummaryCdrProcessor::class)->process($summary, $cdr);
+            $this->assertSame($expectedCommunication, $processedCdr['type']);
+            $soap = '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:s="http://service.sunat.gob.pe"><soap:Body><s:getStatusResponse><status><statusCode>'.$status.'</statusCode><content>'.base64_encode($cdr).'</content></status></s:getStatusResponse></soap:Body></soap:Envelope>';
+            $sequence->push($soap, 200, ['Content-Type' => 'text/xml; charset=utf-8']);
+            $summaries[] = [$summary, $ticket, $expectedStatus, $expectedCommunication];
+        }
+
+        foreach ($summaries as [$summary, $ticket, $expectedStatus, $expectedCommunication]) {
+            $result = app(ElectronicReceiptSummaryCommunicationService::class)->query((int) $summary->id, $actor);
+            $this->assertSame($expectedStatus, $result->status, $result->result_code.' '.$result->result_message);
+            $this->assertSame($expectedCommunication, $result->communication_status);
+            $this->assertSame($ticket, $result->external_ticket);
+            $this->assertNull($result->local_simulation_id);
+            $this->assertNotNull($result->response_path);
+            $this->assertDatabaseHas('electronic_documents', [
+                'id' => $summary->items()->value('electronic_document_id'),
+                'status' => $expectedCommunication === 'rejected' ? 'summary_rejected' : 'reported',
+            ]);
+            $afterTerminal = Http::recorded()->count();
+            app(ElectronicReceiptSummaryCommunicationService::class)->query((int) $summary->id, $actor);
+            $this->assertSame($afterTerminal, Http::recorded()->count(), 'Terminal Beta results must not be queried or overwritten.');
+            $this->assertSame($expectedStatus, $summary->fresh()->status);
+        }
+        Http::assertSentCount(3);
+    }
+
+    public function test_beta_rejects_non_corresponding_cdr_and_keeps_the_summary_uncertain(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        Sanctum::actingAs($actor = User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $fingerprint = strtoupper(str_replace(':', '', (string) openssl_x509_fingerprint($this->certificate['certificate_pem'], 'sha256')));
+        config(['electronic_invoicing.receipt_beta.cdr_certificate_sha256' => $fingerprint]);
+        $summary = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+        $attempt = $summary->attempts()->firstOrFail();
+        $ticket = '202611220000099';
+        $this->setSummaryBetaMode($summary, $attempt, 'beta_processing_pending', 'beta_processing_pending', $ticket);
+        config(['electronic_invoicing.receipt_beta.enabled' => true]);
+        $summary->communication_status = 'ticket_pending';
+        $summary->save();
+        $attempt->communication_status = 'ticket_pending';
+        $attempt->save();
+        $mismatchedCdr = $this->signedSummaryCdrZip($summary, '0', null, 'RC-20990101-99999');
+        Http::fake(fn () => Http::response('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:s="http://service.sunat.gob.pe"><soap:Body><s:getStatusResponse><status><statusCode>0</statusCode><content>'.base64_encode($mismatchedCdr).'</content></status></s:getStatusResponse></soap:Body></soap:Envelope>', 200));
+
+        $updated = app(ElectronicReceiptSummaryCommunicationService::class)->query((int) $summary->id, $actor);
+
+        $this->assertSame('beta_uncertain', $updated->status);
+        $this->assertSame('uncertain', $updated->communication_status);
+        $this->assertSame($ticket, $updated->external_ticket);
+        $this->assertSame('cdr_validation_failed', $updated->result_code);
+        $this->assertNull($updated->items()->firstOrFail()->document->cdr_path);
+        Http::assertSentCount(1);
+    }
+
+    public function test_beta_transport_is_opt_in_and_blocked_outside_local_qa_without_http_requests(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        Sanctum::actingAs($actor = User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $summary = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+        $attempt = $summary->attempts()->firstOrFail();
+        $this->setSummaryBetaMode($summary, $attempt, 'beta_processing_pending', 'beta_processing_pending', '202611220000088');
+        $transport = app(SunatBetaElectronicReceiptSummaryTransport::class);
+        try {
+            $transport->query('202611220000088', 1);
+            $this->fail('The external transport must remain disabled by default.');
+        } catch (HttpException $exception) {
+            $this->assertSame(409, $exception->getStatusCode());
+        }
+
+        config(['electronic_invoicing.receipt_beta.enabled' => true]);
+        $this->app->detectEnvironment(static fn (): string => 'production');
+        try {
+            $transport->query('202611220000088', 1);
+            $this->fail('The Beta adapter must reject production before HTTP.');
+        } catch (HttpException $exception) {
+            $this->assertSame(409, $exception->getStatusCode());
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_beta_preflight_failure_is_not_reported_as_transmitted_and_keeps_numbered_evidence(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        Sanctum::actingAs($actor = User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $document = $this->issueReceipt($this->eligibleReceipt(), $actor);
+        $response = $this->postJson('/api/v1/billing/receipt-summaries', [
+            'documents' => [['id' => $document->id, 'version' => $document->version]],
+        ])->assertAccepted();
+        $summary = ElectronicReceiptSummary::query()->findOrFail($response->json('data.id'));
+        $attempt = $summary->attempts()->firstOrFail();
+        $snapshot = $summary->snapshot;
+        $snapshot['communication_mode'] = 'sunat_beta';
+        $summary->snapshot = $snapshot;
+        $summary->save();
+
+        app(ProcessElectronicReceiptSummary::class, ['summaryId' => $summary->id, 'attemptId' => $attempt->id])
+            ->handle(app(SunatUblReceiptSummaryBuilder::class), app(SunatXmlSignatureService::class), app(SunatSchemaBundle::class));
+
+        $summary->refresh();
+        $this->assertSame('beta_not_sent', $summary->status);
+        $this->assertSame('not_sent', $summary->communication_status);
+        $this->assertNull($summary->external_ticket);
+        $this->assertSame('beta_preflight_failed', $summary->result_code);
+        $this->assertTrue(Storage::disk('local')->exists((string) $summary->xml_path));
+        $this->assertTrue(Storage::disk('local')->exists((string) $summary->zip_path));
+        $this->assertSame('B001', $document->fresh()->series);
+        Http::assertNothingSent();
+    }
+
+    public function test_beta_recovery_uses_only_persisted_ticket_and_never_republishes_ambiguous_work(): void
+    {
+        config(['electronic_invoicing.receipt_beta.enabled' => false]);
+        Sanctum::actingAs($actor = User::factory()->create(['role' => 'billing', 'is_active' => true]));
+        $withTicket = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+        $withoutTicket = $this->createAndProcessSummary($this->issueReceipt($this->eligibleReceipt(), $actor), $actor);
+        foreach ([[$withTicket, '202611220000071'], [$withoutTicket, null]] as [$summary, $ticket]) {
+            $attempt = $summary->attempts()->firstOrFail();
+            $snapshot = $summary->snapshot;
+            $snapshot['communication_mode'] = 'sunat_beta';
+            $summary->forceFill([
+                'snapshot' => $snapshot, 'status' => 'processing', 'communication_status' => 'uncertain',
+                'local_simulation_id' => null, 'external_ticket' => $ticket,
+                'updated_at' => now()->subMinutes(10),
+            ])->save();
+            $attempt->forceFill([
+                'status' => 'processing', 'communication_status' => 'uncertain', 'local_simulation_id' => null,
+                'external_ticket' => $ticket, 'updated_at' => now()->subMinutes(10),
+            ])->save();
+        }
+
+        $eventCount = ElectronicReceiptSummaryEvent::query()->whereIn('electronic_receipt_summary_id', [$withTicket->id, $withoutTicket->id])->count();
+        $this->assertSame(2, app(ElectronicReceiptSummaryRecoveryService::class)->recoverStaleProcessing());
+        $this->assertSame('beta_processing_pending', $withTicket->fresh()->status);
+        $this->assertSame('ticket_pending', $withTicket->fresh()->communication_status);
+        $this->assertSame('202611220000071', $withTicket->fresh()->external_ticket);
+        $this->assertSame('beta_uncertain', $withoutTicket->fresh()->status);
+        $this->assertSame('uncertain', $withoutTicket->fresh()->communication_status);
+        $this->assertNull($withoutTicket->fresh()->external_ticket);
+        $this->assertSame($eventCount + 2, ElectronicReceiptSummaryEvent::query()->whereIn('electronic_receipt_summary_id', [$withTicket->id, $withoutTicket->id])->count());
+        Http::assertNothingSent();
+    }
+
     private function eligibleReceipt(bool $completeTax = true): ElectronicDocument
     {
         $customer = User::factory()->create(['role' => 'customer']);
@@ -461,6 +772,120 @@ class ElectronicReceiptSummaryTest extends TestCase
         ]);
 
         return $document;
+    }
+
+    private function setSummaryBetaMode(ElectronicReceiptSummary $summary, $attempt, string $summaryStatus, string $attemptStatus, ?string $externalTicket = null): void
+    {
+        $snapshot = $summary->snapshot ?? [];
+        $snapshot['communication_mode'] = 'sunat_beta';
+        $summary->forceFill([
+            'snapshot' => $snapshot,
+            'status' => $summaryStatus,
+            'communication_status' => 'uncertain',
+            'external_ticket' => $externalTicket,
+            'local_simulation_id' => null,
+            'ticket' => null,
+        ])->save();
+        $attempt->forceFill([
+            'status' => $attemptStatus,
+            'communication_status' => 'uncertain',
+            'external_ticket' => $externalTicket,
+            'local_simulation_id' => null,
+            'ticket' => null,
+        ])->save();
+    }
+
+    private function xmlElement(string $xml, string $name): ?string
+    {
+        $document = new \DOMDocument;
+        $this->assertTrue($document->loadXML($xml, LIBXML_NONET));
+        $elements = $document->getElementsByTagNameNS('http://service.sunat.gob.pe', $name);
+
+        return $elements->length ? $elements->item(0)->textContent : null;
+    }
+
+    private function signedSummaryCdrZip(ElectronicReceiptSummary $summary, string $responseCode, ?string $note, ?string $reference = null): string
+    {
+        $appNs = 'urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2';
+        $extNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2';
+        $cbcNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2';
+        $cacNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2';
+        $xml = new \DOMDocument('1.0', 'UTF-8');
+        $xml->formatOutput = false;
+        $root = $xml->createElementNS($appNs, 'ApplicationResponse');
+        $xmlNs = 'http://www.w3.org/2000/xmlns/';
+        $root->setAttributeNS($xmlNs, 'xmlns:ext', $extNs);
+        $root->setAttributeNS($xmlNs, 'xmlns:cbc', $cbcNs);
+        $root->setAttributeNS($xmlNs, 'xmlns:cac', $cacNs);
+        $xml->appendChild($root);
+        $extensions = $root->appendChild($xml->createElementNS($extNs, 'ext:UBLExtensions'));
+        $extension = $extensions->appendChild($xml->createElementNS($extNs, 'ext:UBLExtension'));
+        $extension->appendChild($xml->createElementNS($extNs, 'ext:ExtensionContent'));
+        $append = static function (\DOMNode $parent, string $namespace, string $qualifiedName, string $value) use ($xml): \DOMElement {
+            $element = $xml->createElementNS($namespace, $qualifiedName);
+            $element->appendChild($xml->createTextNode($value));
+            $parent->appendChild($element);
+
+            return $element;
+        };
+        $append($root, $cbcNs, 'cbc:UBLVersionID', '2.0');
+        $append($root, $cbcNs, 'cbc:ID', 'R-'.$summary->document_id);
+        $append($root, $cbcNs, 'cbc:IssueDate', now()->toDateString());
+        if ($note !== null) {
+            $append($root, $cbcNs, 'cbc:Note', $note);
+        }
+        foreach ([['SenderParty', '20131312955'], ['ReceiverParty', $summary->issuer_tax_id]] as [$partyName, $ruc]) {
+            $party = $xml->createElementNS($cacNs, 'cac:'.$partyName);
+            $root->appendChild($party);
+            $identification = $xml->createElementNS($cacNs, 'cac:PartyIdentification');
+            $party->appendChild($identification);
+            $append($identification, $cbcNs, 'cbc:ID', $ruc);
+        }
+        $documentResponse = $xml->createElementNS($cacNs, 'cac:DocumentResponse');
+        $root->appendChild($documentResponse);
+        $response = $xml->createElementNS($cacNs, 'cac:Response');
+        $documentResponse->appendChild($response);
+        $append($response, $cbcNs, 'cbc:ReferenceID', $reference ?? $summary->document_id);
+        $append($response, $cbcNs, 'cbc:ResponseCode', $responseCode);
+        $append($response, $cbcNs, 'cbc:Description', $responseCode === '0' ? 'Resultado sintético' : 'Rechazo sintético');
+        $documentReference = $xml->createElementNS($cacNs, 'cac:DocumentReference');
+        $documentResponse->appendChild($documentReference);
+        $append($documentReference, $cbcNs, 'cbc:ID', $summary->document_id);
+        $signed = app(SunatXmlSignatureService::class)->signAndVerify(
+            $xml,
+            $this->certificate['pkcs12'],
+            'synthetic-pass',
+            $summary->issuer_tax_id,
+            $this->certificate['openssl_config'],
+        );
+        $parsed = new \DOMDocument;
+        $parsed->resolveExternals = false;
+        $parsed->substituteEntities = false;
+        $this->assertTrue($parsed->loadXML($signed, LIBXML_NONET));
+        $cdrSchema = resource_path('sunat/xsd/Archivos XSD/2.0/maindoc/UBLPE-ApplicationResponse-1.0.xsd');
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $valid = $parsed->schemaValidate($cdrSchema, LIBXML_NONET);
+        $errors = array_map(static fn (\LibXMLError $error): string => trim($error->message), libxml_get_errors());
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        $this->assertTrue($valid, implode('; ', $errors));
+        $tmp = tempnam(sys_get_temp_dir(), 'synthetic_cdr_');
+        $this->assertNotFalse($tmp);
+        try {
+            $zip = new \ZipArchive;
+            $this->assertTrue($zip->open($tmp, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true);
+            $this->assertTrue($zip->addFromString('R-'.$summary->issuer_tax_id.'-'.$summary->document_id.'.xml', $signed));
+            $this->assertTrue($zip->close());
+            $bytes = file_get_contents($tmp);
+            $this->assertIsString($bytes);
+
+            return $bytes;
+        } finally {
+            if (is_file($tmp)) {
+                unlink($tmp);
+            }
+        }
     }
 
     private function issueReceipt(ElectronicDocument $document, User $actor): ElectronicDocument

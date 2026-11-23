@@ -71,6 +71,42 @@ class ElectronicReceiptSummaryRecoveryService
 
                     return 1;
                 }
+                if (($summary->snapshot['communication_mode'] ?? null) === 'sunat_beta') {
+                    $hasTicket = filled($summary->external_ticket) || filled($attempt->external_ticket);
+                    $summary->status = $hasTicket ? 'beta_processing_pending' : 'beta_uncertain';
+                    $summary->communication_status = $hasTicket ? 'ticket_pending' : 'uncertain';
+                    $summary->result_code ??= $hasTicket ? 'beta_ticket_recovered' : 'beta_worker_interrupted';
+                    $summary->result_message = $hasTicket
+                        ? 'Se recuperó el ticket externo persistido. El procesamiento Beta sigue pendiente de consulta.'
+                        : 'El worker se interrumpió durante la posible comunicación. No se reenvía automáticamente; conserve el resumen y su número.';
+                    $summary->save();
+                    $attempt->status = $summary->status;
+                    $attempt->communication_status = $summary->communication_status;
+                    $attempt->external_ticket = $summary->external_ticket ?? $attempt->external_ticket;
+                    $attempt->completed_at = null;
+                    $attempt->safe_observations = $summary->result_message;
+                    $attempt->save();
+                    foreach ($items as $item) {
+                        $document = $documents->get($item->electronic_document_id);
+                        if ($document && in_array($document->status, ['ready_for_summary', 'summary_pending', 'summary_uncertain'], true)) {
+                            $document->status = 'summary_uncertain';
+                            $document->result_code = (string) $summary->result_code;
+                            $document->result_message = (string) $summary->result_message;
+                            $document->save();
+                        }
+                        $item->result_status = $hasTicket ? 'beta_ticket_pending' : 'beta_uncertain';
+                        $item->result_code = (string) $summary->result_code;
+                        $item->result_message = (string) $summary->result_message;
+                        $item->save();
+                    }
+                    ElectronicReceiptSummaryEvent::query()->create([
+                        'electronic_receipt_summary_id' => $summary->id, 'actor_id' => null,
+                        'event_type' => $hasTicket ? 'beta_ticket_recovered' : 'beta_transmission_uncertain_after_interruption',
+                        'details' => ['mode' => 'sunat_beta', 'ticket_persisted' => $hasTicket], 'created_at' => now(),
+                    ]);
+
+                    return 1;
+                }
                 $summary->status = 'local_preparation_interrupted';
                 $summary->result_code = 'local_preparation_interrupted';
                 $summary->result_message = 'La preparación local se interrumpió. No se transmitió a SUNAT; conserve el documento y la numeración.';

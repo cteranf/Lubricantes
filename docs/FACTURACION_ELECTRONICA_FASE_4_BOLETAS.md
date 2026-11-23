@@ -2,7 +2,7 @@
 
 ## Alcance y límite operativo
 
-Esta fase genera boletas individuales y prepara resúmenes diarios en QA local. No transmite ni consulta SUNAT. El adaptador externo de resúmenes no está implementado y falla cerrado; una respuesta local simulada nunca equivale a un ticket, aceptación o CDR auténticos. La aceptación de XSD tampoco demuestra cumplimiento tributario integral. No se habilita producción.
+Esta fase genera boletas individuales y prepara resúmenes diarios en QA local. El transporte externo para resúmenes se implementa en la Fase 5 descrita en [FACTURACION_ELECTRONICA_FASE_5_RESUMENES_BETA.md](FACTURACION_ELECTRONICA_FASE_5_RESUMENES_BETA.md). La implementación de Fase 5 no transmite por sí sola: el adaptador Beta permanece deshabilitado por defecto. Una respuesta local simulada nunca equivale a un ticket, aceptación o CDR auténticos. La aceptación de XSD tampoco demuestra cumplimiento tributario integral. No se habilita producción.
 
 Fuentes oficiales revisadas:
 

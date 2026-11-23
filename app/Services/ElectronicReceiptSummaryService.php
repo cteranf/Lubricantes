@@ -118,13 +118,13 @@ class ElectronicReceiptSummaryService
             $batch = ElectronicReceiptSummary::query()->create([
                 'issuer_tax_id' => $issuer, 'environment' => 'testing', 'issue_date' => $date, 'sequence' => $sequence,
                 'document_id' => $documentId, 'status' => 'queued', 'document_count' => count($frozen),
-                'snapshot' => ['documents' => $frozen, 'communication_mode' => 'local_simulation', 'source' => 'locked_electronic_document_snapshots'],
+                'snapshot' => ['documents' => $frozen, 'communication_mode' => config('electronic_invoicing.receipt_beta.enabled') ? 'sunat_beta' : 'local_simulation', 'source' => 'locked_electronic_document_snapshots'],
                 'confirmed_by' => $actor->id, 'confirmed_at' => $now,
             ]);
             ElectronicReceiptSummaryEvent::query()->create([
                 'electronic_receipt_summary_id' => $batch->id, 'actor_id' => $actor->id,
-                'event_type' => 'confirmed_for_local_simulation',
-                'details' => ['document_count' => count($frozen), 'environment' => 'testing'], 'created_at' => $now,
+                'event_type' => config('electronic_invoicing.receipt_beta.enabled') ? 'confirmed_for_sunat_beta' : 'confirmed_for_local_simulation',
+                'details' => ['document_count' => count($frozen), 'environment' => 'testing', 'mode' => config('electronic_invoicing.receipt_beta.enabled') ? 'sunat_beta' : 'local_simulation'], 'created_at' => $now,
             ]);
             foreach ($documents->values() as $index => $document) {
                 ElectronicReceiptSummaryItem::query()->create([

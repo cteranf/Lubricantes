@@ -31,9 +31,13 @@ class ElectronicInvoicingFrontendTest extends TestCase
         $this->assertStringContainsString('connection_available', $settings);
         $this->assertStringContainsString('no implica conexión real', mb_strtolower($settings));
         $this->assertStringContainsString('Solicitud del cliente', $inbox);
-        $this->assertStringContainsString('Las facturas solo se emiten en ambiente Beta; las boletas se generan localmente', $inbox);
+        $this->assertStringContainsString('las boletas se generan localmente; sus resúmenes usan simulación local por defecto', mb_strtolower($inbox));
+        $this->assertStringContainsString("receiptCommunicationMode === 'sunat_beta'", $inbox);
+        $this->assertStringContainsString('una respuesta HTTP o un ticket no significan aceptación', $inbox);
+        $this->assertStringContainsString('summary.external_ticket', $inbox);
+        $this->assertStringContainsString('summary.local_simulation_id', $inbox);
         $this->assertStringNotContainsString('Solicitud del cliente · no emitido', $inbox);
-        $this->assertStringContainsString("await load(pagination.value.current_page || 1);", $inbox);
+        $this->assertStringContainsString('await load(pagination.value.current_page || 1);', $inbox);
         $this->assertStringContainsString('Documento electrónico', $inbox);
         $this->assertStringContainsString('document.status_label', $inbox);
         $this->assertStringContainsString('confirmPrepareDraft', $inbox);
@@ -93,7 +97,7 @@ class ElectronicInvoicingFrontendTest extends TestCase
         $this->assertStringContainsString('daily_summary_selection_required', $inbox);
         $this->assertStringContainsString('official_summary_schema_missing_or_invalid', $inbox);
         $this->assertStringContainsString('no contacta SUNAT', $inbox);
-        $this->assertMatchesRegularExpression('/no contacta SUNAT ni representa una aceptación/', $inbox);
+        $this->assertMatchesRegularExpression('/no contacta SUNAT y no representa una aceptación/', $inbox);
         $this->assertStringContainsString("'uncertain' => 'Resultado incierto; requiere revisión manual'", $support);
         $this->assertStringContainsString('ElectronicDocumentStatus::label($this->status)', $resource);
         $this->assertStringContainsString('SUNAT Beta no ofrece consulta de estado', $controller);

@@ -50,6 +50,19 @@ class BillingReceiptSummaryController extends Controller
         if ((config('queue.connections.database.connection') ?: $defaultQueueConnection) !== $defaultQueueConnection) {
             $setupBlockers[] = 'durable_queue_connection_mismatch';
         }
+        $betaEnabled = (bool) config('electronic_invoicing.receipt_beta.enabled');
+        if ($betaEnabled) {
+            if (! app()->environment('testing', 'local')) {
+                $setupBlockers[] = 'beta_transport_qa_only';
+            }
+            if (! filled(config('electronic_invoicing.receipt_beta.cdr_certificate_sha256'))) {
+                $setupBlockers[] = 'beta_cdr_trust_pin_missing';
+            }
+            $cdrXsd = (string) config('electronic_invoicing.sunat.cdr_xsd');
+            if (! filled($cdrXsd) || ! app(SunatSchemaBundle::class)->inspect($cdrXsd)['available']) {
+                $setupBlockers[] = 'beta_cdr_schema_missing';
+            }
+        }
         $rows = ElectronicDocument::query()->with(['order:id,total,payment_status,created_at,requested_receipt_type', 'order.paymentSubmissions:id,order_id,amount,status'])
             ->where('document_type', 'boleta')->where('status', 'ready_for_summary')
             ->whereDoesntHave('attempts')
@@ -77,7 +90,11 @@ class BillingReceiptSummaryController extends Controller
                     'blocking_reasons' => $reasons,
                 ];
             })->values(),
-            'meta' => ['preparation_available' => $setupBlockers === [], 'blocking_reasons' => $setupBlockers],
+            'meta' => [
+                'preparation_available' => $setupBlockers === [],
+                'blocking_reasons' => $setupBlockers,
+                'communication_mode' => $betaEnabled ? 'sunat_beta' : 'local_simulation',
+            ],
         ]);
     }
 
@@ -94,7 +111,7 @@ class BillingReceiptSummaryController extends Controller
                 'local_simulation_id' => $summary->local_simulation_id,
                 'external_ticket' => $summary->external_ticket,
                 'communication_status' => $summary->communication_status,
-                'communication_mode' => 'local_simulation_only',
+                'communication_mode' => data_get($summary->snapshot, 'communication_mode', 'local_simulation'),
             ])->all(),
             'meta' => ['current_page' => $page->currentPage(), 'last_page' => $page->lastPage(), 'total' => $page->total()],
         ]);
@@ -111,7 +128,12 @@ class BillingReceiptSummaryController extends Controller
         ]);
         $summary = $this->summaries->confirm($data['documents'], $request->user());
 
-        return response()->json(['message' => 'Resumen preparado en modo local simulado. No se envió a SUNAT.', 'data' => new ElectronicReceiptSummaryResource($summary)], 202);
+        $mode = data_get($summary->snapshot, 'communication_mode', 'local_simulation');
+        $message = $mode === 'sunat_beta'
+            ? 'Resumen confirmado para el transporte de pruebas SUNAT Beta; aún no se ha procesado.'
+            : 'Resumen preparado en modo local simulado. No se envió a SUNAT.';
+
+        return response()->json(['message' => $message, 'data' => new ElectronicReceiptSummaryResource($summary)], 202);
     }
 
     public function show(int $id)
@@ -126,21 +148,44 @@ class BillingReceiptSummaryController extends Controller
         abort_if(array_diff(array_keys($request->all()), ['_token']) !== [], 422, 'La solicitud contiene campos no permitidos.');
         $summary = $this->communication->query($id, $request->user());
 
-        return response()->json(['message' => 'Consulta procesada por el adaptador local simulado; no se consultó SUNAT.', 'data' => new ElectronicReceiptSummaryResource($summary)]);
+        $mode = data_get($summary->snapshot, 'communication_mode', 'local_simulation');
+
+        return response()->json([
+            'message' => $mode === 'sunat_beta' ? 'Respuesta de consulta Beta registrada; revise el tipo de resultado recibido.' : 'Consulta procesada por el adaptador local simulado; no se consultó SUNAT.',
+            'data' => new ElectronicReceiptSummaryResource($summary),
+        ]);
     }
 
     public function download(int $id, string $type)
     {
-        abort_unless(in_array($type, ['xml', 'archive'], true), 404);
+        abort_unless(in_array($type, ['xml', 'archive', 'cdr'], true), 404);
         $summary = ElectronicReceiptSummary::query()->findOrFail($id);
-        $path = $type === 'xml' ? $summary->xml_path : $summary->zip_path;
-        $extension = $type === 'xml' ? 'xml' : 'zip';
+        $mode = data_get($summary->snapshot, 'communication_mode', 'local_simulation');
+        abort_unless($type !== 'cdr' || $mode === 'sunat_beta', 404);
+        $path = match ($type) {
+            'xml' => $summary->xml_path,
+            'archive' => $summary->zip_path,
+            default => $summary->response_path,
+        };
+        $extension = $type === 'archive' ? 'zip' : 'xml';
+        $expected = $type === 'cdr'
+            ? '#\Aelectronic-invoices/summaries/'.preg_quote((string) $summary->id, '#').'/beta-CDR-[a-f0-9]{16}\.xml\z#D'
+            : '#\Aelectronic-invoices/summaries/'.preg_quote((string) $summary->id, '#').'/[A-Za-z0-9._-]+\.'.preg_quote($extension, '#').'\z#D';
         abort_unless(is_string($path)
-            && preg_match('#\Aelectronic-invoices/summaries/'.preg_quote((string) $summary->id, '#').'/[A-Za-z0-9._-]+\.'.preg_quote($extension, '#').'\z#D', $path) === 1
+            && preg_match($expected, $path) === 1
             && Storage::disk('local')->exists($path), 404);
 
-        return Storage::disk('local')->download($path, 'SIMULACION-'.$summary->document_id.'.'.$extension, [
-            'Cache-Control' => 'private, no-store', 'X-Receipt-Simulation' => 'local-only',
-        ]);
+        $filename = match ($type) {
+            'cdr' => 'CDR-SUNAT-BETA-'.$summary->document_id.'.xml',
+            'xml', 'archive' => ($mode === 'local_simulation' ? 'SIMULACION-' : 'BETA-').$summary->document_id.'.'.$extension,
+        };
+        $headers = ['Cache-Control' => 'private, no-store'];
+        if ($mode === 'local_simulation') {
+            $headers['X-Receipt-Simulation'] = 'local-only';
+        } else {
+            $headers['X-Receipt-Environment'] = 'SUNAT-BETA-TESTING';
+        }
+
+        return Storage::disk('local')->download($path, $filename, $headers);
     }
 }

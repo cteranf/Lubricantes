@@ -10,6 +10,7 @@ use App\Models\ElectronicReceiptSummaryAttempt;
 use App\Models\ElectronicReceiptSummaryEvent;
 use App\Models\ElectronicReceiptSummaryItem;
 use App\Services\ElectronicReceiptSummaryCommunicationService;
+use App\Services\SunatBetaElectronicReceiptSummaryTransport;
 use App\Services\SunatSchemaBundle;
 use App\Services\SunatUblReceiptSummaryBuilder;
 use App\Services\SunatXmlSignatureService;
@@ -51,9 +52,18 @@ class ProcessElectronicReceiptSummary implements ShouldQueue
         }
 
         $ownedPaths = [];
+        $transmissionStarted = false;
+        $betaMode = false;
         try {
             abort_unless(app()->environment('testing', 'local'), 409, 'Daily receipt summary communication is disabled outside local QA.');
             $summary = ElectronicReceiptSummary::query()->with('items.document')->findOrFail($this->summaryId);
+            $mode = (string) data_get($summary->snapshot, 'communication_mode', 'local_simulation');
+            $betaMode = $mode === 'sunat_beta';
+            abort_unless(in_array($mode, ['local_simulation', 'sunat_beta'], true), 409, 'The summary communication mode is not supported.');
+            if ($betaMode) {
+                abort_unless((bool) config('electronic_invoicing.receipt_beta.enabled') && $summary->environment === 'testing', 409,
+                    'SUNAT Beta transport is disabled; preserve the confirmed summary without sending.');
+            }
             $settings = ElectronicInvoiceSetting::query()->where('singleton_key', 'primary')->firstOrFail();
             $certificate = $settings->certificate_path ? Storage::disk('local')->get($settings->certificate_path) : null;
             if (! is_string($certificate) || $certificate === '') {
@@ -89,6 +99,7 @@ class ProcessElectronicReceiptSummary implements ShouldQueue
             try {
                 $zip = new \ZipArchive;
                 if ($zip->open($tmp, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true
+                    || ! $zip->addEmptyDir('dummy')
                     || ! $zip->addFromString($base.'.xml', $xml) || ! $zip->close()) {
                     throw new \RuntimeException('The daily summary ZIP could not be created.');
                 }
@@ -105,23 +116,42 @@ class ProcessElectronicReceiptSummary implements ShouldQueue
             $summary->zip_path = $zipPath;
             $summary->xml_hash = hash('sha256', $xml);
             $summary->save();
-            $result = app(ElectronicReceiptSummaryTransport::class)->sendSummary($summary, $bytes);
+            $transport = $betaMode
+                ? app(SunatBetaElectronicReceiptSummaryTransport::class)
+                : app(ElectronicReceiptSummaryTransport::class);
+            if ($betaMode) {
+                $result = $transport->sendSummary($summary, $bytes, static function () use (&$transmissionStarted): void {
+                    $transmissionStarted = true;
+                });
+            } else {
+                $result = $transport->sendSummary($summary, $bytes);
+            }
             app(ElectronicReceiptSummaryCommunicationService::class)->persistSubmission($summary->id, $this->attemptId, $result);
         } catch (\Throwable) {
-            DB::transaction(function (): void {
+            DB::transaction(function () use ($transmissionStarted, $betaMode): void {
                 $summary = ElectronicReceiptSummary::query()->whereKey($this->summaryId)->lockForUpdate()->first();
                 $attempt = ElectronicReceiptSummaryAttempt::query()->whereKey($this->attemptId)->lockForUpdate()->first();
                 if (! $summary || ! $attempt || $summary->status !== 'processing') {
                     return;
                 }
-                $summary->status = 'local_preparation_failed';
-                $summary->result_code = 'local_preparation_failed';
-                $summary->result_message = 'No se pudo preparar el resumen firmado local. No se envió a SUNAT.';
+                $uncertainBeta = $betaMode && $transmissionStarted;
+                $notSentBeta = $betaMode && ! $transmissionStarted;
+                $status = $uncertainBeta ? 'beta_uncertain' : ($notSentBeta ? 'beta_not_sent' : 'local_preparation_failed');
+                $code = $uncertainBeta ? 'beta_worker_interrupted_after_send_start' : ($notSentBeta ? 'beta_preflight_failed' : 'local_preparation_failed');
+                $message = $uncertainBeta
+                    ? 'El worker se interrumpió durante la comunicación Beta. Conserve ticket, numeración y evidencia; no reenvíe automáticamente.'
+                    : ($notSentBeta ? 'La validación local previa impidió iniciar la solicitud Beta. No se envió a SUNAT; corrija la configuración antes de preparar un nuevo resumen.'
+                        : 'No se pudo preparar el resumen firmado local. No se envió a SUNAT.');
+                $summary->status = $status;
+                $summary->communication_status = $uncertainBeta ? 'uncertain' : ($notSentBeta ? 'not_sent' : $summary->communication_status);
+                $summary->result_code = $code;
+                $summary->result_message = $message;
                 $summary->save();
-                $attempt->status = 'local_preparation_failed';
-                $attempt->response_code = 'local_preparation_failed';
-                $attempt->safe_observations = 'Falló la preparación local. No hubo transmisión a SUNAT; revise certificado, XSD y almacenamiento.';
-                $attempt->completed_at = now();
+                $attempt->status = $status;
+                $attempt->communication_status = $uncertainBeta ? 'uncertain' : ($notSentBeta ? 'not_sent' : $attempt->communication_status);
+                $attempt->response_code = $code;
+                $attempt->safe_observations = $message;
+                $attempt->completed_at = $uncertainBeta ? null : now();
                 $attempt->save();
                 $items = ElectronicReceiptSummaryItem::query()->where('electronic_receipt_summary_id', $summary->id)
                     ->orderBy('electronic_document_id')->lockForUpdate()->get();
@@ -129,21 +159,22 @@ class ProcessElectronicReceiptSummary implements ShouldQueue
                     ElectronicDocument::query()->whereKey($item->electronic_document_id)
                         ->whereIn('status', ['ready_for_summary', 'summary_pending', 'summary_uncertain'])
                         ->lockForUpdate()->update([
-                            'status' => 'summary_failed', 'result_code' => 'local_preparation_failed',
-                            'result_message' => 'Falló la preparación local del resumen; conserve la numeración y revise el historial.',
+                            'status' => $uncertainBeta ? 'summary_uncertain' : 'summary_failed', 'result_code' => $code,
+                            'result_message' => $message,
                             'updated_at' => now(),
                         ]);
-                    $item->result_status = 'local_preparation_failed';
-                    $item->result_code = 'local_preparation_failed';
-                    $item->result_message = 'Falló el procesamiento local; no se confirmó comunicación.';
+                    $item->result_status = $uncertainBeta ? 'beta_uncertain' : ($notSentBeta ? 'beta_not_sent' : 'local_preparation_failed');
+                    $item->result_code = $code;
+                    $item->result_message = $message;
                     $item->save();
                 }
                 ElectronicReceiptSummaryEvent::query()->create([
                     'electronic_receipt_summary_id' => $summary->id, 'actor_id' => null,
-                    'event_type' => 'local_preparation_failed', 'details' => ['mode' => 'local_simulation'], 'created_at' => now(),
+                    'event_type' => $uncertainBeta ? 'beta_worker_interrupted' : ($notSentBeta ? 'beta_preflight_failed' : 'local_preparation_failed'),
+                    'details' => ['mode' => $betaMode ? 'sunat_beta' : 'local_simulation', 'transmission_started' => $transmissionStarted], 'created_at' => now(),
                 ]);
             });
-            if ($ownedPaths !== []) {
+            if (! $betaMode && $ownedPaths !== []) {
                 try {
                     Storage::disk('local')->delete($ownedPaths);
                 } catch (\Throwable) {
