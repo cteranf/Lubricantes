@@ -19,8 +19,8 @@ class SunatUblInvoiceBuilder
 
     public function build(ElectronicDocument $document): DOMDocument
     {
-        if ($document->document_type !== 'factura') {
-            throw new \DomainException('Boleta requires the official daily summary workflow.');
+        if (! in_array($document->document_type, ['factura', 'boleta'], true)) {
+            throw new \DomainException('Only supported invoices and receipts can be built.');
         }
 
         $ruc = (string) data_get($document->seller_snapshot, 'tax_id_number');
@@ -61,7 +61,7 @@ class SunatUblInvoiceBuilder
         ]);
         $this->text($doc, $root, self::CBC, 'cbc:ID', $seriesNumber);
         $this->text($doc, $root, self::CBC, 'cbc:IssueDate', $document->confirmed_at->toDateString());
-        $this->text($doc, $root, self::CBC, 'cbc:InvoiceTypeCode', '01', [
+        $this->text($doc, $root, self::CBC, 'cbc:InvoiceTypeCode', $document->document_type === 'boleta' ? '03' : '01', [
             'listID' => $operationType,
             'listAgencyName' => 'PE:SUNAT',
             'listName' => 'SUNAT:Identificador de Tipo de Documento',
@@ -106,16 +106,25 @@ class SunatUblInvoiceBuilder
         $customer = $this->add($doc, $root, self::CAC, 'cac:AccountingCustomerParty');
         $customerParty = $this->add($doc, $customer, self::CAC, 'cac:Party');
         $customerIdentification = $this->add($doc, $customerParty, self::CAC, 'cac:PartyIdentification');
-        $this->text($doc, $customerIdentification, self::CBC, 'cbc:ID', (string) data_get($document->recipient_snapshot, 'document_number'), [
-            'schemeID' => '6',
+        $recipientType = strtoupper((string) data_get($document->recipient_snapshot, 'document_type', '-'));
+        $recipientNumber = (string) data_get($document->recipient_snapshot, 'document_number', '-');
+        $recipientCode = match ($recipientType) {
+            'RUC' => '6', 'DNI' => '1', 'CE', 'CARNET DE EXTRANJERIA' => '4', 'PASAPORTE' => '7', 'OTROS', 'OTHER' => '0', default => '-',
+        };
+        $this->text($doc, $customerIdentification, self::CBC, 'cbc:ID', $recipientNumber !== '' ? $recipientNumber : '-', [
+            'schemeID' => $recipientCode,
             'schemeName' => 'SUNAT:Identificador de Documento de Identidad',
             'schemeAgencyName' => 'PE:SUNAT',
             'schemeURI' => 'urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo06',
         ]);
         $customerPartyName = $this->add($doc, $customerParty, self::CAC, 'cac:PartyName');
-        $this->text($doc, $customerPartyName, self::CBC, 'cbc:Name', (string) data_get($document->recipient_snapshot, 'name'));
+        $recipientName = (string) data_get($document->recipient_snapshot, 'name', '');
+        if ($recipientName === '' && $document->document_type === 'boleta') {
+            $recipientName = 'CLIENTES VARIOS';
+        }
+        $this->text($doc, $customerPartyName, self::CBC, 'cbc:Name', $recipientName);
         $customerName = $this->add($doc, $customerParty, self::CAC, 'cac:PartyLegalEntity');
-        $this->text($doc, $customerName, self::CBC, 'cbc:RegistrationName', (string) data_get($document->recipient_snapshot, 'name'));
+        $this->text($doc, $customerName, self::CBC, 'cbc:RegistrationName', $recipientName);
         $payment = $this->add($doc, $root, self::CAC, 'cac:PaymentTerms');
         $this->text($doc, $payment, self::CBC, 'cbc:ID', 'FormaPago');
         $this->text($doc, $payment, self::CBC, 'cbc:PaymentMeansID', 'Contado');

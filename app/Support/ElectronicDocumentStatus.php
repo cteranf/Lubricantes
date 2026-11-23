@@ -8,6 +8,13 @@ final class ElectronicDocumentStatus
     {
         return match ($status) {
             'draft' => 'Borrador; no emitido',
+            'generating' => 'Generación local en curso',
+            'ready_for_summary' => 'Boleta firmada y numerada; pendiente de resumen',
+            'summary_pending' => 'Incluida en resumen; procesamiento simulado pendiente',
+            'summary_uncertain' => 'Resultado simulado incierto; conserva numeración',
+            'summary_failed' => 'Falló la simulación local; no fue comunicada a SUNAT',
+            'reported' => 'Informada en resumen aceptado simulado localmente; no SUNAT',
+            'summary_rejected' => 'Resumen rechazado en simulación; requiere revisión',
             'queued' => 'Pendiente de procesamiento',
             'processing' => 'Procesando',
             'submitted' => 'Enviado; resultado pendiente',

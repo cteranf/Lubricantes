@@ -14,9 +14,9 @@ class SunatSchemaBundle
     }
 
     /** @return array{available: bool, root: ?string, files: array<int, string>, reason: ?string} */
-    public function inspect(): array
+    public function inspect(?string $configuredPath = null): array
     {
-        $root = $this->rootPath();
+        $root = $configuredPath === null ? $this->rootPath() : $this->resolvePath($configuredPath);
         $realRoot = realpath($root);
         if ($realRoot === false || ! is_file($realRoot)) {
             return ['available' => false, 'root' => null, 'files' => [], 'reason' => 'official_ubl_schema_missing'];
@@ -81,7 +81,12 @@ class SunatSchemaBundle
 
     public function validate(DOMDocument $xml): bool
     {
-        $bundle = $this->inspect();
+        return $this->validateWith($xml, null);
+    }
+
+    public function validateWith(DOMDocument $xml, ?string $configuredPath): bool
+    {
+        $bundle = $this->inspect($configuredPath);
         if (! $bundle['available'] || ! is_string($bundle['root'])) {
             return false;
         }

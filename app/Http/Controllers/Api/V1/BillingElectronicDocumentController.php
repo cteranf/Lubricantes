@@ -9,12 +9,13 @@ use App\Models\Order;
 use App\Services\ElectronicDocumentEmissionService;
 use App\Services\ElectronicDocumentPdfRenderer;
 use App\Services\ElectronicDocumentService;
+use App\Services\ElectronicReceiptIssuanceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class BillingElectronicDocumentController extends Controller
 {
-    public function __construct(private ElectronicDocumentService $documents, private ElectronicDocumentEmissionService $emissions, private ElectronicDocumentPdfRenderer $pdf) {}
+    public function __construct(private ElectronicDocumentService $documents, private ElectronicDocumentEmissionService $emissions, private ElectronicReceiptIssuanceService $receipts, private ElectronicDocumentPdfRenderer $pdf) {}
 
     public function prepare(Request $request, int $order)
     {
@@ -73,6 +74,11 @@ class BillingElectronicDocumentController extends Controller
         abort_if(array_diff(array_keys($request->all()), ['version', '_token']) !== [], 422, 'La solicitud contiene campos no permitidos.');
         $data = $request->validate(['version' => ['required', 'integer', 'min:1']]);
         $document = ElectronicDocument::query()->findOrFail($id);
+        if ($document->document_type === 'boleta') {
+            $savedReceipt = $this->receipts->issue($document, $request->user(), (int) $data['version']);
+
+            return response()->json(['message' => 'Boleta de prueba generada y firmada localmente. Aún no está incluida ni comunicada mediante un resumen.', 'data' => $this->documentPayload($savedReceipt)], 202);
+        }
         if ($document->connection_type !== 'direct_sunat') {
             return response()->json(['code' => 'connection_not_implemented', 'message' => 'La conexión seleccionada todavía no está implementada. No se creó un intento.'], 503);
         }
@@ -109,8 +115,9 @@ class BillingElectronicDocumentController extends Controller
 
             return response($bytes, 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="'.$series.'-'.$number.'-PRUEBA.pdf"',
+                'Content-Disposition' => 'attachment; filename="'.($document->document_type === 'boleta' ? 'SIMULACION-' : '').$series.'-'.$number.'-PRUEBA.pdf"',
                 'Cache-Control' => 'private, no-store',
+                ...($document->document_type === 'boleta' ? ['X-Receipt-Simulation' => 'local-only'] : []),
             ]);
         }
 
@@ -126,9 +133,12 @@ class BillingElectronicDocumentController extends Controller
         $series = preg_replace('/[^A-Z0-9-]/i', '', (string) $document->series) ?: 'document';
         $number = str_pad((string) $document->document_number, 8, '0', STR_PAD_LEFT);
         $suffix = $extension;
-        $prefix = $type === 'cdr' ? 'R-' : '';
+        $prefix = $type === 'cdr' ? 'R-' : ($document->document_type === 'boleta' ? 'SIMULACION-' : '');
 
-        return Storage::disk('local')->download($path, $prefix.$series.'-'.$number.'.'.$suffix);
+        return Storage::disk('local')->download($path, $prefix.$series.'-'.$number.'.'.$suffix, [
+            'Cache-Control' => 'private, no-store',
+            ...($document->document_type === 'boleta' ? ['X-Receipt-Simulation' => 'local-only'] : []),
+        ]);
     }
 
     /** @return array<string, mixed> */

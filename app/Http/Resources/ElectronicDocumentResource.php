@@ -25,10 +25,10 @@ class ElectronicDocumentResource extends JsonResource
                 'xml' => filled($this->xml_path),
                 'archive' => filled($this->zip_path),
                 'cdr' => filled($this->cdr_path),
-                'pdf' => $this->document_type === 'factura'
-                    && $this->environment === 'testing'
-                    && in_array($this->status, ['accepted', 'accepted_observed', 'rejected'], true)
-                    && filled($this->series) && filled($this->document_number),
+                'pdf' => $this->environment === 'testing' && filled($this->series) && filled($this->document_number)
+                    && ($this->document_type === 'boleta'
+                        ? in_array($this->status, ['ready_for_summary', 'summary_pending', 'summary_uncertain', 'summary_failed', 'reported', 'summary_rejected'], true) && filled($this->xml_path)
+                        : $this->document_type === 'factura' && in_array($this->status, ['accepted', 'accepted_observed', 'rejected'], true)),
             ],
             'accepted_at' => $this->accepted_at?->toISOString(),
             'confirmed_at' => $this->confirmed_at?->toISOString(),

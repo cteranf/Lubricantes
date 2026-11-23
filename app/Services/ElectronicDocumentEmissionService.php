@@ -23,6 +23,7 @@ class ElectronicDocumentEmissionService
     public function confirm(ElectronicDocument $candidate, User $actor, int $expectedVersion): ElectronicDocument
     {
         abort_unless((bool) config('electronic_invoicing.enabled'), 409, 'La facturación electrónica no está habilitada comercialmente.');
+        abort_if($candidate->document_type === 'boleta', 409, 'Las boletas se generan localmente y se comunican únicamente mediante resumen diario.');
 
         $connection = DB::connection($candidate->getConnectionName());
 
@@ -140,7 +141,10 @@ class ElectronicDocumentEmissionService
         if (! Schema::hasTable('jobs')) {
             $reasons[] = 'durable_queue_unavailable';
         }
-        if (! $this->schemas->isAvailable()) {
+        $schemaPath = $candidate->document_type === 'boleta'
+            ? (string) config('electronic_invoicing.sunat.invoice_xsd')
+            : null;
+        if (! $this->schemas->inspect($schemaPath)['available']) {
             $reasons[] = 'official_ubl_schema_missing_or_invalid';
         }
         if (! (bool) config('electronic_invoicing.enabled')) {

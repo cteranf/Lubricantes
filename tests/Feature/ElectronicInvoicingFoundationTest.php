@@ -74,7 +74,7 @@ class ElectronicInvoicingFoundationTest extends TestCase
         $this->assertSame('unsupported', $response->json('data.amounts.payment_terms.type'));
         $this->assertContains('payment_form_unsupported', app(ElectronicInvoiceEligibility::class)->reasons(ElectronicDocument::query()->findOrFail($id), $order));
         $this->postJson('/api/v1/billing/electronic-documents/'.$id.'/issue', ['version' => 1])->assertStatus(409)
-            ->assertJsonPath('message', 'El cálculo tributario está pendiente o requiere revisión. No se puede preparar una emisión hasta completar y validar el desglose.');
+            ->assertJsonPath('message', 'La boleta requiere revisión antes de generar el documento: tax_snapshot_incomplete, line_snapshot_unsupported, payment_form_unsupported.');
         $this->assertDatabaseCount('electronic_document_attempts', 0);
         $this->postJson('/api/v1/billing/orders/'.$order->id.'/electronic-documents', ['preparation_key' => $key])
             ->assertCreated()->assertJsonPath('data.id', $id);
@@ -117,7 +117,7 @@ class ElectronicInvoicingFoundationTest extends TestCase
         ]);
         $secondDraft = ElectronicDocument::query()->create([
             'order_id' => $order->id, 'draft_reference' => (string) Str::uuid(),
-            'preparation_key' => (string) Str::uuid(), 'document_type' => 'boleta', 'status' => 'draft',
+            'preparation_key' => (string) Str::uuid(), 'document_type' => 'factura', 'status' => 'draft',
             'environment' => 'testing', 'connection_type' => 'direct_sunat', 'seller_snapshot' => [],
             'recipient_snapshot' => [], 'lines_snapshot' => [], 'amounts_snapshot' => ['total' => '118.00'],
             'currency' => 'PEN', 'tax_calculation_status' => 'complete', 'version' => 1, 'prepared_at' => now(),
@@ -485,6 +485,8 @@ class ElectronicInvoicingFoundationTest extends TestCase
 
         $order = $this->order(User::factory()->create(['role' => 'customer']), '75.00');
         $order->update([
+            'requested_receipt_type' => 'factura', 'requested_identity_type' => 'RUC',
+            'requested_identity_number' => '20987654321', 'requested_recipient_name' => 'Receptor QA',
             'tax_calculation_status' => 'complete',
             'tax_calculation_version' => 'peruvian-inclusive-tax-v1',
             'tax_snapshot' => ['status' => 'complete', 'missing_fields' => [], 'totals' => ['gross_minor' => '75.00']],

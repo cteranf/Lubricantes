@@ -33,4 +33,9 @@ class ElectronicDocument extends Model
     {
         return $this->hasMany(ElectronicDocumentAttempt::class);
     }
+
+    public function receiptSummaryItem()
+    {
+        return $this->hasOne(ElectronicReceiptSummaryItem::class, 'electronic_document_id');
+    }
 }

@@ -42,6 +42,9 @@ class ElectronicInvoiceEligibility
         if (blank(data_get($document->seller_snapshot, 'commercial_name'))) {
             $reasons[] = 'seller_commercial_name_missing';
         }
+        if (blank(data_get($document->seller_snapshot, 'legal_name'))) {
+            $reasons[] = 'seller_legal_name_missing';
+        }
         if (data_get($document->seller_snapshot, 'country_code') !== 'PE') {
             $reasons[] = 'seller_country_unsupported';
         }
@@ -60,11 +63,27 @@ class ElectronicInvoiceEligibility
                 || preg_match('/\A\d{11}\z/', (string) data_get($document->recipient_snapshot, 'document_number')) !== 1)) {
             $reasons[] = 'invoice_recipient_ruc_required';
         }
+        if ($document->document_type === 'boleta') {
+            $recipient = $document->recipient_snapshot ?? [];
+            $identityTypes = ['DNI', 'RUC', 'CARNET DE EXTRANJERIA', 'CE', 'PASAPORTE', 'OTROS', 'OTHER'];
+            $identityProvided = filled($recipient['document_type'] ?? null)
+                || filled($recipient['document_number'] ?? null)
+                || filled($recipient['name'] ?? null);
+            $identityRequired = (bool) ($recipient['identity_required'] ?? false);
+            if ($identityRequired && (! filled($recipient['document_type'] ?? null)
+                || ! filled($recipient['document_number'] ?? null)
+                || ! filled($recipient['name'] ?? null))) {
+                $reasons[] = 'receipt_recipient_identity_required';
+            }
+            if ($identityProvided && ! in_array(strtoupper((string) ($recipient['document_type'] ?? '')), $identityTypes, true)) {
+                $reasons[] = 'receipt_recipient_identity_type_unsupported';
+            }
+        }
         if (! in_array($document->document_type, ['boleta', 'factura'], true)) {
             $reasons[] = 'document_type_unsupported';
         }
-        if ($document->document_type === 'boleta') {
-            $reasons[] = 'daily_summary_workflow_required';
+        if ($document->currency !== 'PEN') {
+            $reasons[] = 'currency_unsupported';
         }
         if ($order->requested_receipt_type !== $document->document_type) {
             $reasons[] = 'requested_document_type_mismatch';
@@ -72,7 +91,9 @@ class ElectronicInvoiceEligibility
 
         // Fase 2 does not allocate or apply advances to the final tax snapshot.
         // A single full payment is allowed; multiple or partial registered operations are held.
-        $payments = $order->paymentSubmissions()->get(['id', 'amount', 'status']);
+        $payments = $order->relationLoaded('paymentSubmissions')
+            ? $order->paymentSubmissions
+            : $order->paymentSubmissions()->get(['id', 'amount', 'status']);
         if ($order->payment_status === 'partial'
             || $payments->count() > 1
             || ($payments->count() === 1 && (float) $payments->first()->amount > 0 && round((float) $payments->first()->amount, 2) < round((float) $order->total, 2))) {

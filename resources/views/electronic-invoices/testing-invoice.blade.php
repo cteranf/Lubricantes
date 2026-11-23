@@ -22,11 +22,11 @@
 </head>
 <body>
     <div class="notice">COPIA DE PRUEBA · NO ES UN COMPROBANTE VÁLIDO PARA EFECTOS TRIBUTARIOS</div>
-    <h1>Factura electrónica · {{ $document->series }}-{{ str_pad((string) $document->document_number, 8, '0', STR_PAD_LEFT) }}</h1>
-    <p class="muted">Ambiente: PRUEBAS SUNAT · Estado documental: {{ $statusLabel }} · Emitida: {{ $document->confirmed_at?->format('d/m/Y H:i') ?? 'No disponible' }}</p>
+    <h1>{{ $document->document_type === 'boleta' ? 'Boleta de venta electrónica' : 'Factura electrónica' }} · {{ $document->series }}-{{ str_pad((string) $document->document_number, 8, '0', STR_PAD_LEFT) }}</h1>
+    <p class="muted">Documento de prueba · Ambiente: QA local · Estado documental: {{ $statusLabel }} · Generado: {{ $document->confirmed_at?->format('d/m/Y H:i') ?? 'No disponible' }}</p>
     <table class="grid"><tr>
         <td><h2>Emisor</h2><strong>{{ $seller['legal_name'] ?? 'No disponible' }}</strong><br>RUC: {{ $seller['tax_id_number'] ?? 'No disponible' }}<br>{{ $seller['fiscal_address'] ?? '' }}</td>
-        <td><h2>Receptor</h2><strong>{{ $recipient['name'] ?? 'No disponible' }}</strong><br>RUC: {{ $recipient['document_number'] ?? 'No disponible' }}<br>{{ $recipient['billing_address'] ?? '' }}</td>
+        <td><h2>Receptor</h2><strong>{{ $recipient['name'] ?? 'No disponible' }}</strong><br>{{ ($recipient['document_type'] ?? null) === 'DNI' ? 'DNI' : (($recipient['document_type'] ?? null) === 'RUC' ? 'RUC' : 'Documento') }}: {{ $recipient['document_number'] ?? 'No registrado' }}<br>{{ $recipient['billing_address'] ?? '' }}</td>
     </tr></table>
     <h2>Detalle</h2>
     <table class="lines"><thead><tr><th>Cantidad</th><th>Descripción</th><th>Precio unitario</th><th>Importe</th></tr></thead><tbody>

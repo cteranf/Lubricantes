@@ -147,4 +147,61 @@ class ElectronicInvoicingMigrationTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $migration->down();
     }
+
+    public function test_receipt_simulation_migration_splits_and_restores_legacy_ticket_values(): void
+    {
+        $foundation = require database_path('migrations/2026_11_19_071000_create_electronic_invoice_foundation_tables.php');
+        $foundation->up();
+        $phaseThree = require database_path('migrations/2026_11_19_071200_add_direct_sunat_emission_support.php');
+        $phaseThree->up();
+        $receiptSummaries = require database_path('migrations/2026_11_22_071400_create_electronic_receipt_summaries.php');
+        $receiptSummaries->up();
+
+        DB::table('orders')->insert(['id' => 88, 'created_at' => now(), 'updated_at' => now()]);
+        $documentId = DB::table('electronic_documents')->insertGetId([
+            'order_id' => 88, 'draft_reference' => (string) Str::uuid(), 'preparation_key' => (string) Str::uuid(),
+            'document_type' => 'boleta', 'status' => 'queued', 'environment' => 'testing', 'connection_type' => 'direct_sunat',
+            'seller_snapshot' => '{}', 'recipient_snapshot' => '{}', 'lines_snapshot' => '{}', 'amounts_snapshot' => '{}',
+            'currency' => 'PEN', 'tax_calculation_status' => 'complete', 'version' => 2,
+            'prepared_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $summaryId = DB::table('electronic_receipt_summaries')->insertGetId([
+            'issuer_tax_id' => '20123456789', 'environment' => 'testing', 'issue_date' => now()->toDateString(),
+            'sequence' => 1, 'document_id' => 'RC-20261122-1', 'status' => 'simulated_processing_pending',
+            'document_count' => 1, 'snapshot' => '{}', 'ticket' => 'LOCAL-SIM-LEGACY123',
+            'confirmed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $externalSummaryId = DB::table('electronic_receipt_summaries')->insertGetId([
+            'issuer_tax_id' => '20123456789', 'environment' => 'testing', 'issue_date' => now()->toDateString(),
+            'sequence' => 2, 'document_id' => 'RC-20261122-2', 'status' => 'processing',
+            'document_count' => 1, 'snapshot' => '{}', 'ticket' => 'SUNAT-TICKET-123',
+            'confirmed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('electronic_receipt_summary_attempts')->insert([
+            'electronic_receipt_summary_id' => $summaryId, 'attempt_number' => 1, 'idempotency_key' => (string) Str::uuid(),
+            'payload_hash' => str_repeat('a', 64), 'request_snapshot' => '{}', 'status' => 'simulated_processing_pending',
+            'ticket' => 'LOCAL-SIM-LEGACY123', 'started_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('electronic_receipt_summary_attempts')->insert([
+            'electronic_receipt_summary_id' => $externalSummaryId, 'attempt_number' => 1, 'idempotency_key' => (string) Str::uuid(),
+            'payload_hash' => str_repeat('b', 64), 'request_snapshot' => '{}', 'status' => 'processing',
+            'ticket' => 'SUNAT-TICKET-123', 'started_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $migration = require database_path('migrations/2026_11_22_071500_add_electronic_receipt_simulation_state.php');
+        $migration->up();
+        $this->assertSame('LOCAL-SIM-LEGACY123', DB::table('electronic_receipt_summaries')->where('id', $summaryId)->value('local_simulation_id'));
+        $this->assertNull(DB::table('electronic_receipt_summaries')->where('id', $summaryId)->value('external_ticket'));
+        $this->assertSame('SUNAT-TICKET-123', DB::table('electronic_receipt_summaries')->where('id', $externalSummaryId)->value('external_ticket'));
+
+        $migration->down();
+        $this->assertFalse(Schema::hasColumn('electronic_receipt_summaries', 'local_simulation_id'));
+        $this->assertSame('LOCAL-SIM-LEGACY123', DB::table('electronic_receipt_summaries')->where('id', $summaryId)->value('ticket'));
+        $this->assertSame('SUNAT-TICKET-123', DB::table('electronic_receipt_summary_attempts')->where('electronic_receipt_summary_id', $externalSummaryId)->value('ticket'));
+
+        $migration->up();
+        $this->assertSame('LOCAL-SIM-LEGACY123', DB::table('electronic_receipt_summaries')->where('id', $summaryId)->value('local_simulation_id'));
+        $this->assertSame('SUNAT-TICKET-123', DB::table('electronic_receipt_summary_attempts')->where('electronic_receipt_summary_id', $externalSummaryId)->value('external_ticket'));
+        $this->assertSame(1, DB::table('electronic_documents')->where('id', $documentId)->where('order_id', 88)->count());
+    }
 }

@@ -106,6 +106,7 @@ class ElectronicDocumentService
                     'name' => $order->requested_recipient_name,
                     'billing_address' => $order->requested_billing_address,
                     'email' => $order->requested_receipt_email,
+                    'identity_required' => (bool) $order->requested_identity_required,
                 ];
                 $lines = $items->map(fn ($item): array => [
                     'name' => $item->product_name,
@@ -117,7 +118,7 @@ class ElectronicDocumentService
                     'source' => 'order_item_snapshot',
                 ])->all();
                 $taxStatus = $order->tax_calculation_status ?: 'pending_configuration';
-                $missing = $this->missingFields($seller, $recipient, $lines, $taxStatus, $order->tax_snapshot);
+                $missing = $this->missingFields($seller, $recipient, $lines, $taxStatus, $order->tax_snapshot, $order->requested_receipt_type);
 
                 $document = ElectronicDocument::query()->create([
                     'order_id' => $order->id,
@@ -214,7 +215,8 @@ class ElectronicDocumentService
                 $recipientSnapshot,
                 $document->lines_snapshot['items'] ?? [],
                 $document->tax_calculation_status,
-                $amountsSnapshot['tax_snapshot'] ?? null
+                $amountsSnapshot['tax_snapshot'] ?? null,
+                $document->document_type
             );
             $document->amounts_snapshot = $amountsSnapshot;
             $document->version++;
@@ -251,7 +253,7 @@ class ElectronicDocumentService
         ]);
     }
 
-    private function missingFields(array $seller, array $recipient, array $lines, ?string $taxStatus = null, ?array $taxSnapshot = null): array
+    private function missingFields(array $seller, array $recipient, array $lines, ?string $taxStatus = null, ?array $taxSnapshot = null, ?string $documentType = null): array
     {
         $missing = [];
         foreach ($seller as $field => $value) {
@@ -259,8 +261,11 @@ class ElectronicDocumentService
                 $missing[] = 'seller.'.$field;
             }
         }
+        $hasRecipientIdentity = filled($recipient['document_type'] ?? null) || filled($recipient['document_number'] ?? null) || filled($recipient['name'] ?? null);
+        $identityRequired = $documentType === 'factura' || (bool) ($recipient['identity_required'] ?? false) || $hasRecipientIdentity;
         foreach ($recipient as $field => $value) {
-            if ($field !== 'source' && blank($value) && in_array($field, ['document_type', 'document_number', 'name', 'email'], true)) {
+            if ($field !== 'source' && $field !== 'identity_required' && blank($value)
+                && ($field === 'email' || ($identityRequired && in_array($field, ['document_type', 'document_number', 'name'], true)))) {
                 $missing[] = 'recipient.'.$field;
             }
         }

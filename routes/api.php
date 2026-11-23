@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\Admin\WarehouseController as AdminWarehouseContr
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BillingElectronicDocumentController;
 use App\Http\Controllers\Api\V1\BillingOrderController;
+use App\Http\Controllers\Api\V1\BillingReceiptSummaryController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
@@ -155,6 +156,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/electronic-documents/{id}', [BillingElectronicDocumentController::class, 'show'])->whereNumber('id')->name('electronic-documents.show');
             Route::get('/electronic-documents/{id}/readiness', [BillingElectronicDocumentController::class, 'readiness'])->whereNumber('id')->name('electronic-documents.readiness');
             Route::get('/electronic-documents/{id}/files/{type}', [BillingElectronicDocumentController::class, 'download'])->whereNumber('id')->whereIn('type', ['xml', 'archive', 'cdr', 'pdf'])->name('electronic-documents.files.download');
+            Route::get('/receipt-summaries/eligible', [BillingReceiptSummaryController::class, 'eligible'])->name('receipt-summaries.eligible');
+            Route::get('/receipt-summaries', [BillingReceiptSummaryController::class, 'index'])->name('receipt-summaries.index');
+            Route::post('/receipt-summaries', [BillingReceiptSummaryController::class, 'store'])->name('receipt-summaries.store');
+            Route::get('/receipt-summaries/{id}', [BillingReceiptSummaryController::class, 'show'])->whereNumber('id')->name('receipt-summaries.show');
+            Route::post('/receipt-summaries/{id}/query', [BillingReceiptSummaryController::class, 'query'])->whereNumber('id')->name('receipt-summaries.query');
+            Route::get('/receipt-summaries/{id}/files/{type}', [BillingReceiptSummaryController::class, 'download'])->whereNumber('id')->whereIn('type', ['xml', 'archive'])->name('receipt-summaries.files.download');
             Route::put('/electronic-documents/{id}', [BillingElectronicDocumentController::class, 'update'])->whereNumber('id')->name('electronic-documents.update');
             Route::post('/electronic-documents/{id}/issue', [BillingElectronicDocumentController::class, 'issue'])->whereNumber('id')->name('electronic-documents.issue');
             Route::post('/electronic-documents/{id}/query', [BillingElectronicDocumentController::class, 'query'])->whereNumber('id')->name('electronic-documents.query');
