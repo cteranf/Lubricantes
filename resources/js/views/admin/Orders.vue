@@ -208,6 +208,7 @@
                         <div v-if="fulfillment.reservation_status" class="rounded-xl border border-slate-200 bg-white px-3 py-2"><span class="block text-xs text-slate-500">Reserva</span><strong>{{ reservationLabel(fulfillment.reservation_status) }}</strong><span v-if="fulfillment.expires_at" class="block text-xs text-slate-600">Vence {{ formatDate(fulfillment.expires_at) }}</span></div>
                         <div v-if="selectedOrder.delivery_type" class="rounded-xl border border-slate-200 bg-white px-3 py-2"><span class="block text-xs text-slate-500">Modalidad</span><strong>{{ deliveryLabel(selectedOrder) }}</strong></div>
                     </section>
+                    <CommercialOrderDocuments v-if="!detailLoading && !detailError" :order-id="selectedOrder.id" scope="admin" />
                     <p v-if="selectedOrder.payment_method === 'transferencia' && selectedOrder.has_payment_submission" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status" aria-live="polite">
                         {{ paymentSubmissionLabel(selectedOrder.payment_submission_status) }}. Este pago se gestiona desde el flujo de Tesorería.
                     </p>
@@ -275,6 +276,7 @@ import AdminLayout from '@/layouts/AdminLayout.vue';
 import AdminDataTable from '@/components/admin/table/AdminDataTable.vue';
 import OrderPickingPackingPanel from '@/components/admin/OrderPickingPackingPanel.vue';
 import OrderDeliveryPanel from '@/components/admin/OrderDeliveryPanel.vue';
+import CommercialOrderDocuments from '@/components/CommercialOrderDocuments.vue';
 import api from '@/api';
 import { useAdminListQuery } from '@/composables/useAdminListQuery';
 import { useToast } from 'primevue/usetoast';

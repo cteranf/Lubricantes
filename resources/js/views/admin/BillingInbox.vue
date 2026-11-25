@@ -99,6 +99,7 @@
               <div><dt class="label">Total del pedido</dt><dd class="font-bold">S/ {{ money(detail.total) }}</dd></div>
             </dl>
             <section aria-label="Productos del pedido"><h3 class="mb-2 font-bold">Productos del pedido</h3><ul class="divide-y rounded-lg border"><li v-for="(item, index) in detail.items || []" :key="index" class="flex justify-between gap-3 p-3 text-sm"><span>{{ item.quantity }} × {{ item.product_name }}</span><span>S/ {{ money(item.subtotal) }}</span></li></ul></section>
+            <CommercialOrderDocuments :order-id="detail.id" scope="billing" />
 
             <section class="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4" aria-labelledby="documents-title">
               <div class="flex flex-wrap items-center justify-between gap-2"><div><h3 id="documents-title" class="font-bold">Documentos electrónicos</h3><p class="text-sm text-slate-600">La solicitud del pedido no es un documento emitido.</p></div><Button label="Preparar borrador" icon="pi pi-file-edit" size="small" :disabled="documentBusy || !electronicEnabled || !detail.requested_receipt_type" @click="confirmPrepareDraft" /></div>
@@ -164,6 +165,7 @@ import { useToast } from 'primevue/usetoast';
 import { useConfirm } from 'primevue/useconfirm';
 import api from '@/api';
 import AdminLayout from '@/layouts/AdminLayout.vue';
+import CommercialOrderDocuments from '@/components/CommercialOrderDocuments.vue';
 import Button from 'primevue/button';
 import Tag from 'primevue/tag';
 

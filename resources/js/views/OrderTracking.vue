@@ -181,6 +181,7 @@
                             <div class="flex justify-between gap-4 border-t border-slate-100 pt-3 text-base"><dt class="font-bold text-slate-950">{{ order.payment_status === 'approved' ? 'Total pagado' : 'Total a pagar' }}</dt><dd class="font-extrabold tabular-nums text-blue-900">{{ formatMoney(order.total) }}</dd></div>
                         </dl>
                     </section>
+                    <CommercialOrderDocuments :order-id="order.id" scope="customer" />
                 </div>
             </div>
         </main>
@@ -197,6 +198,7 @@ import api from '@/api';
 import { formatCalendarDate, formatDateTime } from '@/utils/dateTime';
 import { cartItemPriceBreakdown, summarizeOrderPriceSnapshots } from '@/utils/cartPricing.mjs';
 import CustomerTransferPaymentPanel from '@/components/CustomerTransferPaymentPanel.vue';
+import CommercialOrderDocuments from '@/components/CommercialOrderDocuments.vue';
 import { useCartStore } from '@/stores/cart';
 
 const route = useRoute();

@@ -19,6 +19,7 @@ class TreasuryPaymentSubmissionDetailResource extends TreasuryPaymentSubmissionL
     public function toArray($request): array
     {
         return array_merge(parent::toArray($request), [
+            'order_id' => (int) $this->order_id,
             'operation_number' => $this->operation_number,
             'origin_phone_last4' => $this->origin_phone_last4,
             'origin_bank' => $this->origin_bank,

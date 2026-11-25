@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CheckoutPickupBranchController;
 use App\Http\Controllers\Api\V1\CheckoutShippingQuoteController;
+use App\Http\Controllers\Api\V1\CommercialOrderPdfController;
 use App\Http\Controllers\Api\V1\ContactInquiryController;
 use App\Http\Controllers\Api\V1\CustomerPaymentSubmissionController;
 use App\Http\Controllers\Api\V1\CustomerTransferPaymentOptionController;
@@ -124,9 +125,13 @@ Route::prefix('v1')->group(function () {
         Route::put('/orders/{order}/payment-submission/correction', [CustomerPaymentSubmissionController::class, 'correct']);
         Route::get('/orders/{order}/payment-submission', [CustomerPaymentSubmissionController::class, 'show']);
         Route::get('/orders/{id}/tracking', [OrderTrackingController::class, 'show']);
+        Route::get('/orders/{order}/commercial-documents', [CommercialOrderPdfController::class, 'customerAvailability'])->whereNumber('order')->name('orders.commercial-documents.availability');
+        Route::get('/orders/{order}/commercial-documents/{kind}', [CommercialOrderPdfController::class, 'customerDownload'])->whereNumber('order')->whereIn('kind', ['summary', 'payment-constancy'])->name('orders.commercial-documents.download');
 
         // Treasury review queue: deliberately separate from administrative configuration.
         Route::middleware('is_treasury')->prefix('treasury')->as('treasury.')->group(function () {
+            Route::get('/orders/{order}/commercial-documents', [CommercialOrderPdfController::class, 'staffAvailability'])->whereNumber('order')->name('orders.commercial-documents.availability');
+            Route::get('/orders/{order}/commercial-documents/{kind}', [CommercialOrderPdfController::class, 'staffDownload'])->whereNumber('order')->whereIn('kind', ['summary', 'payment-constancy'])->name('orders.commercial-documents.download');
             Route::get('/refund-worklist', [TreasuryPaymentRefundReadController::class, 'index'])->name('refund-worklist.index');
             Route::get('/orders/{orderId}/refund-state', [TreasuryPaymentRefundReadController::class, 'show'])->name('orders.refund-state');
             Route::post('/orders/{orderId}/refunds', [TreasuryPaymentRefundController::class, 'store'])
@@ -149,6 +154,8 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::middleware('can_access_billing')->prefix('billing')->as('billing.')->group(function () {
+            Route::get('/orders/{order}/commercial-documents', [CommercialOrderPdfController::class, 'staffAvailability'])->whereNumber('order')->name('orders.commercial-documents.availability');
+            Route::get('/orders/{order}/commercial-documents/{kind}', [CommercialOrderPdfController::class, 'staffDownload'])->whereNumber('order')->whereIn('kind', ['summary', 'payment-constancy'])->name('orders.commercial-documents.download');
             Route::get('/electronic-invoicing/status', [BillingElectronicDocumentController::class, 'status'])->name('electronic-invoicing.status');
             Route::get('/orders', [BillingOrderController::class, 'index'])->name('orders.index');
             Route::get('/orders/{order}', [BillingOrderController::class, 'show'])->name('orders.show');
@@ -174,6 +181,8 @@ Route::prefix('v1')->group(function () {
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::get('/orders/{order}/commercial-documents', [CommercialOrderPdfController::class, 'staffAvailability'])->whereNumber('order')->name('orders.commercial-documents.availability');
+            Route::get('/orders/{order}/commercial-documents/{kind}', [CommercialOrderPdfController::class, 'staffDownload'])->whereNumber('order')->whereIn('kind', ['summary', 'payment-constancy'])->name('orders.commercial-documents.download');
             Route::get('/product-reviews/settings', [ProductReviewSettingsController::class, 'show'])->name('product-reviews.settings.show');
             Route::put('/product-reviews/settings', [ProductReviewSettingsController::class, 'update'])->name('product-reviews.settings.update');
             Route::get('/product-reviews', [App\Http\Controllers\Api\V1\Admin\ProductReviewController::class, 'index'])->name('product-reviews.index');
