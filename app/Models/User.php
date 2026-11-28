@@ -89,4 +89,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(ContactInquiry::class, 'assigned_to');
     }
+
+    public function posCashierAssignments()
+    {
+        return $this->hasMany(PosCashierAssignment::class);
+    }
 }

@@ -2,8 +2,8 @@
 
 namespace App\Http\Resources;
 
-use Illuminate\Http\Resources\Json\JsonResource;
 use App\Support\EffectiveInventoryReservationStatus;
+use Illuminate\Http\Resources\Json\JsonResource;
 
 class AdminOrderListResource extends JsonResource
 {
@@ -13,6 +13,7 @@ class AdminOrderListResource extends JsonResource
 
         return [
             'id' => $this->id,
+            'sales_channel' => $this->sales_channel ?? 'web',
             'created_at' => $this->created_at?->toIso8601String(),
             'customer_name' => $this->user?->name ?? 'Invitado',
             'total' => $this->total,

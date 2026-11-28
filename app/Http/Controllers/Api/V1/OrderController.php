@@ -9,17 +9,19 @@ use App\Models\Branch;
 use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\PaymentSubmission;
-use App\Models\Product;
 use App\Models\UserAddress;
 use App\Services\CheckoutPriceConfirmationService;
 use App\Services\CheckoutTaxQuoteService;
 use App\Services\InventoryReservationExpirationService;
 use App\Services\InventoryService;
 use App\Services\MoneyService;
+use App\Services\OrderTaxCalculationService;
+use App\Services\PaymentSettingService;
 use App\Services\ProductPricingService;
 use App\Services\ShippingRateService;
 use App\Support\SalesReceiptRules;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -33,10 +35,10 @@ class OrderController extends Controller
         private InventoryService $inventory,
         private ShippingRateService $shippingRates,
         private MoneyService $money,
-        private \App\Services\PaymentSettingService $paymentSettings,
+        private PaymentSettingService $paymentSettings,
         private InventoryReservationExpirationService $reservationExpiration,
         private SalesReceiptRules $receiptRules,
-        private \App\Services\OrderTaxCalculationService $taxes,
+        private OrderTaxCalculationService $taxes,
         private CheckoutTaxQuoteService $taxQuotes,
     ) {}
 
@@ -127,7 +129,7 @@ class OrderController extends Controller
         return response()->json(['items' => $items]);
     }
 
-    public function receiptOptions(): \Illuminate\Http\JsonResponse
+    public function receiptOptions(): JsonResponse
     {
         return response()->json(['data' => $this->receiptRules->settings()]);
     }
@@ -184,18 +186,21 @@ class OrderController extends Controller
                 }
                 $existing = Order::where('checkout_token', $data['checkout_token'])
                     ->where('user_id', $request->user()->id)
-                    ->lockForUpdate()
                     ->first();
                 if ($existing) {
+                    // Lock only an existing row. A locking read for an absent unique
+                    // checkout token takes a gap lock in InnoDB and can deadlock with
+                    // a concurrent checkout that already holds the pickup branch.
+                    $existing = Order::whereKey($existing->id)->lockForUpdate()->firstOrFail();
                     $duplicate = true;
 
                     $isPendingUnpaid = $existing->status === 'pending' && $existing->payment_status === 'pending';
                     $isReservationExpired = ($existing->reserved_until && $existing->reserved_until->isPast())
-                        || ($isPendingUnpaid && $existing->reservations()->where('status', \App\Models\InventoryReservation::EXPIRED)->exists());
+                        || ($isPendingUnpaid && $existing->reservations()->where('status', InventoryReservation::EXPIRED)->exists());
 
                     if ($isPendingUnpaid && $isReservationExpired) {
                         $this->logReservationExpired('POST /api/v1/orders', $data['checkout_token'], $existing, 'existing_token_expired');
-                        if ($existing->reservations()->where('status', \App\Models\InventoryReservation::ACTIVE)->exists()) {
+                        if ($existing->reservations()->where('status', InventoryReservation::ACTIVE)->exists()) {
                             $this->reservationExpiration->expireOrder($existing->id);
                         }
                         $existing->update(['status' => 'canceled', 'tracking_status' => 'canceled']);
@@ -221,7 +226,6 @@ class OrderController extends Controller
                 }
                 $foreignToken = Order::where('checkout_token', $data['checkout_token'])
                     ->where('user_id', '!=', $request->user()->id)
-                    ->lockForUpdate()
                     ->first(['id']);
                 if ($foreignToken) {
                     throw ValidationException::withMessages(['checkout_token' => ['La clave de checkout ya está en uso. Genere una nueva e inténtelo otra vez.']]);
@@ -254,11 +258,10 @@ class OrderController extends Controller
                 $subtotalMinor = 0;
                 $itemsToCreate = [];
                 $productIds = collect($data['items'])->pluck('product_id')->map(fn ($id) => (int) $id)->sort()->values();
-                $products = Product::query()->whereIn('id', $productIds)->where('is_active', true)
-                    ->orderBy('id')->lockForUpdate()->with('activePromotion')->get()->keyBy('id');
-                if ($products->count() !== $productIds->count()) {
-                    throw ValidationException::withMessages(['items' => ['Uno de los productos ya no está disponible.']]);
-                }
+                $this->reservationExpiration->expireDueReservations(null, $warehouse->id, $productIds->all());
+                $inventoryContext = $this->inventory->lockCheckoutInventoryContext($warehouse->id, $productIds);
+                $warehouse = $inventoryContext['warehouse'];
+                $products = $inventoryContext['products'];
                 $pricing = app(ProductPricingService::class);
                 foreach ($data['items'] as $requestedItem) {
                     /** @var Product|null $product */
@@ -435,6 +438,7 @@ class OrderController extends Controller
                     ...$receiptSnapshot,
                 ]);
 
+                $orderItems = [];
                 foreach ($itemsToCreate as $itemIndex => $itemData) {
                     $item = $order->items()->create([
                         'product_id' => $itemData['product']->id, 'warehouse_id' => $warehouse->id,
@@ -445,13 +449,14 @@ class OrderController extends Controller
                     ]);
                     $item->setRelation('product', $itemData['product']);
                     $item->setRelation('warehouse', $warehouse);
-                    $this->inventory->reserveForOrder($item, $reservationExpiresAt);
+                    $orderItems[] = $item;
                 }
+                $this->inventory->reserveCheckoutItemsWithLockedContext($orderItems, $reservationExpiresAt, $inventoryContext);
 
                 return $order;
             });
 
-            if ($order instanceof \Illuminate\Http\JsonResponse) {
+            if ($order instanceof JsonResponse) {
                 return $order;
             }
 

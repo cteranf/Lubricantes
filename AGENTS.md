@@ -49,9 +49,9 @@ El mapa de documentación está en [`docs/README.md`](docs/README.md). Los docum
 
 ## POS
 
-El código actual verificado no muestra un módulo de punto de venta/caja para registrar ventas presenciales: no se encontró esa capacidad en `routes/`, `app/` ni `resources/js/`. El checkout web y los métodos de pago en sede/contraentrega no prueban que exista un POS. Trata cualquier diseño o propuesta POS como futuro hasta encontrar una implementación y pruebas concretas.
+La base transaccional inicial de POS/caja está implementada: cajas asociadas a almacén, asignaciones explícitas de cajero, aperturas/cierres de sesión auditados, movimientos de apertura, canal de pedido y aislamiento por middleware. Su alcance y límites están descritos en [docs/POS_DISENO_TECNICO.md](docs/POS_DISENO_TECNICO.md). Esto no significa que exista la interfaz de venta ni la confirmación de ventas POS: el carrito, borrador de venta, cobro en efectivo, vuelto y descuento de inventario siguen pendientes.
 
-Cuando se implemente el POS, actualiza esta sección con sus capacidades, límites y documentación vigente.
+La asignación POS es explícita e independiente del rol de Tesorería. No introduzcas permisos por rol implícitos. Las sesiones tienen un solo cajero responsable; las ventas cobradas serán inmutables y no se permiten devoluciones POS hasta integrar y probar un flujo autorizado de reversión financiera, inventario y caja.
 
 ## Datos, configuración y QA
 

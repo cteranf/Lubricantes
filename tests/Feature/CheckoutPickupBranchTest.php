@@ -111,6 +111,9 @@ class CheckoutPickupBranchTest extends TestCase
         $payload = $this->payload($product, $branch->id, 'same-token');
         Sanctum::actingAs($this->customer());
         $first = $this->postJson('/api/v1/orders', $payload)->assertCreated()->json('id');
+        $invalidPayload = $payload;
+        $invalidPayload['items'][0]['quantity'] = 0;
+        $this->postJson('/api/v1/orders', $invalidPayload)->assertUnprocessable()->assertJsonValidationErrors('items.0.quantity');
         $second = $this->postJson('/api/v1/orders', $payload)->assertOk()->json('id');
         $this->assertSame($first, $second);
         $this->assertDatabaseCount('orders', 1);

@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\Admin\OrderFulfillmentController as AdminOrderFu
 use App\Http\Controllers\Api\V1\Admin\OrderPickingPackingController as AdminOrderPickingPackingController;
 use App\Http\Controllers\Api\V1\Admin\PaymentReceivingAccountController as AdminPaymentReceivingAccountController;
 use App\Http\Controllers\Api\V1\Admin\PaymentSettingController;
+use App\Http\Controllers\Api\V1\Admin\PosRegisterController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\ProductImageController as AdminProductImageController;
 use App\Http\Controllers\Api\V1\Admin\ProductModelController;
@@ -54,6 +55,7 @@ use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\OrderTrackingController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentMethodController;
+use App\Http\Controllers\Api\V1\PosCashSessionController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductReviewController;
 use App\Http\Controllers\Api\V1\ProfileController;
@@ -181,6 +183,13 @@ Route::prefix('v1')->group(function () {
 
         // Admin Routes
         Route::middleware('is_admin')->prefix('admin')->as('admin.')->group(function () {
+            Route::get('/pos/registers', [PosRegisterController::class, 'index'])->name('pos.registers.index');
+            Route::post('/pos/registers', [PosRegisterController::class, 'store'])->name('pos.registers.store');
+            Route::patch('/pos/registers/{register}', [PosRegisterController::class, 'update'])->name('pos.registers.update');
+            Route::post('/pos/registers/{register}/cashiers/{user}', [PosRegisterController::class, 'assign'])->name('pos.registers.cashiers.assign');
+            Route::delete('/pos/registers/{register}/cashiers/{user}', [PosRegisterController::class, 'revoke'])->name('pos.registers.cashiers.revoke');
+            Route::get('/pos/sessions', [PosRegisterController::class, 'sessions'])->name('pos.sessions.index');
+            Route::get('/pos/sessions/{session}', [PosRegisterController::class, 'showSession'])->name('pos.sessions.show');
             Route::get('/orders/{order}/commercial-documents', [CommercialOrderPdfController::class, 'staffAvailability'])->whereNumber('order')->name('orders.commercial-documents.availability');
             Route::get('/orders/{order}/commercial-documents/{kind}', [CommercialOrderPdfController::class, 'staffDownload'])->whereNumber('order')->whereIn('kind', ['summary', 'payment-constancy'])->name('orders.commercial-documents.download');
             Route::get('/product-reviews/settings', [ProductReviewSettingsController::class, 'show'])->name('product-reviews.settings.show');
@@ -334,6 +343,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'replaceQr'])->name('treasury.receiving-accounts.qr.replace');
             Route::get('/treasury/receiving-accounts/{account}/qr', [AdminPaymentReceivingAccountController::class, 'qr'])->name('treasury.receiving-accounts.qr.show');
             Route::apiResource('news', App\Http\Controllers\Api\V1\Admin\NewsController::class)->only(['index', 'store', 'update', 'destroy']);
+        });
+
+        Route::middleware('pos_cashier')->prefix('pos')->as('pos.')->group(function () {
+            Route::get('/registers', [PosCashSessionController::class, 'registers'])->name('registers.index');
+            Route::get('/registers/{register}/session', [PosCashSessionController::class, 'showRegisterSession'])->name('registers.session');
+            Route::post('/registers/{register}/sessions', [PosCashSessionController::class, 'open'])->name('sessions.open');
+            Route::post('/sessions/{session}/close', [PosCashSessionController::class, 'close'])->name('sessions.close');
         });
     });
 });

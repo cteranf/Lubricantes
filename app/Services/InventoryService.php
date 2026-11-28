@@ -6,8 +6,8 @@ use App\Exceptions\InsufficientVersionedInventoryStockException;
 use App\Exceptions\InventoryException;
 use App\Exceptions\InventoryReservationConflictException;
 use App\Models\InventoryMovement;
-use App\Models\InventoryReservation;
 use App\Models\InventoryReceiptLine;
+use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\OrderFulfillmentHistory;
 use App\Models\OrderItem;
@@ -132,6 +132,118 @@ class InventoryService
 
             return $reservation;
         });
+    }
+
+    /**
+     * Lock checkout inventory in the canonical order: warehouses, balances,
+     * then products. Call within the order transaction before quoting prices.
+     *
+     * @return array{warehouse: Warehouse, products: Collection<int, Product>, inventories: Collection<string, WarehouseInventory>}
+     */
+    public function lockCheckoutInventoryContext(int $warehouseId, iterable $productIds): array
+    {
+        $this->requireOuterTransaction();
+        $ids = collect($productIds)->map(fn ($id) => (int) $id)->unique()->sort()->values();
+        if ($ids->isEmpty()) {
+            throw new InventoryException('El checkout no contiene productos para reservar.');
+        }
+
+        $warehouses = Warehouse::query()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $warehouse = $warehouses->get($warehouseId);
+        if (! $warehouse instanceof Warehouse || ! $warehouse->is_default) {
+            throw new InventoryException('El almacén principal cambió durante el checkout. Revisa el pedido e inténtalo nuevamente.');
+        }
+        $branchActive = $warehouse->branch()->value('is_active');
+        if (! $warehouse->is_active || ! $branchActive) {
+            throw new InventoryException('El almacén y su sede deben estar activos.');
+        }
+
+        $pairs = WarehouseInventory::query()
+            ->whereIn('product_id', $ids)
+            ->get(['warehouse_id', 'product_id'])
+            ->map(fn (WarehouseInventory $inventory) => [
+                'warehouse_id' => (int) $inventory->warehouse_id,
+                'product_id' => (int) $inventory->product_id,
+            ]);
+        $requiredPairs = $ids->map(fn (int $productId) => ['warehouse_id' => $warehouseId, 'product_id' => $productId]);
+        $inventories = $this->balanceLocks->lock($pairs->concat($requiredPairs));
+        $products = Product::query()->whereIn('id', $ids)->where('is_active', true)
+            ->orderBy('id')->lockForUpdate()->with('activePromotion')->get()->keyBy('id');
+        if ($products->count() !== $ids->count()) {
+            throw new InventoryException('Uno de los productos ya no está disponible.');
+        }
+
+        return compact('warehouse', 'products', 'inventories');
+    }
+
+    /**
+     * Create the web checkout reservations using locks already acquired by
+     * lockCheckoutInventoryContext(), without re-entering the lock hierarchy.
+     *
+     * @param  iterable<int, OrderItem>  $items
+     * @param  array{warehouse: Warehouse, products: Collection<int, Product>, inventories: Collection<string, WarehouseInventory>}  $context
+     * @return array<int, InventoryReservation>
+     */
+    public function reserveCheckoutItemsWithLockedContext(iterable $items, \DateTimeInterface $expiresAt, array $context): array
+    {
+        $this->requireOuterTransaction();
+        $items = collect($items)->values();
+        $warehouse = $context['warehouse'];
+        $products = $context['products'];
+        $inventories = $context['inventories'];
+        $keys = $items->map(fn (OrderItem $item) => 'reservation-order-item-'.$item->id)->all();
+        $existing = InventoryReservation::query()->whereIn('idempotency_key', $keys)->get()->keyBy('idempotency_key');
+        if ($existing->isNotEmpty()) {
+            if ($existing->count() !== $items->count()) {
+                throw new InventoryReservationConflictException('El conjunto de reservas del checkout está incompleto.');
+            }
+            foreach ($items as $item) {
+                $reservation = $existing->get('reservation-order-item-'.$item->id);
+                if (! $reservation || (int) $reservation->order_id !== (int) $item->order_id
+                    || (int) $reservation->quantity !== (int) $item->quantity
+                    || (int) $reservation->warehouse_id !== (int) $warehouse->id) {
+                    throw new InventoryReservationConflictException('La reserva existente no coincide con las líneas del checkout.');
+                }
+            }
+
+            return $existing->values()->all();
+        }
+
+        $required = [];
+        foreach ($items as $item) {
+            if ((int) $item->warehouse_id !== (int) $warehouse->id || ! $products->has((int) $item->product_id)) {
+                throw new InventoryReservationConflictException('La línea no pertenece al contexto de inventario bloqueado.');
+            }
+            $balance = $this->lockedBalance($inventories, (int) $warehouse->id, (int) $item->product_id);
+            $key = $this->balanceLocks->key((int) $warehouse->id, (int) $item->product_id);
+            $required[$key] = ($required[$key] ?? 0) + (int) $item->quantity;
+            if ($required[$key] > $balance->available_quantity) {
+                $product = $products->get((int) $item->product_id);
+                throw new InventoryException("No hay stock disponible suficiente para {$product->name}.");
+            }
+        }
+
+        $reservations = [];
+        foreach ($items as $item) {
+            $balance = $this->lockedBalance($inventories, (int) $warehouse->id, (int) $item->product_id);
+            $reservation = InventoryReservation::create([
+                'order_id' => $item->order_id,
+                'order_item_id' => $item->id,
+                'product_id' => $item->product_id,
+                'warehouse_id' => $warehouse->id,
+                'quantity' => $item->quantity,
+                'status' => InventoryReservation::ACTIVE,
+                'expires_at' => $expiresAt,
+                'idempotency_key' => 'reservation-order-item-'.$item->id,
+            ]);
+            $balance->update(['reserved_quantity' => (int) $balance->reserved_quantity + (int) $item->quantity]);
+            $reservations[] = $reservation;
+        }
+        foreach ($products as $product) {
+            $this->syncProductStockFromLockedBalances($product, $inventories->filter(fn (WarehouseInventory $inventory) => (int) $inventory->product_id === (int) $product->id));
+        }
+
+        return $reservations;
     }
 
     public function releaseOrderReservation(Order $order, string $status = InventoryReservation::RELEASED): array
@@ -725,7 +837,7 @@ class InventoryService
      * fulfillment history only after reservation/inventory work, so history is
      * deliberately last to avoid a lock-order inversion.
      *
-     * @return array{order: Order, case: PaymentResolutionCase, items: \Illuminate\Support\Collection, historicalReservations: \Illuminate\Support\Collection, inventories: array<int, array<int, WarehouseInventory>>, products: \Illuminate\Support\Collection, fulfillmentHistories: \Illuminate\Support\Collection}
+     * @return array{order: Order, case: PaymentResolutionCase, items: Collection, historicalReservations: Collection, inventories: array<int, array<int, WarehouseInventory>>, products: Collection, fulfillmentHistories: Collection}
      */
     private function lockResolutionReservationContext(
         Order $order,
@@ -860,7 +972,7 @@ class InventoryService
         }
     }
 
-    private function assertVersionedConsumptionCapacity(\Illuminate\Support\Collection $reservations, array $inventories): void
+    private function assertVersionedConsumptionCapacity(Collection $reservations, array $inventories): void
     {
         $demands = [];
         foreach ($reservations as $reservation) {
@@ -886,7 +998,7 @@ class InventoryService
         }
     }
 
-    private function assertCompleteCaseReservationSet(\Illuminate\Support\Collection $items, \Illuminate\Support\Collection $reservations, int $caseId): void
+    private function assertCompleteCaseReservationSet(Collection $items, Collection $reservations, int $caseId): void
     {
         if ($reservations->count() !== $items->count()) {
             $this->reservationConflict('El caso no tiene exactamente una reserva por ítem.');
@@ -940,7 +1052,7 @@ class InventoryService
     }
 
     /**
-     * @param  array{order: Order, case: PaymentResolutionCase, items: \Illuminate\Support\Collection, historicalReservations: \Illuminate\Support\Collection, inventories: array<int, array<int, WarehouseInventory>>, products: \Illuminate\Support\Collection}  $context
+     * @param  array{order: Order, case: PaymentResolutionCase, items: Collection, historicalReservations: Collection, inventories: array<int, array<int, WarehouseInventory>>, products: Collection}  $context
      * @return array<int, InventoryReservation>|null
      */
     private function coherentExistingCaseReservations(array $context): ?array
@@ -963,7 +1075,7 @@ class InventoryService
         return $coherent;
     }
 
-    private function assertCoherentConsumedCaseReservations(Order $order, \Illuminate\Support\Collection $reservations, array $inventories): void
+    private function assertCoherentConsumedCaseReservations(Order $order, Collection $reservations, array $inventories): void
     {
         $expectedMovementKeys = $reservations
             ->map(fn (InventoryReservation $reservation) => $this->saleKey($reservation->order_item_id))

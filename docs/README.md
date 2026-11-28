@@ -45,4 +45,4 @@ Los informes documentan capacidades y pruebas, no autorizan producción ni demue
 
 ## Punto de venta (POS)
 
-El POS y la caja básica están en planificación. Cuando exista el documento de diseño, enlazarlo aquí e identificar su estado.
+- [Diseño técnico de POS y caja básica](POS_DISENO_TECNICO.md): estado de la base transaccional implementada, límites actuales y plan pendiente para la interfaz de venta y confirmación de cobro.

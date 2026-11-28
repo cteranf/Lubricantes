@@ -10,6 +10,8 @@ class Order extends Model
 {
     use HasFactory;
 
+    protected $attributes = ['sales_channel' => 'web'];
+
     /**
      * Payment-submission details are Treasury-only. Administrative order
      * responses expose only the explicit safe summary attributes.
@@ -49,6 +51,11 @@ class Order extends Model
 
     protected $fillable = [
         'user_id',
+        'sales_channel',
+        'pos_sold_by',
+        'pos_register_id',
+        'pos_cash_session_id',
+        'pos_buyer_snapshot',
         'status',
         'total',
         'subtotal',
@@ -118,6 +125,7 @@ class Order extends Model
         'discount_total' => 'decimal:2',
         'shipping_amount' => 'decimal:2',
         'tax_snapshot' => 'array',
+        'pos_buyer_snapshot' => 'array',
         'estimated_delivery_date' => 'date',
         'delivered_at' => 'datetime',
         'reserved_until' => 'datetime',
@@ -133,6 +141,21 @@ class Order extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function posSeller()
+    {
+        return $this->belongsTo(User::class, 'pos_sold_by');
+    }
+
+    public function posRegister()
+    {
+        return $this->belongsTo(PosRegister::class, 'pos_register_id');
+    }
+
+    public function posCashSession()
+    {
+        return $this->belongsTo(PosCashSession::class, 'pos_cash_session_id');
     }
 
     public function items()
